@@ -8,9 +8,9 @@
 
 | 决策项 | 选择 |
 |--------|------|
-| 仿真器 | MuJoCo（CPU 多进程并行 + MJX GPU 加速可选） |
+| 仿真器 | MuJoCo（CPU 默认单进程同步批量，可选多进程后端 + MJX GPU 加速可选） |
 | 机器人 | Unitree G1 29DOF（复用 `unitree_mujoco/unitree_robots/g1/g1_29dof.xml`） |
-| 策略架构 | readme A+B 解耦：π_leg 控制下肢 15DOF，上肢 14DOF 由干预生成器/VR 驱动 |
+| 策略架构 | readme A+B 解耦：π_leg 控制下肢 15DOF；上肢走“手目标位姿→重定向/滤波/IK→14DOF”链路 |
 | 网络模型 | HugWBC 的 MlpAdaptModel（history encoder + state estimator + low-level controller） |
 | RL 算法 | PPO + 对称损失 + 特权信息重建损失 |
 | 课程系统 | Phase 0-4 手动课程 + 可选 ADR 自动调度 |
@@ -42,7 +42,7 @@ VR_Teleoperation/
 │   ├── envs/                         # MuJoCo 环境
 │   │   ├── g1_base_env.py            # 单实例 MuJoCo G1 环境封装
 │   │   ├── g1_multigait_env.py       # 多步态训练环境（核心）
-│   │   ├── mujoco_vec_env.py         # CPU 多进程并行向量化环境
+│   │   ├── mujoco_vec_env.py         # CPU 同步批量向量化环境（可选多进程后端）
 │   │   ├── mjx_vec_env.py            # MJX GPU 加速向量化环境（可选）
 │   │   ├── observation.py            # 观测构建器
 │   │   ├── reward.py                 # 奖励函数实现
@@ -149,12 +149,12 @@ class G1Config:
   ```
 - **Decimation=4**: 每次 `step()` 内执行 4 次 `mj_step()`（仿真 200Hz，策略 50Hz）
 
-#### 2.2.2 `mujoco_vec_env.py` -- CPU 并行向量化
+#### 2.2.2 `mujoco_vec_env.py` -- CPU 向量化
 
-- 使用 `multiprocessing.Pool` 或 `concurrent.futures.ProcessPoolExecutor`
-- 每个 worker 持有独立的 `g1_base_env` 实例
-- 通过共享内存传递 action/observation 批量张量
-- 目标: 64-256 并行环境
+- 默认模式：单进程同步批量（同一进程维护 N 个 `MjModel/MjData`）
+- 可选后端：`multiprocessing.Pool` 或 `concurrent.futures.ProcessPoolExecutor`
+- 多进程模式下每个 worker 持有独立 `g1_base_env`，通过共享内存传递 action/observation 批量张量
+- 目标: 默认模式 64-256；多进程模式按 CPU 核数扩展
 
 #### 2.2.3 `mjx_vec_env.py` -- MJX GPU 加速（可选）
 
@@ -166,7 +166,7 @@ class G1Config:
 
 继承向量化环境，增加:
 - **多步态命令采样**: gait_id ∈ {stand=0, walk=1, run=2} + 速度命令 (vx, vy, wz)
-- **上肢干预注入**: 从 `InterventionGenerator` 获取上肢 14DOF 目标，与策略的 15DOF 输出拼接为完整 29DOF
+- **上肢干预注入**: 从 `InterventionGenerator` 获取手目标位姿，经重定向/滤波/IK 得到上肢 14DOF 目标；与策略 15DOF 输出拼接为 29DOF，并执行腿优先安全约束与回退逻辑
 - **奖励计算**: 调用 `reward.py` 中各奖励函数
 - **终止检测**: 调用 `termination.py`
 - **课程更新**: 每次 PPO update 后检查是否升级 Phase
@@ -190,7 +190,7 @@ class G1Config:
 | **小计 command** | **5** | | |
 | 步态时钟: sin(phase), cos(phase) | 2 | 步态时钟 | ×1.0 |
 | **单步总计** | **58** | | |
-| **含历史 (H=5)** | **58 × 5 = 290** | 展平后送入 HistoryEncoder | |
+| **含历史 (H=5)** | **51 × 5 = 255** | 仅对 proprioception 做历史堆叠并送入 HistoryEncoder | |
 
 #### Critic 观测（特权信息，仅训练时使用）
 
@@ -335,7 +335,7 @@ if in_transition_window:
 ```
 原始目标 → [1] 关节限位检查（夹到限位±5%余量）
          → [2] 速度限位检查（(target-current)/dt < vel_limit）
-         → [3] 自碰撞检查（MuJoCo mj_collision）
+         → [3] 自碰撞检查（`mj_forward` 后读取 `data.contact/ncon`）
          → [4] 躯干稳定性检查（预测 torso roll/pitch < 0.3 rad）
          → [5] 信号整形（低通滤波 + rate/jerk 限幅）
          → 可行目标 or 回退到中性姿态
@@ -444,7 +444,7 @@ env = G1BaseEnv("unitree_mujoco/unitree_robots/g1/scene.xml")
 
 ### Step 2: 环境层
 6. 实现 `g1_base_env.py`（MuJoCo 单实例封装 + PD 控制）
-7. 实现 `mujoco_vec_env.py`（CPU 多进程并行）
+7. 实现 `mujoco_vec_env.py`（CPU 默认同步批量 + 可选多进程后端）
 8. 实现 `observation.py`（观测构建）
 9. 实现 `reward.py`（所有奖励函数）
 10. 实现 `termination.py`（终止条件）
