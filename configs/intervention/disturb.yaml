@@ -1,0 +1,61 @@
+intervention:
+  # Upper body intervention configuration
+  use_disturb: true
+  disturb_dim: 14  # upper body DOFs
+
+  # Intervention signal modes
+  modes:
+    gaussian: true
+    uniform: true
+    sinusoidal: true
+    structured: true    # arm_swing, turning_gesture
+    replay: false       # from motion library (Phase 4 only)
+
+  # Phase-specific intervention parameters
+  phase_params:
+    phase_0:
+      amp: [0.0, 0.0]
+      freq: [0.0, 0.0]
+      duty: [0.0, 0.0]
+      transition_stress: 1.0
+      hold_T: [3.0, 5.0]
+    phase_1:
+      amp: [0.05, 0.2]
+      freq: [0.3, 1.0]
+      duty: [0.1, 0.3]
+      transition_stress: 1.0
+      hold_T: [1.0, 3.0]
+    phase_2:
+      amp: [0.1, 0.5]
+      freq: [0.5, 2.0]
+      duty: [0.2, 0.5]
+      transition_stress: 1.5
+      hold_T: [0.5, 2.0]
+    phase_3:
+      amp: [0.2, 1.0]
+      freq: [0.5, 3.0]
+      duty: [0.5, 0.8]
+      transition_stress: 2.0
+      hold_T: [0.3, 1.5]
+    phase_4:
+      amp: [0.2, 1.0]
+      freq: [0.5, 3.0]
+      duty: [0.5, 0.8]
+      transition_stress: 2.0
+      hold_T: [0.3, 1.5]
+      replay_mixing_ratio: 0.5
+
+  # Intervention switch probability (per step)
+  switch_prob: 0.01
+
+  # Curriculum blending method: 0=fusion, 1=clip_mean, 2=clip_mean_rad
+  curriculum_method: 2
+
+  # Feasibility filter
+  feasibility:
+    enable: true
+    torso_roll_limit: 0.3     # rad
+    torso_pitch_limit: 0.5    # rad
+    max_rate: 5.0             # rad/s per joint
+    max_jerk: 50.0            # rad/s^2 per joint
+    lowpass_alpha: 0.3        # exponential smoothing factor

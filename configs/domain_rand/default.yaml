@@ -1,0 +1,26 @@
+domain_rand:
+  randomize_friction: true
+  friction_range: [0.1, 2.75]
+
+  randomize_base_mass: true
+  added_mass_range: [-3.0, 9.0]  # kg
+
+  randomize_link_mass: true
+  link_mass_range: [0.8, 1.2]    # multiplier
+
+  randomize_pd_gains: true
+  kp_range: [0.8, 1.2]           # multiplier
+  kd_range: [0.8, 1.2]           # multiplier
+
+  randomize_motor_strength: true
+  motor_strength_range: [0.8, 1.2]  # multiplier
+
+  randomize_motor_offset: true
+  motor_offset_range: [-0.02, 0.02]  # rad
+
+  randomize_latency: true
+  latency_range: [0.0, 0.02]  # seconds (0-20ms)
+
+  push_robots: true
+  push_interval_s: 5.0
+  max_push_vel_xy: 0.6  # m/s

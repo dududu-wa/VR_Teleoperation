@@ -1,0 +1,57 @@
+curriculum:
+  # Phase-based curriculum configuration
+  initial_phase: 0
+  max_phase: 4
+
+  # Phase transition thresholds
+  thresholds:
+    phase_0:
+      tracking_reward: 0.80
+      fall_rate: 0.05
+      min_iterations: 2000
+    phase_1:
+      tracking_reward: 0.75
+      fall_rate: 0.10
+      min_iterations: 3000
+    phase_2:
+      tracking_reward: 0.70
+      fall_rate: 0.15
+      transition_failure: 0.15
+      min_iterations: 3000
+    phase_3:
+      tracking_reward: 0.65
+      fall_rate: 0.10
+      transition_failure: 0.10
+      time_to_fall: 15.0
+      min_iterations: 5000
+
+  # Phase-specific velocity ranges
+  velocity_ranges:
+    phase_0:
+      vx: [-0.3, 0.3]
+      vy: [-0.15, 0.15]
+      gaits: [stand, walk]
+    phase_1:
+      vx: [-0.5, 0.5]
+      vy: [-0.2, 0.2]
+      gaits: [stand, walk]
+    phase_2:
+      vx: [-0.8, 1.5]
+      vy: [-0.3, 0.3]
+      gaits: [stand, walk, run]
+    phase_3:
+      vx: [-1.0, 2.0]
+      vy: [-0.3, 0.3]
+      gaits: [stand, walk, run]
+    phase_4:
+      vx: [-1.0, 2.0]
+      vy: [-0.3, 0.3]
+      gaits: [stand, walk, run]
+
+  # ADR (Automatic Domain Randomization) scheduler
+  adr:
+    enable: false
+    tau_high: 0.80
+    tau_low: 0.40
+    step_size: 0.05
+    eval_window: 100  # episodes to average

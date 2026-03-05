@@ -1,0 +1,40 @@
+# Phase 0: Baseline locomotion (stand + slow walk, no intervention)
+# Start from scratch, stand/walk only
+
+defaults:
+  - /base
+
+experiment:
+  name: phase0_baseline
+  seed: 42
+
+env:
+  num_envs: 1024
+  max_episode_length: 1000
+
+  command_ranges:
+    stand:
+      vx: [0.0, 0.0]
+      vy: [0.0, 0.0]
+      wz: [0.0, 0.0]
+    walk:
+      vx: [-0.3, 0.3]
+      vy: [-0.15, 0.15]
+      wz: [-0.3, 0.3]
+    run:
+      vx: [0.0, 0.0]
+      vy: [0.0, 0.0]
+      wz: [0.0, 0.0]
+
+  gait_probs: [0.25, 0.75, 0.0]  # stand=25%, walk=75%, run=0%
+
+intervention:
+  use_disturb: false
+
+curriculum:
+  initial_phase: 0
+  max_phase: 0  # stay in phase 0
+
+algo:
+  max_iterations: 10000
+  save_interval: 1000

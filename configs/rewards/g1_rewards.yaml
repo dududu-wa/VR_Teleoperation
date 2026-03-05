@@ -1,0 +1,41 @@
+rewards:
+  # Positive rewards
+  tracking_lin_vel:
+    weight: 2.0
+    sigma: 0.25    # exp(-||v_cmd - v_actual||^2 / sigma^2)
+  tracking_ang_vel:
+    weight: 3.0
+    sigma: 0.25
+  alive:
+    weight: 0.2
+
+  # Penalties (negative weights)
+  torso_orientation:
+    weight: -20.0
+  ang_vel_xy:
+    weight: -0.5
+  base_height:
+    weight: -40.0
+    target_stand: 0.793
+    target_walk: 0.75
+    target_run: 0.72
+  action_rate:
+    weight: -0.01
+  action_rate_second_order:
+    weight: -0.005
+  torques:
+    weight: -5.0e-6
+  dof_acc:
+    weight: -2.5e-7
+  foot_slip:
+    weight: -0.2
+  feet_contact_forces:
+    weight: -0.2
+    max_force: 500.0
+  transition_stability:
+    weight: -5.0
+    window: 0.5    # seconds around transition
+  standing_still:
+    weight: -10.0
+  termination:
+    weight: -200.0

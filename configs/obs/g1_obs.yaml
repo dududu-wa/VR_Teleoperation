@@ -1,0 +1,54 @@
+obs:
+  # Actor observation (partial, deployable)
+  actor_components:
+    base_ang_vel: 3
+    projected_gravity: 3
+    dof_pos_lower: 15
+    dof_vel_lower: 15
+    last_actions: 15
+    commands_vel: 2      # vx, vy
+    command_yaw: 1       # wz
+    gait_id: 1
+    intervention_flag: 1
+    clock_input: 2       # sin(phase), cos(phase)
+  single_step_dim: 58
+
+  # History stacking
+  include_history_steps: 5
+  history_obs_dim: 51    # proprioception only (no commands/clock for history)
+
+  # Critic observation (privileged, training only)
+  critic_extra_components:
+    base_lin_vel: 3
+    base_height: 1
+    foot_contact_forces: 2
+    friction_coeff: 1
+    mass_offset: 1
+    motor_strength: 1
+    pd_gain_multiplier: 2   # kp_mult, kd_mult
+    upper_dof_pos: 14
+    upper_dof_vel: 14
+    intervention_amp: 1
+    intervention_freq: 1
+  critic_extra_dim: 41
+  critic_obs_dim: 99     # single_step_dim + critic_extra_dim
+
+  # Observation scales
+  scales:
+    base_ang_vel: 0.25
+    dof_pos: 1.0
+    dof_vel: 0.05
+    commands: 1.0
+    projected_gravity: 1.0
+
+  # Observation noise
+  add_noise: true
+  noise_level: 1.0
+  noise_scales:
+    base_ang_vel: 0.2
+    dof_pos: 0.01
+    dof_vel: 1.5
+    projected_gravity: 0.05
+
+  # Clip
+  clip_observations: 100.0
