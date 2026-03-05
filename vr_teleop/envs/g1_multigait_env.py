@@ -140,6 +140,10 @@ class G1MultigaitEnv:
         self.transition_window = self.reward_cfg.transition_window
 
         # ---- Intervention state (placeholder - fully implemented in Wave 5) ----
+        self.intervention_generator = None
+        self.feasibility_filter = None
+        self.auto_intervention = False
+        self.motion_retargeter = None
         self.interrupt_mask = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
         self.intervention_flag = torch.zeros(num_envs, device=self.device)
         self.intervention_amp = torch.zeros(num_envs, device=self.device)
@@ -180,6 +184,10 @@ class G1MultigaitEnv:
         # Store for second-order action rate
         self.last_last_actions[:] = self.vec_env.last_actions.clone()
 
+        # Auto-generate upper-body intervention targets if enabled.
+        if self.auto_intervention and self.intervention_generator is not None:
+            self._update_intervention(actions)
+
         # Set upper body actions (from intervention or zeros)
         self.vec_env.set_upper_body_actions(self.upper_body_actions)
 
@@ -215,8 +223,8 @@ class G1MultigaitEnv:
         if len(reset_ids) > 0:
             self._log_episode_info(reset_ids)
             self._reset_envs(reset_ids)
-            # Recompute observations for reset envs
-            self._compute_observations()
+            # Recompute buffers without pushing history a second time.
+            self._compute_observations(update_history=False)
 
         return (
             self.obs_buf,
@@ -255,7 +263,16 @@ class G1MultigaitEnv:
         # Reset intervention
         self.interrupt_mask[env_ids] = False
         self.intervention_flag[env_ids] = 0.0
+        self.intervention_amp[env_ids] = 0.0
+        self.intervention_freq[env_ids] = 0.0
         self.upper_body_actions[env_ids] = 0.0
+
+        # Reset intervention modules with current upper-body pose.
+        current_upper_pos = self.vec_env.dof_pos[env_ids, self.robot_cfg.lower_body_dofs:]
+        if self.intervention_generator is not None:
+            self.intervention_generator.reset(env_ids, current_upper_pos=current_upper_pos)
+        if self.feasibility_filter is not None:
+            self.feasibility_filter.reset(env_ids, current_pos=current_upper_pos)
 
         # Reset action buffer
         self.last_last_actions[env_ids] = 0.0
@@ -365,13 +382,14 @@ class G1MultigaitEnv:
             clock=self.clock_input,
         )
 
-    def _compute_observations(self):
+    def _compute_observations(self, update_history: bool = True):
         """Compute actor and critic observations."""
         # Single-step actor obs
         actor_obs = self._build_actor_obs_single_step()
 
         # Update history buffer
-        self.obs_builder.update_history(actor_obs)
+        if update_history:
+            self.obs_builder.update_history(actor_obs)
 
         # Full actor obs = current + history
         self.obs_buf = self.obs_builder.get_actor_obs_with_history(actor_obs)
@@ -395,6 +413,38 @@ class G1MultigaitEnv:
             intervention_amp=self.intervention_amp,
             intervention_freq=self.intervention_freq,
         )
+
+    def _update_intervention(self, policy_lower_actions: torch.Tensor):
+        """Generate and apply upper-body intervention for current step."""
+        transition_mask = self.transition_timer > 0.0
+        current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+
+        upper_actions, mask, amp, freq = self.intervention_generator.step(
+            dt=self.dt,
+            current_upper_pos=current_upper_pos,
+            policy_lower_actions=policy_lower_actions,
+            transition_mask=transition_mask,
+        )
+
+        if self.feasibility_filter is not None:
+            raw_abs = self.feasibility_filter.action_scale_to_absolute(
+                upper_actions, self.robot_cfg.action_scale)
+            filtered_abs, safety_mask = self.feasibility_filter.filter(
+                raw_targets=raw_abs,
+                current_upper_pos=current_upper_pos,
+                torso_euler=self.vec_env.base_euler,
+                dt=self.dt,
+                mask=mask,
+            )
+            upper_actions = self.feasibility_filter.absolute_to_action_scale(
+                filtered_abs, self.robot_cfg.action_scale)
+            mask = safety_mask
+
+        self.upper_body_actions = upper_actions
+        self.interrupt_mask = mask
+        self.intervention_flag = mask.float()
+        self.intervention_amp = amp * mask.float()
+        self.intervention_freq = freq * mask.float()
 
     def _compute_rewards(self):
         """Compute all reward components and total reward."""
@@ -433,6 +483,7 @@ class G1MultigaitEnv:
             episode_length_buf=self.episode_length_buf,
             interrupt_mask=self.interrupt_mask,
         )
+        term_result['in_transition'] = self.transition_timer > 0.0
         self.reset_buf = term_result['reset']
         self.extras['termination'] = term_result
 
@@ -453,8 +504,31 @@ class G1MultigaitEnv:
             self.extras['episode']['timeout_rate'] = term['timeout'][reset_ids].float().mean().item()
             self.extras['episode']['contact_fall_rate'] = term['contact'][reset_ids].float().mean().item()
             self.extras['episode']['orientation_fall_rate'] = term['orientation'][reset_ids].float().mean().item()
+            fell = term['contact'] | term['orientation']
+            in_transition = term.get('in_transition', torch.zeros_like(fell))
+            transition_failure = fell & in_transition
+            self.extras['episode']['transition_failure_rate'] = (
+                transition_failure[reset_ids].float().mean().item()
+            )
 
     # ---- Intervention interface (used by Wave 5) ----
+    def attach_intervention(self, generator=None, feasibility_filter=None,
+                            auto_mode: bool = True):
+        """Attach intervention modules and optionally enable auto updates."""
+        self.intervention_generator = generator
+        self.feasibility_filter = feasibility_filter
+        self.auto_intervention = bool(auto_mode and generator is not None)
+
+        if generator is not None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+            current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+            generator.reset(env_ids, current_upper_pos=current_upper_pos)
+            self.interrupt_mask = generator.interrupt_mask.clone()
+            self.intervention_flag = self.interrupt_mask.float()
+        if feasibility_filter is not None:
+            env_ids = torch.arange(self.num_envs, device=self.device)
+            current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+            feasibility_filter.reset(env_ids, current_pos=current_upper_pos)
 
     def set_intervention(self, upper_actions: torch.Tensor,
                          mask: torch.Tensor,
@@ -473,8 +547,86 @@ class G1MultigaitEnv:
         self.intervention_flag = mask.float()
         if amp is not None:
             self.intervention_amp = amp
+        else:
+            self.intervention_amp = torch.zeros_like(self.intervention_amp)
         if freq is not None:
             self.intervention_freq = freq
+        else:
+            self.intervention_freq = torch.zeros_like(self.intervention_freq)
+
+    def set_hand_intervention_targets(
+        self,
+        left_hand_pos: torch.Tensor,
+        left_hand_quat_wxyz: torch.Tensor,
+        right_hand_pos: torch.Tensor,
+        right_hand_quat_wxyz: torch.Tensor,
+        mask: torch.Tensor,
+        amp: torch.Tensor = None,
+        freq: torch.Tensor = None,
+    ):
+        """Set upper-body intervention via hand pose targets.
+
+        This is the preferred interface for VR teleoperation:
+            hand target pose -> retarget + IK -> upper joint targets.
+        """
+        retargeter = self._get_motion_retargeter()
+
+        base_pos = self.vec_env.base_pos.detach().cpu().numpy()
+        base_quat_xyzw = self.vec_env.base_quat_xyzw.detach().cpu().numpy()
+        base_quat_wxyz = np.concatenate(
+            [base_quat_xyzw[:, 3:4], base_quat_xyzw[:, 0:3]], axis=-1)
+
+        upper_abs = retargeter.retarget(
+            left_hand_pos=left_hand_pos.detach().cpu().numpy(),
+            left_hand_quat=left_hand_quat_wxyz.detach().cpu().numpy(),
+            right_hand_pos=right_hand_pos.detach().cpu().numpy(),
+            right_hand_quat=right_hand_quat_wxyz.detach().cpu().numpy(),
+            base_pos=base_pos,
+            base_quat_wxyz=base_quat_wxyz,
+            mask=mask.detach().cpu().numpy().astype(bool),
+        )
+
+        upper_abs_t = torch.from_numpy(upper_abs).float().to(self.device)
+
+        # Optional safety filtering in joint space.
+        if self.feasibility_filter is not None:
+            current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+            upper_abs_t, safety_mask = self.feasibility_filter.filter(
+                raw_targets=upper_abs_t,
+                current_upper_pos=current_upper_pos,
+                torso_euler=self.vec_env.base_euler,
+                dt=self.dt,
+                mask=mask,
+            )
+            mask = safety_mask
+
+        upper_actions = self.feasibility_filter.absolute_to_action_scale(
+            upper_abs_t, self.robot_cfg.action_scale
+        ) if self.feasibility_filter is not None else (
+            (upper_abs_t - self.vec_env.default_dof_pos[:, self.robot_cfg.lower_body_dofs:])
+            / self.robot_cfg.action_scale
+        )
+
+        self.set_intervention(
+            upper_actions=upper_actions,
+            mask=mask,
+            amp=amp,
+            freq=freq,
+        )
+
+    def _get_motion_retargeter(self):
+        """Create motion retargeter lazily."""
+        if self.motion_retargeter is None:
+            from vr_teleop.intervention.motion_retarget import MotionRetargeter
+            mj_models = [e.mj_model for e in self.vec_env._envs]
+            mj_datas = [e.mj_data for e in self.vec_env._envs]
+            self.motion_retargeter = MotionRetargeter(
+                mj_models=mj_models,
+                mj_datas=mj_datas,
+                robot_cfg=self.robot_cfg,
+                device=self.device,
+            )
+        return self.motion_retargeter
 
     # ---- Curriculum interface (used by Wave 6) ----
 

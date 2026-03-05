@@ -53,6 +53,9 @@ def get_config_path() -> str:
 
 def get_asset_path() -> str:
     """Return absolute path to robot asset directory (unitree_mujoco)."""
+    env_root = os.getenv("UNITREE_MUJOCO_ROOT")
+    if env_root:
+        return os.path.abspath(env_root)
     project_root = get_project_root()
     codespace = os.path.dirname(project_root)
     return os.path.join(codespace, "unitree_mujoco")

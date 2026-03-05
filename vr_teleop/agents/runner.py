@@ -138,12 +138,12 @@ class OnPolicyRunner:
                     # Episode bookkeeping
                     cur_reward_sum += rewards
                     cur_episode_length += 1
-                    new_ids = dones.nonzero(as_tuple=False)
-                    if len(new_ids) > 0:
+                    new_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+                    if new_ids.numel() > 0:
                         rewbuffer.extend(
-                            cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                            cur_reward_sum[new_ids].cpu().numpy().tolist())
                         lenbuffer.extend(
-                            cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                            cur_episode_length[new_ids].cpu().numpy().tolist())
                         cur_reward_sum[new_ids] = 0
                         cur_episode_length[new_ids] = 0
 
@@ -175,9 +175,6 @@ class OnPolicyRunner:
         if self.log_dir is not None:
             self.save(os.path.join(
                 self.log_dir, f'model_{self.current_learning_iteration}.pt'))
-
-        if self.logger is not None:
-            self.logger.close()
 
     def _log(self, iteration: int, num_iterations: int, metrics: dict,
              rewbuffer, lenbuffer, collection_time: float, learn_time: float):
@@ -245,3 +242,8 @@ class OnPolicyRunner:
         if device is not None:
             self.alg.actor_critic.to(device)
         return self.alg.actor_critic
+
+    def close(self):
+        """Release logger resources."""
+        if self.logger is not None:
+            self.logger.close()

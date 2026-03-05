@@ -187,17 +187,20 @@ class Evaluator:
 
                 # Determine if fell
                 fell = False
+                in_transition = False
                 if 'termination' in extras:
                     term = extras['termination']
                     fell = (term['contact'][idx].item() or
                             term['orientation'][idx].item())
+                    if 'in_transition' in term:
+                        in_transition = bool(term['in_transition'][idx].item())
 
                 result.episode_lengths.append(ep_len)
                 result.episode_rewards.append(ep_rew)
                 result.fell.append(fell)
                 result.tracking_errors.append(mean_track_err)
                 result.torque_costs.append(mean_torque)
-                result.transition_failures.append(False)  # TODO: track transitions
+                result.transition_failures.append(fell and in_transition)
 
                 episodes_completed += 1
 
@@ -222,6 +225,10 @@ class Evaluator:
 
         # Finalize
         result.finalize()
+        if result.tracking_errors:
+            result.tracking_success_rate = float(np.mean([
+                e < self.cfg.tracking_threshold for e in result.tracking_errors
+            ]))
 
         if verbose:
             print(result.summary())

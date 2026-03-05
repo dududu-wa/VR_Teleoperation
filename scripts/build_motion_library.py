@@ -15,6 +15,7 @@ import os
 import sys
 import argparse
 import numpy as np
+import torch
 
 # Add project root to path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -135,9 +136,8 @@ def validate_clips(clips: list, robot_cfg: G1Config, dt: float) -> list:
     Returns list of clips that pass validation.
     """
     filter_cfg = FeasibilityConfig()
-    feas_filter = FeasibilityFilter(cfg=filter_cfg, robot_cfg=robot_cfg)
-
-    import torch
+    feas_filter = FeasibilityFilter(
+        num_envs=1, cfg=filter_cfg, robot_cfg=robot_cfg, device=torch.device('cpu'))
     valid_clips = []
     torso_euler = np.zeros((1, 3))  # Assume upright
 
@@ -154,7 +154,7 @@ def validate_clips(clips: list, robot_cfg: G1Config, dt: float) -> list:
 
             filtered, safety_mask = feas_filter.filter(
                 raw_targets=raw,
-                current_pos=current,
+                current_upper_pos=current,
                 torso_euler=torso_t,
                 dt=dt,
                 mask=mask,

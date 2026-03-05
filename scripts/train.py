@@ -27,6 +27,7 @@ from vr_teleop.envs.domain_rand import DomainRandConfig
 from vr_teleop.agents.runner import OnPolicyRunner
 from vr_teleop.curriculum.phase_curriculum import PhaseCurriculum, PhaseConfig
 from vr_teleop.intervention.intervention_generator import InterventionGenerator, InterventionConfig
+from vr_teleop.intervention.feasibility_filter import FeasibilityFilter, FeasibilityConfig
 
 
 def parse_args():
@@ -122,6 +123,7 @@ def main():
 
     # ---- Create intervention generator ----
     intervention = None
+    feasibility_filter = None
     if args.use_intervention:
         int_cfg = InterventionConfig()
         intervention = InterventionGenerator(
@@ -130,7 +132,18 @@ def main():
             robot_cfg=robot_cfg,
             device=torch.device(device),
         )
+        feasibility_filter = FeasibilityFilter(
+            num_envs=args.num_envs,
+            cfg=FeasibilityConfig(),
+            robot_cfg=robot_cfg,
+            device=torch.device(device),
+        )
         intervention.set_phase(args.initial_phase)
+        env.attach_intervention(
+            generator=intervention,
+            feasibility_filter=feasibility_filter,
+            auto_mode=True,
+        )
 
     # ---- Resume from checkpoint ----
     if args.resume:
@@ -168,15 +181,22 @@ def main():
         # Update curriculum metrics from env
         extras = env.extras
         ep_info = extras.get('episode', {})
-        tracking_reward = ep_info.get('reward_mean', 0.0)
+        tracking_lin = ep_info.get('reward_tracking_lin_vel', None)
+        tracking_ang = ep_info.get('reward_tracking_ang_vel', None)
+        if tracking_lin is not None and tracking_ang is not None:
+            tracking_reward = 0.5 * (tracking_lin + tracking_ang)
+        else:
+            tracking_reward = ep_info.get('reward_mean', 0.0)
         fall_rate = ep_info.get('contact_fall_rate', 0.0)
         orientation_fall = ep_info.get('orientation_fall_rate', 0.0)
         total_fall_rate = fall_rate + orientation_fall
+        transition_failure = ep_info.get('transition_failure_rate', 0.0)
         ep_len = ep_info.get('episode_length_mean', 0.0)
 
         curriculum.update_metrics(
             tracking_reward=tracking_reward,
             fall_rate=total_fall_rate,
+            transition_failure=transition_failure,
             mean_episode_length=ep_len,
         )
 
@@ -193,11 +213,13 @@ def main():
               f"Phase {curriculum.phase} | "
               f"Reward {tracking_reward:6.3f} | "
               f"Fall {total_fall_rate:5.3f} | "
+              f"TransFail {transition_failure:5.3f} | "
               f"FPS {fps:7.0f}")
 
     total_time = time.time() - start_time
     print(f"\nTraining complete in {total_time:.0f}s")
     print(f"Final phase: {curriculum.phase}")
+    runner.close()
 
 
 if __name__ == '__main__':
