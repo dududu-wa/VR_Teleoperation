@@ -231,7 +231,7 @@ Actor 网络（MlpAdaptModel 架构）:
 │           command+clock) = [B, 32+3+51+7=93]          │
 │   Linear(93, 512) → ELU → Linear(512, 256) → ELU     │
 │   → Linear(256, 128) → ELU → Linear(128, 15)         │
-│   → action [B, 15]                                    │
+│   → action [B, 15]                                   │
 └──────────────────────────────────────────────────────┘
 
 动作分布: Gaussian(mean=action, std=learnable)

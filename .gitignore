@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs & checkpoints
+logs/
+checkpoints/
+outputs/
+runs/
+wandb/
+
+# Hydra outputs
+multirun/
+
+# Data
+data/motions/*.npz
+data/motions/*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Conda
+environment.yml.bak
