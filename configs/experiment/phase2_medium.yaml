@@ -35,5 +35,5 @@ curriculum:
 
 algo:
   max_iterations: 18000
-  save_interval: 1500
+  save_interval: 100
 

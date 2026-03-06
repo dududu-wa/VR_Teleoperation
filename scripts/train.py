@@ -24,7 +24,7 @@ DEFAULT_ARGS = {
     "sim_backend": "isaacgym",
     "max_iterations": 10000,
     "num_steps": 24,
-    "save_interval": 500,
+    "save_interval": 100,
     "experiment_name": "g1_multigait",
     "initial_phase": 0,
 }
@@ -319,6 +319,11 @@ def main():
               f"FPS {fps:7.0f}")
 
     total_time = time.time() - start_time
+    if runner.log_dir is not None:
+        runner.save(os.path.join(
+            runner.log_dir,
+            f"model_{runner.current_learning_iteration}.pt"
+        ))
     print(f"\nTraining complete in {total_time:.0f}s")
     print(f"Final phase: {curriculum.phase}")
     runner.close()

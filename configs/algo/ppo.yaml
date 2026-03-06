@@ -11,7 +11,7 @@ algo:
   entropy_coef: 0.01
   num_steps_per_env: 24
   num_learning_iterations: 30000
-  save_interval: 500
+  save_interval: 100
 
   # Adaptive KL schedule
   schedule: adaptive

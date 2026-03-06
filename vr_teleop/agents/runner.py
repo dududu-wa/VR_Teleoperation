@@ -172,7 +172,10 @@ class OnPolicyRunner:
 
         # Final save
         self.current_learning_iteration = tot_iter
-        if self.log_dir is not None:
+        if (
+            self.log_dir is not None
+            and self.current_learning_iteration % self.save_interval == 0
+        ):
             self.save(os.path.join(
                 self.log_dir, f'model_{self.current_learning_iteration}.pt'))
 
