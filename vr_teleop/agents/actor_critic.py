@@ -84,8 +84,23 @@ class ActorCritic(nn.Module):
         """Reset any internal state (unused for MLP, needed for interface)."""
         pass
 
-    def forward(self):
-        raise NotImplementedError("Use act() or evaluate() instead.")
+    def forward(
+        self,
+        observations: torch.Tensor,
+        privileged_obs: Optional[torch.Tensor] = None,
+        deterministic: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Unified forward API.
+
+        Returns deterministic action mean by default, matching inference usage.
+        """
+        if deterministic:
+            actions_mean, _ = self.act_inference(
+                observations, privileged_obs=privileged_obs, **kwargs)
+            return actions_mean
+        return self.act(
+            observations, privileged_obs=privileged_obs, **kwargs)
 
     @property
     def action_mean(self) -> torch.Tensor:

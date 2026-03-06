@@ -54,7 +54,7 @@ class DDSBridge:
                  robot_cfg: G1Config = None):
         self.policy = policy
         self.cfg = cfg or DDSBridgeConfig()
-        self.robot_cfg = robot_cfg or G1Config()
+        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
 
         # State from robot
         self.joint_pos = np.zeros(self.robot_cfg.num_dofs)

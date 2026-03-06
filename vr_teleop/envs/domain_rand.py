@@ -11,11 +11,16 @@ Randomizes:
 - Action latency (delayed action application)
 - External pushes (velocity perturbation)
 """
+from __future__ import annotations
 
 import numpy as np
-import mujoco
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
+
+try:
+    import mujoco  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover - optional in some runtime modes
+    mujoco = None  # type: ignore
 
 
 @dataclass
@@ -55,8 +60,12 @@ class DomainRandomizer:
     `maybe_push()` during the episode for periodic pushes.
     """
 
-    def __init__(self, cfg: DomainRandConfig, mj_model: mujoco.MjModel,
+    def __init__(self, cfg: DomainRandConfig, mj_model: Any,
                  num_dofs: int = 29, dt: float = 0.02):
+        if mujoco is None:
+            raise RuntimeError(
+                "mujoco is required for DomainRandomizer in MuJoCo backend mode."
+            )
         self.cfg = cfg
         self.num_dofs = num_dofs
         self.dt = dt  # policy dt

@@ -1,0 +1,39 @@
+# Phase 2: structured intervention + medium intensity
+
+defaults:
+  - /base
+
+experiment:
+  name: phase2_medium
+  seed: 42
+
+env:
+  num_envs: 3072
+  max_episode_length: 1000
+  command_ranges:
+    stand:
+      vx: [0.0, 0.0]
+      vy: [0.0, 0.0]
+      wz: [0.0, 0.0]
+    walk:
+      vx: [-0.7, 0.7]
+      vy: [-0.3, 0.3]
+      wz: [-0.5, 0.5]
+    run:
+      vx: [0.6, 1.6]
+      vy: [-0.2, 0.2]
+      wz: [-0.4, 0.4]
+  gait_probs: [0.15, 0.65, 0.20]
+
+intervention:
+  use_disturb: true
+  curriculum_method: 2
+
+curriculum:
+  initial_phase: 2
+  max_phase: 2
+
+algo:
+  max_iterations: 18000
+  save_interval: 1500
+

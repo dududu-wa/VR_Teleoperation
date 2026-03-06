@@ -318,7 +318,14 @@ class PPO:
                     history_3d, self._proprio_perm_mat)
                 mirror_history = mirror_history_3d.view(B, -1)
             else:
-                mirror_history = history_flat  # fallback: leave unchanged
+                valid_hist_dim = (history_flat.shape[-1] // self._proprio_dim) * self._proprio_dim
+                if valid_hist_dim > 0:
+                    valid_hist = history_flat[:, :valid_hist_dim].view(B, -1, self._proprio_dim)
+                    mirror_valid = torch.matmul(valid_hist, self._proprio_perm_mat).view(B, -1)
+                    tail = history_flat[:, valid_hist_dim:]
+                    mirror_history = torch.cat([mirror_valid, tail], dim=-1)
+                else:
+                    mirror_history = history_flat
 
             mirror_obs = torch.cat([mirror_current, mirror_history], dim=-1)
 

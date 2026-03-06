@@ -18,6 +18,7 @@ from typing import Tuple, Union, Optional, Dict
 from vr_teleop.robot.g1_config import G1Config
 from vr_teleop.envs.g1_base_env import G1BaseEnv
 from vr_teleop.envs.domain_rand import DomainRandomizer, DomainRandConfig
+from vr_teleop.envs.observation import ObservationBuilder, ObsConfig
 from vr_teleop.utils.math_utils import (
     mujoco_quat_to_isaac, compute_projected_gravity,
     quat_rotate_inverse, get_euler_xyz
@@ -47,7 +48,7 @@ class MujocoVecEnv:
         model_path: str = None,
     ):
         self.num_envs = num_envs
-        self.cfg = robot_cfg or G1Config()
+        self.cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.rand_cfg = domain_rand_cfg or DomainRandConfig()
         self.sim_dt = sim_dt
         self.decimation = decimation
@@ -131,6 +132,32 @@ class MujocoVecEnv:
         # Extras dict for logging
         self.extras = {}
 
+        # Default observation interface so this class can be consumed directly.
+        self.obs_cfg = ObsConfig()
+        self.obs_builder = ObservationBuilder(
+            obs_cfg=self.obs_cfg,
+            num_envs=self.num_envs,
+            device=self.device,
+            lower_body_dofs=self.cfg.lower_body_dofs,
+        )
+        self.obs_buf = torch.zeros(
+            self.num_envs,
+            self.obs_cfg.single_step_dim + self.obs_cfg.history_obs_dim * self.obs_cfg.include_history_steps,
+            device=self.device,
+            dtype=torch.float32,
+        )
+        self.privileged_obs_buf = torch.zeros(
+            self.num_envs, self.obs_cfg.critic_obs_dim, device=self.device, dtype=torch.float32
+        )
+        self._command_context = {
+            "commands": torch.zeros(self.num_envs, 3, device=self.device, dtype=torch.float32),
+            "gait_id": torch.zeros(self.num_envs, device=self.device, dtype=torch.float32),
+            "intervention_flag": torch.zeros(self.num_envs, device=self.device, dtype=torch.float32),
+            "clock": torch.zeros(self.num_envs, 2, device=self.device, dtype=torch.float32),
+            "intervention_amp": torch.zeros(self.num_envs, device=self.device, dtype=torch.float32),
+            "intervention_freq": torch.zeros(self.num_envs, device=self.device, dtype=torch.float32),
+        }
+
     def reset_all(self):
         """Reset all environments."""
         env_ids = torch.arange(self.num_envs, device=self.device)
@@ -171,6 +198,7 @@ class MujocoVecEnv:
 
         # Sync state from MuJoCo to tensors
         self._sync_state_from_mujoco(env_ids_cpu)
+        self._refresh_default_observations(reset_env_ids=env_ids)
 
         # Update domain rand privileged info
         for idx in env_ids_cpu:
@@ -233,7 +261,15 @@ class MujocoVecEnv:
         # Increment episode length
         self.episode_length_buf += 1
 
-        return None  # Observations computed separately by the training env
+        self._refresh_default_observations()
+
+        return (
+            self.obs_buf,
+            self.privileged_obs_buf,
+            self.rew_buf,
+            self.reset_buf,
+            self.extras,
+        )
 
     def _sync_state_from_mujoco(self, env_ids: np.ndarray):
         """Sync MuJoCo state to GPU tensors for specified environments.
@@ -323,6 +359,67 @@ class MujocoVecEnv:
         self.base_euler[env_ids_torch, 1] = pitch
         self.base_euler[env_ids_torch, 2] = yaw
 
+    def set_command_context(
+        self,
+        commands: Optional[torch.Tensor] = None,
+        gait_id: Optional[torch.Tensor] = None,
+        intervention_flag: Optional[torch.Tensor] = None,
+        clock: Optional[torch.Tensor] = None,
+        intervention_amp: Optional[torch.Tensor] = None,
+        intervention_freq: Optional[torch.Tensor] = None,
+    ):
+        """Set command/intervention context used by default observation APIs."""
+        if commands is not None:
+            self._command_context["commands"] = commands.to(self.device)
+        if gait_id is not None:
+            self._command_context["gait_id"] = gait_id.to(self.device)
+        if intervention_flag is not None:
+            self._command_context["intervention_flag"] = intervention_flag.to(self.device)
+        if clock is not None:
+            self._command_context["clock"] = clock.to(self.device)
+        if intervention_amp is not None:
+            self._command_context["intervention_amp"] = intervention_amp.to(self.device)
+        if intervention_freq is not None:
+            self._command_context["intervention_freq"] = intervention_freq.to(self.device)
+
+    def _refresh_default_observations(self, reset_env_ids: Optional[torch.Tensor] = None):
+        """Build actor/critic observations for direct VecEnv compatibility."""
+        dof_pos_rel = self.get_dof_pos_relative()
+        lower_pos = dof_pos_rel[:, :self.cfg.lower_body_dofs]
+        lower_vel = self.dof_vel[:, :self.cfg.lower_body_dofs]
+
+        actor_obs = self.obs_builder.build_actor_obs(
+            base_ang_vel=self.base_ang_vel_body,
+            projected_gravity=self.projected_gravity,
+            dof_pos_lower=lower_pos,
+            dof_vel_lower=lower_vel,
+            last_actions=self.last_actions,
+            commands=self._command_context["commands"],
+            gait_id=self._command_context["gait_id"],
+            intervention_flag=self._command_context["intervention_flag"],
+            clock=self._command_context["clock"],
+        )
+        if reset_env_ids is not None and len(reset_env_ids) > 0:
+            self.obs_builder.reset_history(reset_env_ids, actor_obs)
+        else:
+            self.obs_builder.update_history(actor_obs)
+
+        self.obs_buf = self.obs_builder.get_actor_obs_with_history(actor_obs)
+        self.privileged_obs_buf = self.obs_builder.build_critic_obs(
+            actor_obs=actor_obs,
+            base_lin_vel=self.base_lin_vel_body,
+            base_height=self.get_base_height(),
+            foot_contact_forces=self.foot_contact_forces,
+            friction_coeff=self.friction_coeffs,
+            mass_offset=self.mass_offsets,
+            motor_strength=self.motor_strengths,
+            pd_gain_mult=torch.stack([self.kp_multipliers, self.kd_multipliers], dim=-1),
+            upper_dof_pos=dof_pos_rel[:, self.cfg.lower_body_dofs:],
+            upper_dof_vel=self.dof_vel[:, self.cfg.lower_body_dofs:],
+            intervention_amp=self._command_context["intervention_amp"],
+            intervention_freq=self._command_context["intervention_freq"],
+        )
+
     def set_upper_body_actions(self, upper_actions: torch.Tensor, env_ids: torch.Tensor = None):
         """Set upper body DOF targets (from intervention or VR).
 
@@ -344,19 +441,19 @@ class MujocoVecEnv:
         return self.base_pos[:, 2]
 
     def get_observations(self) -> torch.Tensor:
-        """Placeholder - actual obs built by the training environment."""
-        raise NotImplementedError("Observations should be built by the training environment")
+        """Return actor observations built from current internal state."""
+        return self.obs_buf
 
     def get_privileged_observations(self) -> Optional[torch.Tensor]:
-        """Placeholder - actual privileged obs built by the training environment."""
-        raise NotImplementedError("Privileged observations should be built by the training environment")
+        """Return critic observations built from current internal state."""
+        return self.privileged_obs_buf
 
     @property
     def num_obs(self) -> int:
-        """Number of observation dimensions (set by training env)."""
-        return 0  # Overridden by training env
+        """Number of actor observation dimensions."""
+        return int(self.obs_buf.shape[-1])
 
     @property
     def num_privileged_obs(self) -> int:
-        """Number of privileged observation dimensions (set by training env)."""
-        return 0  # Overridden by training env
+        """Number of critic observation dimensions."""
+        return int(self.privileged_obs_buf.shape[-1])

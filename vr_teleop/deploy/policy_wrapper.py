@@ -35,7 +35,7 @@ class PolicyWrapper:
                  obs_cfg: ObsConfig = None,
                  device: str = 'cpu'):
         self.device = torch.device(device)
-        self.robot_cfg = robot_cfg or G1Config()
+        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.obs_cfg = obs_cfg or ObsConfig()
 
         self.actor_critic = actor_critic.to(self.device)
@@ -79,7 +79,7 @@ class PolicyWrapper:
         Returns:
             PolicyWrapper instance
         """
-        robot_cfg = robot_cfg or G1Config()
+        robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         obs_cfg = obs_cfg or ObsConfig()
 
         num_actor_obs = obs_cfg.single_step_dim + \

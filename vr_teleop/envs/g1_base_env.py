@@ -42,7 +42,7 @@ class G1BaseEnv:
             decimation: Number of physics steps per policy step
             model_path: Override path to MuJoCo XML model
         """
-        self.cfg = robot_cfg or G1Config()
+        self.cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.decimation = decimation
         self.num_dofs = self.cfg.num_dofs  # 29
         self.num_actions = self.cfg.num_dofs  # full 29-DOF for base env

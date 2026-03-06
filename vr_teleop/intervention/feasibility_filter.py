@@ -44,7 +44,7 @@ class FeasibilityFilter:
         device: torch.device = None,
     ):
         self.cfg = cfg or FeasibilityConfig()
-        self.robot_cfg = robot_cfg or G1Config()
+        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.num_envs = num_envs
         self.device = device or torch.device('cpu')
         self.upper_dim = self.robot_cfg.upper_body_dofs  # 14

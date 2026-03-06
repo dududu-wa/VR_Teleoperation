@@ -175,7 +175,7 @@ def validate_clips(clips: list, robot_cfg: G1Config, dt: float) -> list:
 def main():
     args = parse_args()
     rng = np.random.default_rng(args.seed)
-    robot_cfg = G1Config()
+    robot_cfg = G1Config.from_falcon_yaml_if_available()
 
     print(f"Building motion library")
     print(f"  Output: {args.output}")

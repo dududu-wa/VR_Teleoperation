@@ -1,0 +1,38 @@
+# Phase 1: low-frequency, low-amplitude intervention
+
+defaults:
+  - /base
+
+experiment:
+  name: phase1_low
+  seed: 42
+
+env:
+  num_envs: 2048
+  max_episode_length: 1000
+  command_ranges:
+    stand:
+      vx: [0.0, 0.0]
+      vy: [0.0, 0.0]
+      wz: [0.0, 0.0]
+    walk:
+      vx: [-0.5, 0.5]
+      vy: [-0.2, 0.2]
+      wz: [-0.4, 0.4]
+    run:
+      vx: [0.0, 0.0]
+      vy: [0.0, 0.0]
+      wz: [0.0, 0.0]
+  gait_probs: [0.20, 0.80, 0.0]
+
+intervention:
+  use_disturb: true
+
+curriculum:
+  initial_phase: 1
+  max_phase: 1
+
+algo:
+  max_iterations: 12000
+  save_interval: 1000
+

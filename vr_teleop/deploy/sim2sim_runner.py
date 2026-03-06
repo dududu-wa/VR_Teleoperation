@@ -44,7 +44,7 @@ class Sim2SimRunner:
                  cfg: Sim2SimConfig = None,
                  robot_cfg: G1Config = None):
         self.cfg = cfg or Sim2SimConfig()
-        self.robot_cfg = robot_cfg or G1Config()
+        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.actor_critic = actor_critic
         self.actor_critic.eval()
 
@@ -54,7 +54,7 @@ class Sim2SimRunner:
                         robot_cfg: G1Config = None) -> 'Sim2SimRunner':
         """Create from checkpoint file."""
         cfg = cfg or Sim2SimConfig()
-        robot_cfg = robot_cfg or G1Config()
+        robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         obs_cfg = ObsConfig()
 
         num_actor_obs = obs_cfg.single_step_dim + \
@@ -96,6 +96,7 @@ class Sim2SimRunner:
             term_cfg=term_cfg,
             rand_cfg=rand_cfg,
             device=self.cfg.device,
+            sim_backend="mujoco",
         )
 
         eval_cfg = EvalConfig(

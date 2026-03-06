@@ -13,6 +13,7 @@ seed: 42
 torch_deterministic: false
 headless: true
 num_envs: 1024
+sim_backend: isaacgym
 device: null  # auto-detect cuda/cpu
 base_dir: logs
 experiment_name: vr_teleop

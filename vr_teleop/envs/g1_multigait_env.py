@@ -1,7 +1,8 @@
 """
 G1 Multi-Gait Training Environment.
 
-Top-level training environment that wraps MujocoVecEnv and provides:
+Top-level training environment that wraps a vectorized simulator backend
+(IsaacGym primary backend; MuJoCo explicit mode only) and provides:
 - Gait command sampling (stand/walk/run)
 - Velocity command sampling per gait mode
 - Gait phase clock (sin/cos for periodic locomotion)
@@ -20,7 +21,6 @@ import numpy as np
 from typing import Tuple, Union, Optional, Dict
 
 from vr_teleop.robot.g1_config import G1Config
-from vr_teleop.envs.mujoco_vec_env import MujocoVecEnv
 from vr_teleop.envs.observation import ObservationBuilder, ObsConfig
 from vr_teleop.envs.reward import RewardComputer, RewardConfig
 from vr_teleop.envs.termination import TerminationChecker, TerminationConfig
@@ -52,6 +52,7 @@ class G1MultigaitEnv:
         max_episode_length: int = 1000,
         device: str = 'cuda:0',
         model_path: str = None,
+        sim_backend: str = "isaacgym",
         # Command config
         gait_probs: list = None,
         command_ranges: dict = None,
@@ -61,7 +62,7 @@ class G1MultigaitEnv:
         run_freq: float = 3.0,
         phase_offset: float = 0.5,
     ):
-        self.robot_cfg = robot_cfg or G1Config()
+        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.obs_cfg = obs_cfg or ObsConfig()
         self.reward_cfg = reward_cfg or RewardConfig()
         self.term_cfg = term_cfg or TerminationConfig(episode_length=max_episode_length)
@@ -71,6 +72,7 @@ class G1MultigaitEnv:
         self.dt = sim_dt * decimation
         self.max_episode_length = max_episode_length
         self.device = torch.device(device)
+        self.sim_backend = sim_backend.lower()
 
         # Action dimensions
         self.num_actions = self.robot_cfg.lower_body_dofs  # 15
@@ -78,10 +80,8 @@ class G1MultigaitEnv:
         self.num_privileged_obs = self.obs_cfg.critic_obs_dim  # 99
 
         # ---- Create underlying vectorized environment ----
-        self.vec_env = MujocoVecEnv(
+        self.vec_env = self._build_vec_env(
             num_envs=num_envs,
-            robot_cfg=self.robot_cfg,
-            domain_rand_cfg=self.rand_cfg,
             sim_dt=sim_dt,
             decimation=decimation,
             max_episode_length=max_episode_length,
@@ -139,7 +139,7 @@ class G1MultigaitEnv:
         self.transition_timer = torch.zeros(num_envs, device=self.device)
         self.transition_window = self.reward_cfg.transition_window
 
-        # ---- Intervention state (placeholder - fully implemented in Wave 5) ----
+        # ---- Intervention state ----
         self.intervention_generator = None
         self.feasibility_filter = None
         self.auto_intervention = False
@@ -164,6 +164,39 @@ class G1MultigaitEnv:
 
         # ---- Previous action for second-order action rate ----
         self.last_last_actions = torch.zeros(num_envs, self.num_actions, device=self.device)
+
+    def _build_vec_env(
+        self,
+        num_envs: int,
+        sim_dt: float,
+        decimation: int,
+        max_episode_length: int,
+        device: str,
+        model_path: Optional[str],
+    ):
+        """Instantiate vectorized simulator backend."""
+        common_kwargs = dict(
+            num_envs=num_envs,
+            robot_cfg=self.robot_cfg,
+            domain_rand_cfg=self.rand_cfg,
+            sim_dt=sim_dt,
+            decimation=decimation,
+            max_episode_length=max_episode_length,
+            device=device,
+            model_path=model_path,
+        )
+
+        if self.sim_backend == "isaacgym":
+            from vr_teleop.envs.isaac_vec_env import IsaacVecEnv
+            return IsaacVecEnv(**common_kwargs)
+        if self.sim_backend == "mujoco":
+            from vr_teleop.envs.mujoco_vec_env import MujocoVecEnv
+            return MujocoVecEnv(**common_kwargs)
+
+        raise ValueError(
+            f"Unsupported sim_backend '{self.sim_backend}'. "
+            "Expected one of: ['isaacgym', 'mujoco']"
+        )
 
     def reset_all(self):
         """Reset all environments and return initial observations."""
@@ -384,6 +417,16 @@ class G1MultigaitEnv:
 
     def _compute_observations(self, update_history: bool = True):
         """Compute actor and critic observations."""
+        if hasattr(self.vec_env, "set_command_context"):
+            self.vec_env.set_command_context(
+                commands=self.commands,
+                gait_id=self.gait_id.float(),
+                intervention_flag=self.intervention_flag,
+                clock=self.clock_input,
+                intervention_amp=self.intervention_amp,
+                intervention_freq=self.intervention_freq,
+            )
+
         # Single-step actor obs
         actor_obs = self._build_actor_obs_single_step()
 
@@ -511,7 +554,7 @@ class G1MultigaitEnv:
                 transition_failure[reset_ids].float().mean().item()
             )
 
-    # ---- Intervention interface (used by Wave 5) ----
+    # ---- Intervention interface ----
     def attach_intervention(self, generator=None, feasibility_filter=None,
                             auto_mode: bool = True):
         """Attach intervention modules and optionally enable auto updates."""
@@ -618,6 +661,11 @@ class G1MultigaitEnv:
         """Create motion retargeter lazily."""
         if self.motion_retargeter is None:
             from vr_teleop.intervention.motion_retarget import MotionRetargeter
+            if not hasattr(self.vec_env, "_envs"):
+                raise RuntimeError(
+                    "MotionRetargeter currently requires MuJoCo-compatible backend "
+                    "with per-env `MjModel/MjData` handles."
+                )
             mj_models = [e.mj_model for e in self.vec_env._envs]
             mj_datas = [e.mj_data for e in self.vec_env._envs]
             self.motion_retargeter = MotionRetargeter(
@@ -628,7 +676,7 @@ class G1MultigaitEnv:
             )
         return self.motion_retargeter
 
-    # ---- Curriculum interface (used by Wave 6) ----
+    # ---- Curriculum interface ----
 
     def update_command_ranges(self, new_ranges: dict):
         """Update velocity command ranges (called by curriculum)."""

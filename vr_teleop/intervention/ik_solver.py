@@ -63,7 +63,7 @@ class DampedLeastSquaresIK:
         self.model = mj_model
         self.data = mj_data
         self.cfg = cfg or IKConfig()
-        self.robot_cfg = robot_cfg or G1Config()
+        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.arm_joint_ids = arm_joint_ids
         self.n_joints = len(arm_joint_ids)
 
@@ -270,7 +270,7 @@ class BatchIKSolver:
             robot_cfg: Robot configuration
         """
         self.cfg = cfg or IKConfig()
-        self.robot_cfg = robot_cfg or G1Config()
+        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
         self.num_envs = len(mj_models)
 
         # Create per-env per-arm solvers
