@@ -8,13 +8,14 @@
 
 | 决策项 | 选择 |
 |--------|------|
-| 仿真器 | MuJoCo（CPU 默认单进程同步批量，可选多进程后端 + MJX GPU 加速可选） |
+| 仿真器 | **Isaac Gym GPU tensor pipeline 为默认**；MuJoCo 仅作 sim2sim、单元测试与部署前对齐验证 |
 | 机器人 | Unitree G1 29DOF（复用 `unitree_mujoco/unitree_robots/g1/g1_29dof.xml`） |
 | 策略架构 | readme A+B 解耦：π_leg 控制下肢 15DOF；上肢走“手目标位姿→重定向/滤波/IK→14DOF”链路 |
 | 网络模型 | HugWBC 的 MlpAdaptModel（history encoder + state estimator + low-level controller） |
 | RL 算法 | PPO + 对称损失 + 特权信息重建损失 |
 | 课程系统 | Phase 0-4 手动课程 + 可选 ADR 自动调度 |
-| 开发顺序 | A+B 并行开发 |
+| 数据通路 | Isaac Gym GPU state tensors → PyTorch GPU policy/PPO → GPU action tensor → Isaac Gym step |
+| 开发顺序 | A+B 并行开发，且以 Isaac Gym GPU rollout 主链路优先 |
 
 ---
 
@@ -42,8 +43,8 @@ VR_Teleoperation/
 │   ├── envs/                         # MuJoCo 环境
 │   │   ├── g1_base_env.py            # 单实例 MuJoCo G1 环境封装
 │   │   ├── g1_multigait_env.py       # 多步态训练环境（核心）
-│   │   ├── mujoco_vec_env.py         # CPU 同步批量向量化环境（可选多进程后端）
-│   │   ├── mjx_vec_env.py            # MJX GPU 加速向量化环境（可选）
+│   │   ├── mujoco_vec_env.py         # MuJoCo 对齐/调试向量化环境（可选多进程后端）
+│   │   ├── isaac_vec_env.py          # Isaac Gym GPU 主训练向量化环境
 │   │   ├── observation.py            # 观测构建器
 │   │   ├── reward.py                 # 奖励函数实现
 │   │   ├── termination.py            # 终止条件
@@ -133,7 +134,7 @@ class G1Config:
     # 初始位置 -- pos=[0, 0, 0.8], standing height ~0.793m
 ```
 
-### 2.2 MuJoCo 环境 -- `vr_teleop/envs/`
+### 2.2 训练/验证环境 -- `vr_teleop/envs/`
 
 #### 2.2.1 `g1_base_env.py` -- 单实例环境
 
@@ -149,18 +150,20 @@ class G1Config:
   ```
 - **Decimation=4**: 每次 `step()` 内执行 4 次 `mj_step()`（仿真 200Hz，策略 50Hz）
 
-#### 2.2.2 `mujoco_vec_env.py` -- CPU 向量化
+#### 2.2.2 `mujoco_vec_env.py` -- MuJoCo 对齐/回归后端
 
+- 仅用于调试、单元测试、Isaac Gym 对齐验证、部署前观测一致性检查
 - 默认模式：单进程同步批量（同一进程维护 N 个 `MjModel/MjData`）
 - 可选后端：`multiprocessing.Pool` 或 `concurrent.futures.ProcessPoolExecutor`
 - 多进程模式下每个 worker 持有独立 `g1_base_env`，通过共享内存传递 action/observation 批量张量
-- 目标: 默认模式 64-256；多进程模式按 CPU 核数扩展
+- 目标: 1-64 环境验证，不作为主训练吞吐来源
 
-#### 2.2.3 `mjx_vec_env.py` -- MJX GPU 加速（可选）
+#### 2.2.3 `isaac_vec_env.py` -- Isaac Gym GPU 主训练后端
 
-- 使用 `mujoco.mjx` 将 G1 模型编译为 JAX 表示
-- `jax.vmap(mjx.step)` 在 GPU 上并行运行 1024-4096 环境
-- JAX→PyTorch 零拷贝转换: `torch.from_dlpack(jax.dlpack.to_dlpack(...))`
+- 基于 Isaac Gym / Legged Gym 风格 GPU tensor API 构建 G1 批量环境
+- 通过 `gymtorch.wrap_tensor(...)` 直接读取 root states、dof states、contact forces 等 GPU tensor
+- 观测构建、奖励、终止、域随机化全部在 GPU 端批量完成
+- 主目标: 4096-16384 env 规模下获得接近 HugWBC/FALCON 的 GPU rollout 吞吐
 
 #### 2.2.4 `g1_multigait_env.py` -- 训练环境（核心）
 
@@ -170,6 +173,7 @@ class G1Config:
 - **奖励计算**: 调用 `reward.py` 中各奖励函数
 - **终止检测**: 调用 `termination.py`
 - **课程更新**: 每次 PPO update 后检查是否升级 Phase
+- **后端策略**: 默认走 `isaac_vec_env.py`；`mujoco_vec_env.py` 只用于 debug / eval 对齐
 
 ### 2.3 观测空间 -- `vr_teleop/envs/observation.py`
 
@@ -190,7 +194,7 @@ class G1Config:
 | **小计 command** | **5** | | |
 | 步态时钟: sin(phase), cos(phase) | 2 | 步态时钟 | ×1.0 |
 | **单步总计** | **58** | | |
-| **含历史 (H=5)** | **51 × 5 = 255** | 仅对 proprioception 做历史堆叠并送入 HistoryEncoder | |
+| **含历史 (H=5)** | **51 × 5 = 255** | 仅对 proprioception 做历史堆叠并送入 HistoryEncoder；历史缓存默认保存在 GPU | |
 
 #### Critic 观测（特权信息，仅训练时使用）
 
@@ -265,6 +269,10 @@ L = L_surrogate + value_loss_coef * L_value - entropy_coef * H
 ```
 
 **对称损失**: 使用 FALCON `symmetric_dofs_idx` 中的左右对称索引，构建置换矩阵，强制策略对称输入产生对称输出。
+
+**执行策略**:
+- rollout storage、GAE、mini-batch 采样、PPO update 默认全部在 CUDA 上完成
+- 避免 CPU↔GPU 往返拷贝成为瓶颈；Isaac Gym 状态、奖励、动作全部维持在 GPU tensor 上
 
 ### 2.6 奖励函数 -- `vr_teleop/envs/reward.py`
 
@@ -357,7 +365,7 @@ if in_transition_window:
 ```python
 # scripts/train.py
 cfg = load_config(experiment="phase0_baseline")
-env = G1MultiGaitEnv(cfg, num_envs=256, device="cpu")  # 或 MJX 4096 envs
+env = G1MultiGaitEnv(cfg, num_envs=4096, device="cuda:0", sim_backend="isaacgym")
 actor_critic = ActorCritic(env.num_partial_obs, env.num_obs, env.num_actions, cfg.algo)
 ppo = PPO(actor_critic, **cfg.algo)
 ppo.init_storage(env.num_envs, num_steps_per_env=24, ...)
@@ -386,9 +394,9 @@ for iteration in range(max_iterations):
 
 ### 3.2 与 HugWBC/FALCON 的关键差异
 
-1. **无 Isaac Gym 依赖**: `isaacgym.torch_utils` 中的四元数/旋转函数在 `math_utils.py` 重新实现
-2. **向量化**: 通过 multiprocessing 或 MJX 替代 Isaac Gym 的 `create_sim`
-3. **传感器读取**: 从 `mj_data.sensordata` 读取而非 Isaac Gym tensor API
+1. **采用 Isaac Gym**: 直接复用 HugWBC / FALCON 的 GPU 仿真范式与 tensor API 组织方式
+2. **GPU 向量化**: 基于 `create_sim`、`acquire_*_tensor`、`refresh_*_tensor` 实现大规模并行环境
+3. **观测/奖励/重置**: 全部基于 GPU tensor 完成，避免 host copy
 4. **对称损失置换矩阵**: 按 G1 的 15-action 下肢关节排列重新计算
 
 ---
@@ -437,19 +445,20 @@ env = G1BaseEnv("unitree_mujoco/unitree_robots/g1/scene.xml")
 
 ### Step 1: 基础设施搭建
 1. 创建项目目录结构
-2. 编写 `requirements.txt`（mujoco, torch, numpy, omegaconf, tensorboard 等）
+2. 编写 `requirements.txt` / `environment.yml`（Isaac Gym、PyTorch CUDA、numpy、omegaconf、tensorboard 等）
 3. 实现 `g1_config.py`（从 FALCON yaml 提取所有数据）
 4. 实现 `math_utils.py`（替代 `isaacgym.torch_utils`）
 5. 实现 `config_utils.py`（YAML 加载合并）
 
 ### Step 2: 环境层
-6. 实现 `g1_base_env.py`（MuJoCo 单实例封装 + PD 控制）
-7. 实现 `mujoco_vec_env.py`（CPU 默认同步批量 + 可选多进程后端）
-8. 实现 `observation.py`（观测构建）
-9. 实现 `reward.py`（所有奖励函数）
-10. 实现 `termination.py`（终止条件）
-11. 实现 `domain_rand.py`（域随机化）
-12. 实现 `g1_multigait_env.py`（组装完整训练环境）
+6. 实现 `g1_base_env.py`（MuJoCo 单实例封装 + PD 控制，用于 sim2sim）
+7. 实现 `isaac_vec_env.py`（Isaac Gym GPU 主训练后端）
+8. 实现 `mujoco_vec_env.py`（MuJoCo 对齐/调试后端）
+9. 实现 `observation.py`（观测构建）
+10. 实现 `reward.py`（所有奖励函数）
+11. 实现 `termination.py`（终止条件）
+12. 实现 `domain_rand.py`（域随机化）
+13. 实现 `g1_multigait_env.py`（组装完整训练环境）
 
 ### Step 3: RL 算法层
 13. 实现 `networks.py`（MLP + HistoryEncoder + StateEstimator）
@@ -494,10 +503,11 @@ env = G1BaseEnv("unitree_mujoco/unitree_robots/g1/scene.xml")
 ### 7.1 环境验证
 - `step()` 返回有效形状的 obs/reward/done
 - 零动作不崩溃，随机动作产生有限奖励
+- Isaac Gym 与 MuJoCo 单步/短时 rollout 对齐
 - PD 控制输出与 unitree_mujoco 一致
 
 ### 7.2 训练验证
-- Phase 0: 10k iterations 后 stand 成功率 >95%, walk tracking >80%
+- Phase 0: `sim_backend=isaacgym, device=cuda:0, num_envs>=4096` 下 10k iterations 后 stand 成功率 >95%, walk tracking >80%
 - Phase 1-3: 逐步引入干预，tracking 不低于 0.65, transition_failure < 10%
 
 ### 7.3 Sim2Sim 验证
