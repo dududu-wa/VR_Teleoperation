@@ -108,6 +108,7 @@ class PhaseCurriculum:
         fall_rate: float,
         transition_failure: float = 0.0,
         mean_episode_length: float = 0.0,
+        num_iterations: int = 1,
     ):
         """Update performance metrics from latest training iteration.
 
@@ -116,14 +117,17 @@ class PhaseCurriculum:
             fall_rate: Fraction of episodes ending in falls
             transition_failure: Fraction of gait transitions that caused falls
             mean_episode_length: Mean episode length in steps
+            num_iterations: How many learner iterations these metrics represent.
+                Use this when the outer training loop updates curriculum in chunks.
         """
+        num_iterations = max(1, int(num_iterations))
         self.tracking_rewards.append(tracking_reward)
         self.fall_rates.append(fall_rate)
         self.transition_failures.append(transition_failure)
         self.episode_lengths.append(mean_episode_length)
 
-        self.iteration += 1
-        self._iterations_in_phase += 1
+        self.iteration += num_iterations
+        self._iterations_in_phase += num_iterations
 
     def check_promotion(self) -> bool:
         """Check if current metrics meet promotion thresholds.
