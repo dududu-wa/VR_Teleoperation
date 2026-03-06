@@ -217,9 +217,10 @@ class G1Config:
     action_scale: float = 0.25
     action_clip_value: float = 100.0
 
-    # ---- MuJoCo model path ----
-    mujoco_model_file: str = "unitree_robots/g1/g1_29dof.xml"
-    mujoco_scene_file: str = "unitree_robots/g1/scene.xml"
+    # ---- Model paths (relative to asset root) ----
+    mujoco_model_file: str = "robots/g1_description/g1_29dof.xml"
+    mujoco_scene_file: str = "robots/g1_description/scene.xml"
+    urdf_file: str = "robots/g1_description/g1_29dof.urdf"
 
     def get_default_dof_pos(self) -> torch.Tensor:
         """Return (29,) tensor of default joint angles, ordered by dof_names."""

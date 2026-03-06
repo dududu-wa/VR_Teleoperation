@@ -166,9 +166,13 @@ class IsaacVecEnv:
             return path
 
         asset_root = get_asset_path()
+        # Try URDF first (preferred for Isaac Gym), then XML scene/model
+        urdf_path = os.path.join(asset_root, getattr(self.cfg, 'urdf_file', ''))
         scene_path = os.path.join(asset_root, self.cfg.mujoco_scene_file)
         model_file_path = os.path.join(asset_root, self.cfg.mujoco_model_file)
 
+        if urdf_path and os.path.exists(urdf_path):
+            return urdf_path
         if os.path.exists(scene_path):
             return scene_path
         if os.path.exists(model_file_path):

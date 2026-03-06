@@ -12,6 +12,13 @@ import os
 import sys
 import argparse
 import time
+
+# Isaac Gym MUST be imported before torch
+try:
+    import isaacgym  # noqa: F401
+except ImportError:
+    pass
+
 import torch
 
 # Add project root to path
