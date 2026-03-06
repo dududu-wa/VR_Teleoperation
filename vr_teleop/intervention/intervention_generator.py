@@ -1,4 +1,4 @@
-"""
+﻿"""
 Upper-body intervention signal generator for G1 multi-gait training.
 
 Generates 14-DOF (left arm 7 + right arm 7) intervention targets that
@@ -85,7 +85,7 @@ class InterventionGenerator:
         device: torch.device = None,
     ):
         self.cfg = cfg or InterventionConfig()
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.num_envs = num_envs
         self.device = device or torch.device('cpu')
         self.disturb_dim = self.cfg.disturb_dim  # 14
@@ -558,3 +558,4 @@ class InterventionGenerator:
             self.upper_pos_upper.unsqueeze(0) - self.upper_default.unsqueeze(0)
         ) / self.cfg.action_scale
         return torch.clamp(self.disturb_actions, lower_action, upper_action)
+

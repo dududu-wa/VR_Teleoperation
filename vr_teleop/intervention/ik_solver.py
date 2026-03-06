@@ -1,4 +1,4 @@
-"""
+﻿"""
 Damped Least Squares IK solver for G1 7-DOF arms using MuJoCo Jacobian.
 
 Solves inverse kinematics for VR hand tracking by computing joint angles
@@ -63,7 +63,7 @@ class DampedLeastSquaresIK:
         self.model = mj_model
         self.data = mj_data
         self.cfg = cfg or IKConfig()
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.arm_joint_ids = arm_joint_ids
         self.n_joints = len(arm_joint_ids)
 
@@ -270,7 +270,7 @@ class BatchIKSolver:
             robot_cfg: Robot configuration
         """
         self.cfg = cfg or IKConfig()
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.num_envs = len(mj_models)
 
         # Create per-env per-arm solvers
@@ -348,3 +348,4 @@ class BatchIKSolver:
             mask=mask,
         )
         return np.concatenate([left_joints, right_joints], axis=-1)
+

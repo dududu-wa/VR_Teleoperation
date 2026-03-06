@@ -1,4 +1,4 @@
-"""
+﻿"""
 G1 left-right symmetry utilities for PPO symmetry loss.
 Builds permutation and sign-flip matrices for observations and actions.
 """
@@ -28,7 +28,7 @@ def build_action_symmetry_matrix(cfg: G1Config = None) -> torch.Tensor:
       waist_op (negate):     {12, 13}
     """
     if cfg is None:
-        cfg = G1Config.from_falcon_yaml_if_available()
+        cfg = G1Config()
 
     n = cfg.lower_body_dofs  # 15
     S = torch.zeros(n, n, dtype=torch.float32)
@@ -77,7 +77,7 @@ def build_obs_symmetry_matrix(obs_dim: int, cfg: G1Config = None) -> torch.Tenso
         (obs_dim, obs_dim) matrix S_o such that mirror(obs) = S_o @ obs
     """
     if cfg is None:
-        cfg = G1Config.from_falcon_yaml_if_available()
+        cfg = G1Config()
 
     S = torch.zeros(obs_dim, obs_dim, dtype=torch.float32)
     S_act = build_action_symmetry_matrix(cfg)
@@ -126,3 +126,4 @@ def build_obs_symmetry_matrix(obs_dim: int, cfg: G1Config = None) -> torch.Tenso
         idx += 1
 
     return S
+

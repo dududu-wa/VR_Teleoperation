@@ -4,7 +4,7 @@ Training entry point for G1 multi-gait intervention-robust locomotion.
 
 Usage:
     python scripts/train.py
-    python scripts/train.py --num-envs 256 --device cpu --sim-backend mujoco
+    python scripts/train.py --num-envs 256 --device cuda:0 --sim-backend isaacgym
     python scripts/train.py --use-intervention --initial-phase 0
 """
 
@@ -167,7 +167,7 @@ def main():
     print(f"  Initial phase: {args.initial_phase}")
 
     # ---- Create configs ----
-    robot_cfg = G1Config.from_falcon_yaml_if_available()
+    robot_cfg = G1Config()
     obs_cfg = ObsConfig()
     reward_cfg = RewardConfig()
     term_cfg = TerminationConfig(episode_length=max_episode_length)
@@ -326,3 +326,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

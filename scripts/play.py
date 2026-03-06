@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Visualization / playback script for trained G1 multi-gait policy.
 
@@ -68,7 +68,7 @@ class PolicyPlayer:
     def __init__(self, checkpoint_path: str, device: str = 'cpu',
                  robot_cfg: G1Config = None, obs_cfg: ObsConfig = None):
         self.device = torch.device(device)
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.obs_cfg = obs_cfg or ObsConfig()
 
         # Load model
@@ -334,3 +334,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

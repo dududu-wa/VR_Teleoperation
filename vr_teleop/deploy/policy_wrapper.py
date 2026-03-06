@@ -1,4 +1,4 @@
-"""
+﻿"""
 Policy inference wrapper for deployment.
 
 Wraps a trained ActorCritic checkpoint into a stateful inference module
@@ -35,7 +35,7 @@ class PolicyWrapper:
                  obs_cfg: ObsConfig = None,
                  device: str = 'cpu'):
         self.device = torch.device(device)
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.obs_cfg = obs_cfg or ObsConfig()
 
         self.actor_critic = actor_critic.to(self.device)
@@ -79,7 +79,7 @@ class PolicyWrapper:
         Returns:
             PolicyWrapper instance
         """
-        robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        robot_cfg = robot_cfg or G1Config()
         obs_cfg = obs_cfg or ObsConfig()
 
         num_actor_obs = obs_cfg.single_step_dim + \
@@ -209,3 +209,4 @@ class PolicyWrapper:
         actions = actions_mean.squeeze(0)
         self.last_actions[0] = actions
         return actions.cpu().numpy()
+

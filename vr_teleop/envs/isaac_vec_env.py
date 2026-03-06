@@ -1,22 +1,25 @@
 """
-Isaac Gym vectorized environment backend.
+Self-contained Isaac Gym vectorized environment backend.
 
-Implementation strategy:
-1) Require Isaac Gym runtime.
-2) Use external backend from sibling `unitree_rl_gym`.
-3) No MuJoCo fallback in training backend path.
+This module intentionally does not import or depend on any sibling repository.
 """
 
 from __future__ import annotations
 
+import math
 import os
-import sys
-from typing import Optional, Any
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
 from vr_teleop.envs.observation import ObsConfig, ObservationBuilder
-from vr_teleop.utils.config_utils import get_unitree_rl_gym_root
+from vr_teleop.utils.config_utils import get_asset_path
+from vr_teleop.utils.math_utils import (
+    compute_projected_gravity,
+    get_euler_xyz,
+    quat_rotate_inverse,
+    wrap_to_pi,
+)
 
 
 def is_isaacgym_available() -> bool:
@@ -28,22 +31,44 @@ def is_isaacgym_available() -> bool:
         return False
 
 
-class _ExternalUnitreeIsaacVecEnv:
-    """Adapter around `unitree_rl_gym` IsaacGym environment."""
+def _parse_sim_device(device: str) -> Tuple[str, int]:
+    """Parse torch-like device string to Isaac Gym device type and index."""
+    dev = str(device).strip().lower()
+    if dev.startswith("cuda"):
+        parts = dev.split(":", 1)
+        index = int(parts[1]) if len(parts) == 2 and parts[1] else 0
+        return "cuda", index
+    return "cpu", 0
+
+
+class IsaacVecEnv:
+    """Native Isaac Gym backend without external project dependencies."""
 
     def __init__(
         self,
         num_envs: int,
         robot_cfg,
         domain_rand_cfg,
-        sim_dt: float,
-        decimation: int,
-        max_episode_length: int,
-        device: str,
+        sim_dt: float = 0.005,
+        decimation: int = 4,
+        max_episode_length: int = 1000,
+        device: str = "cuda:0",
         model_path: Optional[str] = None,
-        external_task: str = "g1",
-        external_headless: bool = True,
+        headless: bool = True,
+        **_: Any,
     ):
+        if not is_isaacgym_available():
+            raise RuntimeError(
+                "Isaac Gym backend requested but `isaacgym` is unavailable. "
+                "Install Isaac Gym and ensure its Python path is active."
+            )
+
+        from isaacgym import gymapi, gymtorch  # type: ignore
+
+        self.gymapi = gymapi
+        self.gymtorch = gymtorch
+        self.gym = gymapi.acquire_gym()
+
         self.num_envs = int(num_envs)
         self.cfg = robot_cfg
         self.rand_cfg = domain_rand_cfg
@@ -52,28 +77,232 @@ class _ExternalUnitreeIsaacVecEnv:
         self.dt = self.sim_dt * self.decimation
         self.max_episode_length = int(max_episode_length)
         self.device = torch.device(device)
+        self.headless = bool(headless)
+
         self.num_dofs = int(self.cfg.num_dofs)
         self.num_actions = int(self.cfg.lower_body_dofs)
-        self.backend_name = "isaac_external_unitree_rl_gym"
+        self.backend_name = "isaac_native_local"
         self.using_fallback = False
+        self.requested_backend = "isaacgym"
 
-        self._external_env = self._create_external_env(
-            task_name=external_task,
-            num_envs=self.num_envs,
-            sim_dt=self.sim_dt,
-            decimation=self.decimation,
-            device=device,
-            headless=external_headless,
+        self._sim_device_type, self._sim_device_id = _parse_sim_device(str(self.device))
+        self._graphics_device_id = (
+            -1 if self.headless else (self._sim_device_id if self._sim_device_type == "cuda" else 0)
         )
-        self._external_num_actions = int(getattr(self._external_env, "num_actions"))
-        self._external_num_dofs = int(getattr(self._external_env, "num_dof"))
-        self._ext_device = torch.device(getattr(self._external_env, "device", device))
 
-        # Core buffers aligned with MujocoVecEnv API.
+        self.sim = self._create_sim()
+        self._add_ground_plane()
+
+        self.model_path = self._resolve_model_path(model_path)
+        self.asset = self._load_asset(self.model_path)
+
+        self.num_asset_dofs = int(self.gym.get_asset_dof_count(self.asset))
+        self.num_bodies = int(self.gym.get_asset_rigid_body_count(self.asset))
+        if self.num_asset_dofs < self.num_dofs:
+            raise RuntimeError(
+                f"Loaded asset has {self.num_asset_dofs} dofs, but robot_cfg expects {self.num_dofs}."
+            )
+
+        self.envs: List[Any] = []
+        self.actors: List[Any] = []
+        self._actor_indices_list: List[int] = []
+        self._create_envs()
+
+        self.viewer = None
+        if not self.headless:
+            self.viewer = self.gym.create_viewer(self.sim, self.gymapi.CameraProperties())
+            if self.viewer is None:
+                raise RuntimeError("Failed to create Isaac Gym viewer.")
+            self._setup_viewer_camera()
+
+        self.gym.prepare_sim(self.sim)
+        self._acquire_tensors()
+        self._setup_body_indices()
+
+        self._init_control_constants()
+        self._allocate_buffers()
+        self._init_observation_interface()
+
+        self.reset_all()
+
+    def _create_sim(self):
+        sim_params = self.gymapi.SimParams()
+        sim_params.dt = self.sim_dt
+        sim_params.substeps = 1
+        sim_params.up_axis = self.gymapi.UP_AXIS_Z
+        sim_params.gravity = self.gymapi.Vec3(0.0, 0.0, -9.81)
+        sim_params.use_gpu_pipeline = self._sim_device_type == "cuda"
+
+        sim_params.physx.use_gpu = self._sim_device_type == "cuda"
+        sim_params.physx.num_position_iterations = 8
+        sim_params.physx.num_velocity_iterations = 1
+        sim_params.physx.contact_offset = 0.02
+        sim_params.physx.rest_offset = 0.0
+
+        sim = self.gym.create_sim(
+            self._sim_device_id,
+            self._graphics_device_id,
+            self.gymapi.SIM_PHYSX,
+            sim_params,
+        )
+        if sim is None:
+            raise RuntimeError("Failed to create Isaac Gym simulation.")
+        return sim
+
+    def _add_ground_plane(self):
+        plane = self.gymapi.PlaneParams()
+        plane.normal = self.gymapi.Vec3(0.0, 0.0, 1.0)
+        plane.distance = 0.0
+        plane.static_friction = 1.0
+        plane.dynamic_friction = 1.0
+        plane.restitution = 0.0
+        self.gym.add_ground(self.sim, plane)
+
+    def _resolve_model_path(self, model_path: Optional[str]) -> str:
+        if model_path is not None:
+            path = os.path.abspath(model_path)
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"Model path does not exist: {path}")
+            return path
+
+        asset_root = get_asset_path()
+        scene_path = os.path.join(asset_root, self.cfg.mujoco_scene_file)
+        model_file_path = os.path.join(asset_root, self.cfg.mujoco_model_file)
+
+        if os.path.exists(scene_path):
+            return scene_path
+        if os.path.exists(model_file_path):
+            return model_file_path
+        raise FileNotFoundError(
+            "No G1 model file found. Checked:\n"
+            f"  - {scene_path}\n"
+            f"  - {model_file_path}"
+        )
+
+    def _load_asset(self, model_path: str):
+        root = os.path.dirname(model_path)
+        file = os.path.basename(model_path)
+        options = self.gymapi.AssetOptions()
+        options.default_dof_drive_mode = self.gymapi.DOF_MODE_EFFORT
+        options.fix_base_link = False
+        options.disable_gravity = False
+        options.collapse_fixed_joints = False
+        options.flip_visual_attachments = False
+        options.replace_cylinder_with_capsule = False
+        options.use_mesh_materials = True
+        asset = self.gym.load_asset(self.sim, root, file, options)
+        if asset is None:
+            raise RuntimeError(f"Failed to load Isaac Gym asset: {model_path}")
+        return asset
+
+    def _create_envs(self):
+        spacing = 2.0
+        num_per_row = int(math.ceil(math.sqrt(self.num_envs)))
+        env_lower = self.gymapi.Vec3(-spacing, -spacing, 0.0)
+        env_upper = self.gymapi.Vec3(spacing, spacing, spacing)
+
+        dof_props = self.gym.get_asset_dof_properties(self.asset)
+        dof_props["driveMode"][:] = self.gymapi.DOF_MODE_EFFORT
+        dof_props["stiffness"][:] = 0.0
+        dof_props["damping"][:] = 0.0
+
+        default_pose = self.gymapi.Transform()
+        default_pose.p = self.gymapi.Vec3(*self.cfg.init_pos)
+        q = self.cfg.init_rot
+        default_pose.r = self.gymapi.Quat(float(q[0]), float(q[1]), float(q[2]), float(q[3]))
+
+        for i in range(self.num_envs):
+            env = self.gym.create_env(self.sim, env_lower, env_upper, num_per_row)
+            actor = self.gym.create_actor(env, self.asset, default_pose, "g1", i, 0, 0)
+            self.gym.set_actor_dof_properties(env, actor, dof_props)
+
+            actor_idx = self.gym.get_actor_index(env, actor, self.gymapi.DOMAIN_SIM)
+            self.envs.append(env)
+            self.actors.append(actor)
+            self._actor_indices_list.append(int(actor_idx))
+
+    def _setup_viewer_camera(self):
+        if self.viewer is None or not self.envs:
+            return
+        cam_pos = self.gymapi.Vec3(3.0, 3.0, 2.0)
+        cam_target = self.gymapi.Vec3(0.0, 0.0, 0.8)
+        self.gym.viewer_camera_look_at(self.viewer, self.envs[0], cam_pos, cam_target)
+
+    def _acquire_tensors(self):
+        self._root_state_tensor = self.gymtorch.wrap_tensor(
+            self.gym.acquire_actor_root_state_tensor(self.sim)
+        )
+        self._dof_state_tensor = self.gymtorch.wrap_tensor(
+            self.gym.acquire_dof_state_tensor(self.sim)
+        )
+        self._rb_state_tensor = self.gymtorch.wrap_tensor(
+            self.gym.acquire_rigid_body_state_tensor(self.sim)
+        )
+        self._net_contact_tensor = self.gymtorch.wrap_tensor(
+            self.gym.acquire_net_contact_force_tensor(self.sim)
+        )
+
+        self._sim_tensor_device = self._root_state_tensor.device
+        self.actor_indices = torch.tensor(
+            self._actor_indices_list, dtype=torch.int32, device=self._sim_tensor_device
+        )
+
+        self._root_state = self._root_state_tensor.view(self.num_envs, -1, 13)[:, 0, :]
+        self._dof_state = self._dof_state_tensor.view(self.num_envs, self.num_asset_dofs, 2)
+        self._rb_state = self._rb_state_tensor.view(self.num_envs, self.num_bodies, 13)
+        self._net_contact_forces = self._net_contact_tensor.view(self.num_envs, self.num_bodies, 3)
+        self._actuation_forces = torch.zeros(
+            self.num_envs, self.num_asset_dofs, dtype=torch.float32, device=self._sim_tensor_device
+        )
+
+    def _setup_body_indices(self):
+        body_names: Sequence[str] = self.gym.get_asset_rigid_body_names(self.asset)
+        self._body_names = [str(n) for n in body_names]
+        name_to_idx = {name: i for i, name in enumerate(self._body_names)}
+
+        def _resolve_body(name: str, fallbacks: Sequence[str]) -> Optional[int]:
+            if name in name_to_idx:
+                return int(name_to_idx[name])
+            lower_name = name.lower()
+            for body, idx in name_to_idx.items():
+                if lower_name in body.lower():
+                    return int(idx)
+            for token in fallbacks:
+                token = token.lower()
+                for body, idx in name_to_idx.items():
+                    if token in body.lower():
+                        return int(idx)
+            return None
+
+        self.left_foot_body_idx = _resolve_body(self.cfg.left_foot_name, ["left_ankle", "left_foot"])
+        self.right_foot_body_idx = _resolve_body(self.cfg.right_foot_name, ["right_ankle", "right_foot"])
+
+        term_indices = set()
+        for idx, body_name in enumerate(self._body_names):
+            lower = body_name.lower()
+            for token in self.cfg.terminate_after_contacts_on:
+                if str(token).lower() in lower:
+                    term_indices.add(idx)
+                    break
+        self.termination_body_indices = sorted(term_indices)
+        self.contact_force_threshold = 1.0
+
+    def _init_control_constants(self):
+        self.default_dof_pos = self.cfg.get_default_dof_pos().to(self.device).unsqueeze(0)
+        self.kp = self.cfg.get_kp().to(self.device).unsqueeze(0)
+        self.kd = self.cfg.get_kd().to(self.device).unsqueeze(0)
+        self.torque_limits = self.cfg.get_torque_limits().to(self.device).unsqueeze(0)
+
+        self._default_dof_pos_sim = torch.zeros(
+            self.num_asset_dofs, dtype=torch.float32, device=self._sim_tensor_device
+        )
+        self._default_dof_pos_sim[: self.num_dofs] = self.default_dof_pos[0].to(self._sim_tensor_device)
+
+    def _allocate_buffers(self):
         self.base_quat_xyzw = torch.zeros(self.num_envs, 4, device=self.device)
         self.base_pos = torch.zeros(self.num_envs, 3, device=self.device)
-        self.base_lin_vel = torch.zeros(self.num_envs, 3, device=self.device)  # world
-        self.base_ang_vel = torch.zeros(self.num_envs, 3, device=self.device)  # world
+        self.base_lin_vel = torch.zeros(self.num_envs, 3, device=self.device)
+        self.base_ang_vel = torch.zeros(self.num_envs, 3, device=self.device)
         self.base_lin_vel_body = torch.zeros(self.num_envs, 3, device=self.device)
         self.base_ang_vel_body = torch.zeros(self.num_envs, 3, device=self.device)
         self.projected_gravity = torch.zeros(self.num_envs, 3, device=self.device)
@@ -96,14 +325,10 @@ class _ExternalUnitreeIsaacVecEnv:
         self.foot_velocities = torch.zeros(self.num_envs, 2, 3, device=self.device)
         self.has_contact_termination = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
-        self.default_dof_pos = torch.tensor(
-            self.cfg.get_default_dof_pos().numpy(), dtype=torch.float32, device=self.device
-        ).unsqueeze(0)
-
         self.episode_length_buf = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.reset_buf = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self.rew_buf = torch.zeros(self.num_envs, device=self.device)
-        self.extras = {}
+        self.extras: Dict[str, Any] = {}
 
         self.friction_coeffs = torch.ones(self.num_envs, device=self.device)
         self.mass_offsets = torch.zeros(self.num_envs, device=self.device)
@@ -111,7 +336,7 @@ class _ExternalUnitreeIsaacVecEnv:
         self.kp_multipliers = torch.ones(self.num_envs, device=self.device)
         self.kd_multipliers = torch.ones(self.num_envs, device=self.device)
 
-        # Default observation interface (same pattern as MujocoVecEnv).
+    def _init_observation_interface(self):
         self.obs_cfg = ObsConfig()
         self.obs_builder = ObservationBuilder(
             obs_cfg=self.obs_cfg,
@@ -119,12 +344,11 @@ class _ExternalUnitreeIsaacVecEnv:
             device=self.device,
             lower_body_dofs=self.cfg.lower_body_dofs,
         )
-        self.obs_buf = torch.zeros(
-            self.num_envs,
-            self.obs_cfg.single_step_dim + self.obs_cfg.history_obs_dim * self.obs_cfg.include_history_steps,
-            device=self.device,
-            dtype=torch.float32,
+        total_obs_dim = (
+            self.obs_cfg.single_step_dim
+            + self.obs_cfg.history_obs_dim * self.obs_cfg.include_history_steps
         )
+        self.obs_buf = torch.zeros(self.num_envs, total_obs_dim, device=self.device, dtype=torch.float32)
         self.privileged_obs_buf = torch.zeros(
             self.num_envs, self.obs_cfg.critic_obs_dim, device=self.device, dtype=torch.float32
         )
@@ -137,161 +361,71 @@ class _ExternalUnitreeIsaacVecEnv:
             "intervention_freq": torch.zeros(self.num_envs, device=self.device, dtype=torch.float32),
         }
 
-        self.reset_all()
+    def _unwrap(self, tensor: torch.Tensor):
+        return self.gymtorch.unwrap_tensor(tensor)
 
-    def _create_external_env(
-        self,
-        task_name: str,
-        num_envs: int,
-        sim_dt: float,
-        decimation: int,
-        device: str,
-        headless: bool,
-    ):
-        root = get_unitree_rl_gym_root()
-        if root is None or not os.path.exists(root):
-            raise RuntimeError("unitree_rl_gym repo not found")
-        if root not in sys.path:
-            sys.path.insert(0, root)
+    def _refresh_sim_tensors(self):
+        self.gym.refresh_actor_root_state_tensor(self.sim)
+        self.gym.refresh_dof_state_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
+        self.gym.refresh_net_contact_force_tensor(self.sim)
 
-        import isaacgym  # type: ignore  # noqa: F401
-        from isaacgym import gymapi  # type: ignore
+    def _sync_from_sim(self):
+        self.base_pos[:] = self._root_state[:, 0:3].to(self.device)
+        self.base_quat_xyzw[:] = self._root_state[:, 3:7].to(self.device)
+        self.base_lin_vel[:] = self._root_state[:, 7:10].to(self.device)
+        self.base_ang_vel[:] = self._root_state[:, 10:13].to(self.device)
 
-        import legged_gym.envs  # noqa: F401  # trigger task registration
-        from legged_gym.utils.task_registry import task_registry
-        from legged_gym.utils.helpers import class_to_dict, parse_sim_params
+        self.dof_pos[:] = self._dof_state[:, : self.num_dofs, 0].to(self.device)
+        self.dof_vel[:] = self._dof_state[:, : self.num_dofs, 1].to(self.device)
 
-        env_cfg, _ = task_registry.get_cfgs(task_name)
-        env_cfg.env.num_envs = int(num_envs)
-        if hasattr(env_cfg.sim, "dt"):
-            env_cfg.sim.dt = float(sim_dt)
-        if hasattr(env_cfg.control, "decimation"):
-            env_cfg.control.decimation = int(decimation)
+        self.base_lin_vel_body[:] = quat_rotate_inverse(self.base_quat_xyzw, self.base_lin_vel)
+        self.base_ang_vel_body[:] = quat_rotate_inverse(self.base_quat_xyzw, self.base_ang_vel)
+        self.projected_gravity[:] = compute_projected_gravity(self.base_quat_xyzw)
 
-        # Build args namespace expected by parse_sim_params helper.
-        class _Args:
-            pass
+        roll, pitch, yaw = get_euler_xyz(self.base_quat_xyzw)
+        self.base_euler[:, 0] = wrap_to_pi(roll)
+        self.base_euler[:, 1] = wrap_to_pi(pitch)
+        self.base_euler[:, 2] = wrap_to_pi(yaw)
 
-        args = _Args()
-        args.physics_engine = gymapi.SIM_PHYSX
-        args.device = "cuda" if "cuda" in device else "cpu"
-        args.use_gpu = bool("cuda" in device)
-        args.subscenes = 0
-        args.use_gpu_pipeline = bool("cuda" in device)
-        args.num_threads = 0
-        args.compute_device_id = 0
-        args.sim_device_id = 0
-        args.sim_device_type = "cuda" if "cuda" in device else "cpu"
-        args.sim_device = device
-        args.headless = bool(headless)
-        args.rl_device = device
-        args.num_envs = int(num_envs)
-        args.seed = getattr(env_cfg, "seed", 1)
-        args.max_iterations = None
-        args.resume = False
-        args.experiment_name = None
-        args.run_name = None
-        args.load_run = None
-        args.checkpoint = None
-
-        sim_params = parse_sim_params(args, {"sim": class_to_dict(env_cfg.sim)})
-        task_cls = task_registry.get_task_class(task_name)
-        env = task_cls(
-            cfg=env_cfg,
-            sim_params=sim_params,
-            physics_engine=args.physics_engine,
-            sim_device=args.sim_device,
-            headless=args.headless,
-        )
-        return env
-
-    def _map_actions_to_external(self, actions: torch.Tensor) -> torch.Tensor:
-        act = actions.to(self._ext_device)
-        mapped = torch.zeros(self.num_envs, self._external_num_actions, device=self._ext_device)
-        n = min(self._external_num_actions, act.shape[-1])
-        mapped[:, :n] = act[:, :n]
-        return mapped
-
-    def _sync_from_external(self):
-        env = self._external_env
-
-        root_states = env.root_states.to(self.device)
-        self.base_pos[:] = root_states[:, 0:3]
-        self.base_quat_xyzw[:] = root_states[:, 3:7]
-        self.base_lin_vel[:] = root_states[:, 7:10]
-        self.base_ang_vel[:] = root_states[:, 10:13]
-
-        if hasattr(env, "base_lin_vel"):
-            self.base_lin_vel_body[:] = env.base_lin_vel.to(self.device)
-        if hasattr(env, "base_ang_vel"):
-            self.base_ang_vel_body[:] = env.base_ang_vel.to(self.device)
-        if hasattr(env, "projected_gravity"):
-            self.projected_gravity[:] = env.projected_gravity.to(self.device)
-        if hasattr(env, "rpy"):
-            self.base_euler[:] = env.rpy.to(self.device)
-
-        self.dof_pos.zero_()
-        self.dof_vel.zero_()
         self.torques.zero_()
-        n = min(self._external_num_dofs, self.num_dofs)
-        self.dof_pos[:, :n] = env.dof_pos[:, :n].to(self.device)
-        self.dof_vel[:, :n] = env.dof_vel[:, :n].to(self.device)
-        if hasattr(env, "torques"):
-            self.torques[:, :n] = env.torques[:, :n].to(self.device)
+        self.torques[:, : self.num_dofs] = self._actuation_forces[:, : self.num_dofs].to(self.device)
 
-        if hasattr(env, "contact_forces") and hasattr(env, "feet_indices"):
-            cf = env.contact_forces[:, env.feet_indices, :].to(self.device)
-            mags = torch.norm(cf, dim=-1)
-            m = min(mags.shape[1], 2)
-            self.foot_contact_forces.zero_()
-            self.foot_contact_forces[:, :m] = mags[:, :m]
+        self.foot_contact_forces.zero_()
+        if self.left_foot_body_idx is not None:
+            left_force = self._net_contact_forces[:, self.left_foot_body_idx, :]
+            self.foot_contact_forces[:, 0] = torch.linalg.norm(left_force, dim=-1).to(self.device)
+        if self.right_foot_body_idx is not None:
+            right_force = self._net_contact_forces[:, self.right_foot_body_idx, :]
+            self.foot_contact_forces[:, 1] = torch.linalg.norm(right_force, dim=-1).to(self.device)
 
-        if hasattr(env, "feet_vel"):
-            fv = env.feet_vel.to(self.device)
-            m = min(fv.shape[1], 2)
-            self.foot_velocities.zero_()
-            self.foot_velocities[:, :m] = fv[:, :m]
+        self.foot_velocities.zero_()
+        if self.left_foot_body_idx is not None:
+            self.foot_velocities[:, 0, :] = self._rb_state[:, self.left_foot_body_idx, 7:10].to(self.device)
+        if self.right_foot_body_idx is not None:
+            self.foot_velocities[:, 1, :] = self._rb_state[:, self.right_foot_body_idx, 7:10].to(self.device)
 
-        self.rew_buf[:] = env.rew_buf.to(self.device)
-        self.reset_buf[:] = env.reset_buf.to(self.device) > 0
-        self.episode_length_buf[:] = env.episode_length_buf.to(self.device)
-        self.extras = env.extras
-
-        if hasattr(env, "time_out_buf"):
-            self.has_contact_termination[:] = self.reset_buf & (~env.time_out_buf.to(self.device))
+        if self.termination_body_indices:
+            term_forces = self._net_contact_forces[:, self.termination_body_indices, :]
+            term_mag = torch.linalg.norm(term_forces, dim=-1)
+            self.has_contact_termination[:] = (term_mag > self.contact_force_threshold).any(dim=1).to(
+                self.device
+            )
         else:
-            self.has_contact_termination[:] = self.reset_buf
+            self.has_contact_termination[:] = False
 
-        if hasattr(env, "friction_coeffs"):
-            fr = env.friction_coeffs.to(self.device).view(self.num_envs, -1)[:, 0]
-            self.friction_coeffs[:] = fr
-
-    def set_command_context(
-        self,
-        commands: Optional[torch.Tensor] = None,
-        gait_id: Optional[torch.Tensor] = None,
-        intervention_flag: Optional[torch.Tensor] = None,
-        clock: Optional[torch.Tensor] = None,
-        intervention_amp: Optional[torch.Tensor] = None,
-        intervention_freq: Optional[torch.Tensor] = None,
-    ):
-        if commands is not None:
-            self._command_context["commands"] = commands.to(self.device)
-        if gait_id is not None:
-            self._command_context["gait_id"] = gait_id.to(self.device)
-        if intervention_flag is not None:
-            self._command_context["intervention_flag"] = intervention_flag.to(self.device)
-        if clock is not None:
-            self._command_context["clock"] = clock.to(self.device)
-        if intervention_amp is not None:
-            self._command_context["intervention_amp"] = intervention_amp.to(self.device)
-        if intervention_freq is not None:
-            self._command_context["intervention_freq"] = intervention_freq.to(self.device)
+    def _build_torques(self) -> torch.Tensor:
+        targets = self.default_dof_pos + self.cfg.action_scale * self.full_actions_29
+        kp = self.kp * self.kp_multipliers.unsqueeze(-1)
+        kd = self.kd * self.kd_multipliers.unsqueeze(-1)
+        torques = kp * (targets - self.dof_pos) - kd * self.dof_vel
+        torques = torques * self.motor_strengths.unsqueeze(-1)
+        return torch.clamp(torques, -self.torque_limits, self.torque_limits)
 
     def _refresh_default_observations(self, reset_env_ids: Optional[torch.Tensor] = None):
         dof_pos_rel = self.get_dof_pos_relative()
-        lower_pos = dof_pos_rel[:, :self.cfg.lower_body_dofs]
-        lower_vel = self.dof_vel[:, :self.cfg.lower_body_dofs]
+        lower_pos = dof_pos_rel[:, : self.cfg.lower_body_dofs]
+        lower_vel = self.dof_vel[:, : self.cfg.lower_body_dofs]
 
         actor_obs = self.obs_builder.build_actor_obs(
             base_ang_vel=self.base_ang_vel_body,
@@ -319,29 +453,87 @@ class _ExternalUnitreeIsaacVecEnv:
             mass_offset=self.mass_offsets,
             motor_strength=self.motor_strengths,
             pd_gain_mult=torch.stack([self.kp_multipliers, self.kd_multipliers], dim=-1),
-            upper_dof_pos=dof_pos_rel[:, self.cfg.lower_body_dofs:],
-            upper_dof_vel=self.dof_vel[:, self.cfg.lower_body_dofs:],
+            upper_dof_pos=dof_pos_rel[:, self.cfg.lower_body_dofs :],
+            upper_dof_vel=self.dof_vel[:, self.cfg.lower_body_dofs :],
             intervention_amp=self._command_context["intervention_amp"],
             intervention_freq=self._command_context["intervention_freq"],
         )
 
+    def _reset_sim_state(self, env_ids: torch.Tensor):
+        env_ids_sim_long = env_ids.to(device=self._sim_tensor_device, dtype=torch.long)
+        if env_ids_sim_long.numel() == 0:
+            return
+
+        init_pos = torch.tensor(self.cfg.init_pos, dtype=torch.float32, device=self._sim_tensor_device)
+        init_rot = torch.tensor(self.cfg.init_rot, dtype=torch.float32, device=self._sim_tensor_device)
+
+        self._root_state[env_ids_sim_long, 0:3] = init_pos
+        self._root_state[env_ids_sim_long, 3:7] = init_rot
+        self._root_state[env_ids_sim_long, 7:13] = 0.0
+
+        self._dof_state[env_ids_sim_long, :, :] = 0.0
+        self._dof_state[env_ids_sim_long, : self.num_dofs, 0] = self._default_dof_pos_sim[: self.num_dofs]
+        self._actuation_forces[env_ids_sim_long, :] = 0.0
+
+        actor_ids = self.actor_indices.index_select(0, env_ids_sim_long).contiguous()
+        self.gym.set_actor_root_state_tensor_indexed(
+            self.sim,
+            self._unwrap(self._root_state_tensor),
+            self._unwrap(actor_ids),
+            actor_ids.numel(),
+        )
+        self.gym.set_dof_state_tensor_indexed(
+            self.sim,
+            self._unwrap(self._dof_state_tensor),
+            self._unwrap(actor_ids),
+            actor_ids.numel(),
+        )
+        self.gym.set_dof_actuation_force_tensor(self.sim, self._unwrap(self._actuation_forces.view(-1)))
+
+    def set_command_context(
+        self,
+        commands: Optional[torch.Tensor] = None,
+        gait_id: Optional[torch.Tensor] = None,
+        intervention_flag: Optional[torch.Tensor] = None,
+        clock: Optional[torch.Tensor] = None,
+        intervention_amp: Optional[torch.Tensor] = None,
+        intervention_freq: Optional[torch.Tensor] = None,
+    ):
+        if commands is not None:
+            self._command_context["commands"] = commands.to(self.device)
+        if gait_id is not None:
+            self._command_context["gait_id"] = gait_id.to(self.device)
+        if intervention_flag is not None:
+            self._command_context["intervention_flag"] = intervention_flag.to(self.device)
+        if clock is not None:
+            self._command_context["clock"] = clock.to(self.device)
+        if intervention_amp is not None:
+            self._command_context["intervention_amp"] = intervention_amp.to(self.device)
+        if intervention_freq is not None:
+            self._command_context["intervention_freq"] = intervention_freq.to(self.device)
+
     def reset_all(self):
-        self._external_env.reset()
-        self._sync_from_external()
-        env_ids = torch.arange(self.num_envs, device=self.device)
-        self._refresh_default_observations(reset_env_ids=env_ids)
+        env_ids = torch.arange(self.num_envs, device=self.device, dtype=torch.long)
+        self.reset(env_ids)
 
     def reset(self, env_ids: torch.Tensor):
         if len(env_ids) == 0:
             return
-        env_ids = env_ids.to(self._ext_device, dtype=torch.long)
-        self._external_env.reset_idx(env_ids)
-        self.actions[env_ids.to(self.device)] = 0.0
-        self.last_actions[env_ids.to(self.device)] = 0.0
-        self.last_last_actions[env_ids.to(self.device)] = 0.0
-        self.full_actions_29[env_ids.to(self.device)] = 0.0
-        self._sync_from_external()
-        self._refresh_default_observations(reset_env_ids=env_ids.to(self.device))
+        env_ids = env_ids.to(self.device, dtype=torch.long)
+
+        self._reset_sim_state(env_ids)
+        self.actions[env_ids] = 0.0
+        self.last_actions[env_ids] = 0.0
+        self.last_last_actions[env_ids] = 0.0
+        self.full_actions_29[env_ids] = 0.0
+        self.upper_body_actions[env_ids] = 0.0
+        self.last_dof_vel[env_ids] = 0.0
+        self.episode_length_buf[env_ids] = 0
+        self.reset_buf[env_ids] = False
+
+        self._refresh_sim_tensors()
+        self._sync_from_sim()
+        self._refresh_default_observations(reset_env_ids=env_ids)
 
     def step(self, actions: torch.Tensor):
         self.last_last_actions[:] = self.last_actions
@@ -353,10 +545,24 @@ class _ExternalUnitreeIsaacVecEnv:
         self.full_actions_29[:, : self.cfg.lower_body_dofs] = actions
         self.full_actions_29[:, self.cfg.lower_body_dofs :] = self.upper_body_actions
 
-        ext_actions = self._map_actions_to_external(actions)
-        self._external_env.step(ext_actions)
+        torques = self._build_torques()
+        self._actuation_forces.zero_()
+        self._actuation_forces[:, : self.num_dofs] = torques.to(self._sim_tensor_device)
 
-        self._sync_from_external()
+        for _ in range(self.decimation):
+            self.gym.set_dof_actuation_force_tensor(self.sim, self._unwrap(self._actuation_forces.view(-1)))
+            self.gym.simulate(self.sim)
+            self.gym.fetch_results(self.sim, True)
+            if self.viewer is not None:
+                self.gym.step_graphics(self.sim)
+                self.gym.draw_viewer(self.viewer, self.sim, True)
+
+        self._refresh_sim_tensors()
+        self._sync_from_sim()
+        self.episode_length_buf += 1
+        self.rew_buf.zero_()
+        self.reset_buf.zero_()
+        self.extras = {}
         self._refresh_default_observations()
 
         return (
@@ -371,6 +577,7 @@ class _ExternalUnitreeIsaacVecEnv:
         if env_ids is None:
             self.upper_body_actions[:] = upper_actions.to(self.device)
         else:
+            env_ids = env_ids.to(self.device, dtype=torch.long)
             self.upper_body_actions[env_ids] = upper_actions.to(self.device)
 
     def get_dof_pos_relative(self) -> torch.Tensor:
@@ -394,72 +601,18 @@ class _ExternalUnitreeIsaacVecEnv:
         return int(self.privileged_obs_buf.shape[-1])
 
     def close(self):
-        viewer = getattr(self._external_env, "viewer", None)
-        if viewer is not None:
+        if self.viewer is not None:
             try:
-                self._external_env.gym.destroy_viewer(viewer)
+                self.gym.destroy_viewer(self.viewer)
             except Exception:
                 pass
-
-
-class IsaacVecEnv:
-    """Primary Isaac backend (strict, no MuJoCo fallback)."""
-
-    def __init__(
-        self,
-        *args,
-        prefer_external: bool = True,
-        external_task: str = "g1",
-        external_headless: bool = True,
-        **kwargs,
-    ):
-        self.requested_backend = "isaacgym"
-        self.using_fallback = False
-        self.backend_name = "isaac"
-        self._delegate: Any = None
-
-        if not is_isaacgym_available():
-            raise RuntimeError(
-                "Isaac Gym backend requested but `isaacgym` is unavailable. "
-                "Install Isaac Gym and ensure its Python path is active."
-            )
-        if not prefer_external:
-            raise RuntimeError(
-                "Internal Isaac backend is not implemented; external backend is required. "
-                "Set `prefer_external=True` and provide unitree_rl_gym."
-            )
-
-        try:
-            self._delegate = _ExternalUnitreeIsaacVecEnv(
-                *args,
-                external_task=external_task,
-                external_headless=external_headless,
-                **kwargs,
-            )
-            self.backend_name = self._delegate.backend_name
-            self.using_fallback = False
-        except Exception as exc:
-            raise RuntimeError(
-                "Failed to initialize external Isaac backend from unitree_rl_gym. "
-                f"Reason: {exc}"
-            ) from exc
-
-    def __getattr__(self, name: str):
-        return getattr(self._delegate, name)
-
-    def reset_all(self):
-        return self._delegate.reset_all()
-
-    def reset(self, env_ids: torch.Tensor):
-        return self._delegate.reset(env_ids)
-
-    def step(self, actions: torch.Tensor):
-        return self._delegate.step(actions)
-
-    def close(self):
-        close_fn = getattr(self._delegate, "close", None)
-        if callable(close_fn):
-            close_fn()
+            self.viewer = None
+        if self.sim is not None:
+            try:
+                self.gym.destroy_sim(self.sim)
+            except Exception:
+                pass
+            self.sim = None
 
 
 IsaacGymVecEnv = IsaacVecEnv

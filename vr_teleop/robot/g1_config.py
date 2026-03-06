@@ -1,16 +1,12 @@
 """
 Unitree G1 29-DOF robot configuration.
-Data extracted from FALCON g1_29dof_waist_fakehand.yaml and unitree_mujoco.
+Data is embedded locally in this repository.
 """
 
-import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import torch
-import yaml
-
-from vr_teleop.utils.config_utils import get_falcon_g1_yaml_path
 
 
 @dataclass
@@ -69,7 +65,7 @@ class G1Config:
     lower_body_indices: List[int] = field(default_factory=lambda: list(range(15)))
     upper_body_indices: List[int] = field(default_factory=lambda: list(range(15, 29)))
 
-    # ---- Symmetric DOF indices (from FALCON) ----
+    # ---- Symmetric DOF indices ----
     # "no" = same sign when mirrored, "op" = opposite sign when mirrored
     symmetric_left_no: List[int] = field(default_factory=lambda: [0, 3, 4, 15, 18, 20])
     symmetric_left_op: List[int] = field(default_factory=lambda: [1, 2, 5, 16, 17, 19, 21])
@@ -265,86 +261,3 @@ class G1Config:
             if not matched:
                 raise ValueError(f"No PD gain found for joint '{name}' (short: '{short_name}')")
         return gains
-
-    @classmethod
-    def from_falcon_yaml(cls, yaml_path: Optional[str] = None) -> "G1Config":
-        """Build config from FALCON `g1_29dof_waist_fakehand.yaml`."""
-        yaml_path = yaml_path or get_falcon_g1_yaml_path()
-        if yaml_path is None or not os.path.exists(yaml_path):
-            raise FileNotFoundError(
-                "FALCON G1 YAML not found. Set FALCON_ROOT or place FALCON as workspace sibling."
-            )
-
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-        robot = raw.get("robot", {})
-        control = robot.get("control", {})
-        init_state = robot.get("init_state", {})
-        sym = robot.get("symmetric_dofs_idx", {})
-
-        cfg = cls()
-        cfg.num_bodies = int(robot.get("num_bodies", cfg.num_bodies))
-        cfg.num_dofs = int(robot.get("actions_dim", cfg.num_dofs))
-        cfg.lower_body_dofs = int(robot.get("lower_body_actions_dim", cfg.lower_body_dofs))
-        cfg.upper_body_dofs = int(robot.get("upper_body_actions_dim", cfg.upper_body_dofs))
-
-        cfg.dof_names = list(robot.get("dof_names", cfg.dof_names))
-        cfg.upper_dof_names = list(robot.get("upper_dof_names", cfg.upper_dof_names))
-        cfg.lower_dof_names = list(robot.get("lower_dof_names", cfg.lower_dof_names))
-        cfg.left_arm_indices = list(range(cfg.lower_body_dofs, cfg.lower_body_dofs + 7))
-        cfg.right_arm_indices = list(range(cfg.lower_body_dofs + 7, cfg.num_dofs))
-        cfg.lower_body_indices = list(range(cfg.lower_body_dofs))
-        cfg.upper_body_indices = list(range(cfg.lower_body_dofs, cfg.num_dofs))
-
-        cfg.left_leg_indices = [0, 1, 2, 3, 4, 5]
-        cfg.right_leg_indices = [6, 7, 8, 9, 10, 11]
-        cfg.waist_indices = [12, 13, 14]
-
-        cfg.symmetric_left_no = list(sym.get("left_dofs_idx_no", cfg.symmetric_left_no))
-        cfg.symmetric_left_op = list(sym.get("left_dofs_idx_op", cfg.symmetric_left_op))
-        cfg.symmetric_right_no = list(sym.get("right_dofs_idx_no", cfg.symmetric_right_no))
-        cfg.symmetric_right_op = list(sym.get("right_dofs_idx_op", cfg.symmetric_right_op))
-        cfg.symmetric_waist_no = list(sym.get("waist_dofs_idx_no", cfg.symmetric_waist_no))
-        cfg.symmetric_waist_op = list(sym.get("waist_dofs_idx_op", cfg.symmetric_waist_op))
-        cfg.lower_sym_left_no = list(sym.get("lower_left_dofs_idx_no", cfg.lower_sym_left_no))
-        cfg.lower_sym_left_op = list(sym.get("lower_left_dofs_idx_op", cfg.lower_sym_left_op))
-        cfg.lower_sym_right_no = list(sym.get("lower_right_dofs_idx_no", cfg.lower_sym_right_no))
-        cfg.lower_sym_right_op = list(sym.get("lower_right_dofs_idx_op", cfg.lower_sym_right_op))
-
-        cfg.dof_pos_lower = list(robot.get("dof_pos_lower_limit_list", cfg.dof_pos_lower))
-        cfg.dof_pos_upper = list(robot.get("dof_pos_upper_limit_list", cfg.dof_pos_upper))
-        cfg.dof_vel_limit = list(robot.get("dof_vel_limit_list", cfg.dof_vel_limit))
-        cfg.dof_effort_limit = list(robot.get("dof_effort_limit_list", cfg.dof_effort_limit))
-        cfg.dof_effort_limit_scale = float(robot.get("dof_effort_limit_scale", cfg.dof_effort_limit_scale))
-
-        cfg.contact_bodies = list(robot.get("contact_bodies", cfg.contact_bodies))
-        cfg.left_foot_name = str(robot.get("left_foot_name", cfg.left_foot_name))
-        cfg.right_foot_name = str(robot.get("right_foot_name", cfg.right_foot_name))
-        cfg.torso_name = str(robot.get("torso_name", cfg.torso_name))
-        cfg.base_name = str(robot.get("base_name", cfg.base_name))
-        cfg.terminate_after_contacts_on = list(
-            robot.get("terminate_after_contacts_on", cfg.terminate_after_contacts_on)
-        )
-
-        if "stiffness" in control:
-            cfg.stiffness = dict(control["stiffness"])
-        if "damping" in control:
-            cfg.damping = dict(control["damping"])
-        cfg.action_scale = float(control.get("action_scale", cfg.action_scale))
-        cfg.action_clip_value = float(control.get("action_clip_value", cfg.action_clip_value))
-
-        cfg.init_pos = list(init_state.get("pos", cfg.init_pos))
-        cfg.init_rot = list(init_state.get("rot", cfg.init_rot))
-        default_joint_angles = init_state.get("default_joint_angles")
-        if default_joint_angles:
-            cfg.default_joint_angles = dict(default_joint_angles)
-
-        return cfg
-
-    @classmethod
-    def from_falcon_yaml_if_available(cls, yaml_path: Optional[str] = None) -> "G1Config":
-        """Load from FALCON yaml when present, otherwise fall back to defaults."""
-        try:
-            return cls.from_falcon_yaml(yaml_path=yaml_path)
-        except Exception:
-            return cls()

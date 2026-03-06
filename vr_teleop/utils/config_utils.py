@@ -5,7 +5,7 @@ Registers OmegaConf custom resolvers and provides config loading helpers.
 
 import math
 import os
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 import copy
 import yaml
 try:
@@ -57,70 +57,28 @@ def get_project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def get_workspace_root() -> str:
-    """Return parent directory that contains sibling repos."""
-    return os.path.dirname(get_project_root())
-
-
 def get_config_path() -> str:
     """Return absolute path to configs directory."""
     return os.path.join(get_project_root(), "configs")
 
 
 def get_asset_path() -> str:
-    """Return absolute path to robot asset directory (unitree_mujoco)."""
-    env_root = os.getenv("UNITREE_MUJOCO_ROOT")
-    if env_root:
-        return os.path.abspath(env_root)
-    return os.path.join(get_workspace_root(), "unitree_mujoco")
+    """Return absolute path to robot assets inside this repo or configured path."""
+    candidates = []
+    for env_var in ("VR_TELEOP_ASSET_ROOT", "UNITREE_MUJOCO_ROOT"):
+        env_root = os.getenv(env_var)
+        if env_root:
+            candidates.append(os.path.abspath(env_root))
+    candidates.append(os.path.join(get_project_root(), "assets"))
 
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
 
-def _resolve_repo_root(env_var: str, default_repo_name: str) -> Optional[str]:
-    """Resolve an external reference repo root path.
-
-    Priority:
-    1) explicit environment variable
-    2) sibling folder under workspace root
-    """
-    env_val = os.getenv(env_var)
-    if env_val:
-        return os.path.abspath(env_val)
-
-    candidate = os.path.join(get_workspace_root(), default_repo_name)
-    if os.path.exists(candidate):
-        return os.path.abspath(candidate)
-    return None
-
-
-def get_falcon_root() -> Optional[str]:
-    """Return FALCON repo root if available."""
-    return _resolve_repo_root("FALCON_ROOT", "FALCON")
-
-
-def get_hugwbc_root() -> Optional[str]:
-    """Return HugWBC repo root if available."""
-    return _resolve_repo_root("HUGWBC_ROOT", "HugWBC")
-
-
-def get_unitree_rl_gym_root() -> Optional[str]:
-    """Return unitree_rl_gym repo root if available."""
-    return _resolve_repo_root("UNITREE_RL_GYM_ROOT", "unitree_rl_gym")
-
-
-def get_falcon_g1_yaml_path() -> Optional[str]:
-    """Return FALCON G1 29-DOF YAML path if present."""
-    falcon_root = get_falcon_root()
-    if falcon_root is None:
-        return None
-    path = os.path.join(
-        falcon_root,
-        "humanoidverse",
-        "config",
-        "robot",
-        "g1",
-        "g1_29dof_waist_fakehand.yaml",
+    raise FileNotFoundError(
+        "Robot asset path not found. Set VR_TELEOP_ASSET_ROOT (or UNITREE_MUJOCO_ROOT) "
+        f"or place assets in {os.path.join(get_project_root(), 'assets')}."
     )
-    return path if os.path.exists(path) else None
 
 
 def deep_merge_dict(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

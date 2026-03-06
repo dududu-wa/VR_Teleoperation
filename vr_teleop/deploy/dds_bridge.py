@@ -8,8 +8,6 @@ DDS topics (lowcmd / lowstate). Runs a control loop that:
   3. Runs inference to get target joint positions
   4. Publishes lowcmd with PD targets
 
-Based on unitree_mujoco/unitree_sdk2py_bridge.py structure.
-
 Requires:
   - unitree_sdk2py installed
   - CycloneDDS environment configured
@@ -54,7 +52,7 @@ class DDSBridge:
                  robot_cfg: G1Config = None):
         self.policy = policy
         self.cfg = cfg or DDSBridgeConfig()
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
 
         # State from robot
         self.joint_pos = np.zeros(self.robot_cfg.num_dofs)
@@ -281,3 +279,4 @@ class DDSBridge:
             time.sleep(self.cfg.control_dt)
 
         print("Control loop finished.")
+

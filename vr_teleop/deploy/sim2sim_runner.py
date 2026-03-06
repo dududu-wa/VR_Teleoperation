@@ -1,4 +1,4 @@
-"""
+﻿"""
 Sim-to-sim validation runner.
 
 Tests a trained policy under different physics parameters
@@ -44,7 +44,7 @@ class Sim2SimRunner:
                  cfg: Sim2SimConfig = None,
                  robot_cfg: G1Config = None):
         self.cfg = cfg or Sim2SimConfig()
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.actor_critic = actor_critic
         self.actor_critic.eval()
 
@@ -54,7 +54,7 @@ class Sim2SimRunner:
                         robot_cfg: G1Config = None) -> 'Sim2SimRunner':
         """Create from checkpoint file."""
         cfg = cfg or Sim2SimConfig()
-        robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        robot_cfg = robot_cfg or G1Config()
         obs_cfg = ObsConfig()
 
         num_actor_obs = obs_cfg.single_step_dim + \
@@ -233,3 +233,4 @@ class Sim2SimRunner:
                   f"max_fall_rate={max_fall:.3f}")
 
         return results
+

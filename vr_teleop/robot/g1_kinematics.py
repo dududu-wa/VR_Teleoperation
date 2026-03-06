@@ -1,4 +1,4 @@
-"""
+﻿"""
 Approximate kinematics utilities for Unitree G1.
 
 This module provides lightweight forward-kinematics helpers useful for sanity
@@ -32,7 +32,7 @@ class G1Kinematics:
     HIP_HALF_WIDTH = 0.10
 
     def __init__(self, robot_cfg: G1Config | None = None):
-        self.cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.cfg = robot_cfg or G1Config()
 
     @staticmethod
     def _leg_fk_sagittal(hip_pitch: float, knee: float, ankle_pitch: float):
@@ -81,3 +81,4 @@ class G1Kinematics:
             left_foot_pos=np.array([lx, ly, lz], dtype=np.float64),
             right_foot_pos=np.array([rx, ry, rz], dtype=np.float64),
         )
+

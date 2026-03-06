@@ -2,7 +2,7 @@
 G1 Multi-Gait Training Environment.
 
 Top-level training environment that wraps a vectorized simulator backend
-(IsaacGym primary backend; MuJoCo explicit mode only) and provides:
+(IsaacGym-only for train/eval; MuJoCo is only for post-training playback) and provides:
 - Gait command sampling (stand/walk/run)
 - Velocity command sampling per gait mode
 - Gait phase clock (sin/cos for periodic locomotion)
@@ -62,7 +62,7 @@ class G1MultigaitEnv:
         run_freq: float = 3.0,
         phase_offset: float = 0.5,
     ):
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.obs_cfg = obs_cfg or ObsConfig()
         self.reward_cfg = reward_cfg or RewardConfig()
         self.term_cfg = term_cfg or TerminationConfig(episode_length=max_episode_length)
@@ -189,13 +189,10 @@ class G1MultigaitEnv:
         if self.sim_backend == "isaacgym":
             from vr_teleop.envs.isaac_vec_env import IsaacVecEnv
             return IsaacVecEnv(**common_kwargs)
-        if self.sim_backend == "mujoco":
-            from vr_teleop.envs.mujoco_vec_env import MujocoVecEnv
-            return MujocoVecEnv(**common_kwargs)
 
         raise ValueError(
             f"Unsupported sim_backend '{self.sim_backend}'. "
-            "Expected one of: ['isaacgym', 'mujoco']"
+            "Expected: ['isaacgym']"
         )
 
     def reset_all(self):
@@ -693,3 +690,4 @@ class G1MultigaitEnv:
 
     def get_privileged_observations(self) -> torch.Tensor:
         return self.privileged_obs_buf
+

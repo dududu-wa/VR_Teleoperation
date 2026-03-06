@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Build a motion library of feasible upper-body motion clips.
 
@@ -175,7 +175,7 @@ def validate_clips(clips: list, robot_cfg: G1Config, dt: float) -> list:
 def main():
     args = parse_args()
     rng = np.random.default_rng(args.seed)
-    robot_cfg = G1Config.from_falcon_yaml_if_available()
+    robot_cfg = G1Config()
 
     print(f"Building motion library")
     print(f"  Output: {args.output}")
@@ -235,3 +235,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

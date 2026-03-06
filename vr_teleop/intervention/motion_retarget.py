@@ -1,4 +1,4 @@
-"""
+﻿"""
 VR controller pose to G1 upper body joint angle retargeting.
 
 Maps VR hand tracker (6-DOF pose: position + orientation) to
@@ -67,7 +67,7 @@ class MotionRetargeter:
         device: torch.device = None,
     ):
         self.cfg = cfg or RetargetConfig()
-        self.robot_cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.robot_cfg = robot_cfg or G1Config()
         self.num_envs = len(mj_models)
         self.device = device or torch.device('cpu')
 
@@ -267,3 +267,4 @@ class MotionRetargeter:
             [2*(x*y + w*z), 1 - 2*(x*x + z*z), 2*(y*z - w*x)],
             [2*(x*z - w*y), 2*(y*z + w*x), 1 - 2*(x*x + y*y)],
         ])
+

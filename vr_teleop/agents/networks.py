@@ -1,10 +1,10 @@
 """
 Neural network architectures for G1 multi-gait policy.
 
-MlpAdaptModel (from HugWBC):
-    HistoryEncoder: (batch, H, proprio_dim) → flatten → MLP → latent
-    StateEstimator: latent → privileged prediction (e.g., base_lin_vel)
-    LowLevelController: cat(latent, pred, current_proprio, cmd) → actions
+MlpAdaptModel:
+    HistoryEncoder: (batch, H, proprio_dim) 鈫?flatten 鈫?MLP 鈫?latent
+    StateEstimator: latent 鈫?privileged prediction (e.g., base_lin_vel)
+    LowLevelController: cat(latent, pred, current_proprio, cmd) 鈫?actions
 
 Standalone implementation, no isaacgym dependency.
 """
@@ -33,7 +33,7 @@ def build_mlp(input_dim: int, output_dim: int, hidden_dims: List[int],
               activation: str, output_activation: str = None) -> nn.Sequential:
     """Build a multi-layer perceptron.
 
-    Architecture: input → hidden[0] → ... → hidden[-1] → output
+    Architecture: input 鈫?hidden[0] 鈫?... 鈫?hidden[-1] 鈫?output
     """
     act = get_activation(activation)
     layers = []
@@ -52,9 +52,9 @@ class MlpAdaptModel(nn.Module):
     """Adaptive MLP actor model with history encoding and state estimation.
 
     Architecture:
-        1. HistoryEncoder: flattened proprioception history → latent
-        2. StateEstimator: latent → privileged info prediction
-        3. LowLevelController: cat(latent, prediction, current_proprio, cmd) → actions
+        1. HistoryEncoder: flattened proprioception history 鈫?latent
+        2. StateEstimator: latent 鈫?privileged info prediction
+        3. LowLevelController: cat(latent, prediction, current_proprio, cmd) 鈫?actions
 
     Input x: (batch, history_steps, single_step_dim) where
         single_step_dim = proprioception_dim + cmd_dim
@@ -91,16 +91,16 @@ class MlpAdaptModel(nn.Module):
         if controller_hidden is None:
             controller_hidden = [512, 256, 128]
 
-        # History encoder: flattened proprioception → latent
+        # History encoder: flattened proprioception 鈫?latent
         history_input_dim = proprioception_dim * history_length
         self.history_encoder = build_mlp(
             history_input_dim, latent_dim, history_encoder_hidden, activation)
 
-        # State estimator: latent → privileged prediction
+        # State estimator: latent 鈫?privileged prediction
         self.state_estimator = build_mlp(
             latent_dim, privileged_recon_dim, state_estimator_hidden, activation)
 
-        # Low-level controller: cat(latent, pred, proprio, cmd) → actions
+        # Low-level controller: cat(latent, pred, proprio, cmd) 鈫?actions
         controller_input_dim = latent_dim + privileged_recon_dim + proprioception_dim + cmd_dim
         self.controller = build_mlp(
             controller_input_dim, act_dim, controller_hidden, activation,

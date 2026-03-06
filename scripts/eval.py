@@ -6,7 +6,7 @@ Loads a checkpoint, runs batched episodes, and reports metrics.
 
 Usage:
     python scripts/eval.py --checkpoint logs/g1_multigait/checkpoint_final.pt
-    python scripts/eval.py --checkpoint model.pt --num-episodes 200 --gait walk --sim-backend mujoco
+    python scripts/eval.py --checkpoint model.pt --num-episodes 200 --gait walk --sim-backend isaacgym
     python scripts/eval.py --checkpoint model.pt --per-gait
 """
 
@@ -86,7 +86,7 @@ def main():
         device = 'cpu'
 
     # ---- Create configs ----
-    robot_cfg = G1Config.from_falcon_yaml_if_available()
+    robot_cfg = G1Config()
     obs_cfg = ObsConfig()
     reward_cfg = RewardConfig()
     max_episode_length = env_cfg.get("max_episode_length", env_cfg.get("episode_length", 1000))
@@ -188,3 +188,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

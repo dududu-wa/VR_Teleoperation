@@ -1,4 +1,4 @@
-"""
+﻿"""
 Synchronous batched MuJoCo vectorized environment for G1 robot.
 
 Manages N independent MjModel/MjData instances in a single process.
@@ -48,7 +48,7 @@ class MujocoVecEnv:
         model_path: str = None,
     ):
         self.num_envs = num_envs
-        self.cfg = robot_cfg or G1Config.from_falcon_yaml_if_available()
+        self.cfg = robot_cfg or G1Config()
         self.rand_cfg = domain_rand_cfg or DomainRandConfig()
         self.sim_dt = sim_dt
         self.decimation = decimation
@@ -457,3 +457,4 @@ class MujocoVecEnv:
     def num_privileged_obs(self) -> int:
         """Number of critic observation dimensions."""
         return int(self.privileged_obs_buf.shape[-1])
+
