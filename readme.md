@@ -1,4 +1,4 @@
-# VR 多步态人形遥操作（A+B）鲁棒训练计划说明
+﻿# VR 多步态人形遥操作（A+B）鲁棒训练计划说明
 
 > 项目目标：在 VR 遥操作场景下，实现 **三步态（stand / walk / run + transitions）** 的稳定下肢行走，同时支持 **复杂上肢/手部动作**；鲁棒性体现在 **sim2sim** 与 **sim2real** 下都不容易摔、不容易在切换时崩。
 
@@ -211,3 +211,28 @@ d = [amp, freq, duty, transition\_stress, hold\_T]
 - 最终演示：VR 控制上肢动作 + 腿部三步态稳定行走与切换
 
 ---
+
+## 13. 训练体系（代码已同步）
+
+当前代码保留两套训练体系，并由 `scripts/train.py` 统一切换：
+
+- `phase`：手工阶段课程（Phase 0-4），按阈值推进难度。
+- `lp_teacher`：LP-Teacher 自动采样高学习进展区间。
+
+训练入口：
+
+```bash
+python scripts/train.py --curriculum-system phase --use-intervention
+python scripts/train.py --curriculum-system lp_teacher --use-intervention
+```
+
+对应配置：
+
+- `configs/curriculum/phase.yaml`
+- `configs/curriculum/lp_teacher.yaml`
+
+说明：
+
+- 两套体系共用同一套 PPO、环境和奖励实现。
+- `phase` 更适合可控、可解释、好复现实验。
+- `lp_teacher` 更适合自动探索任务难度前沿。

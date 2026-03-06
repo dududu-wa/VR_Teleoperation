@@ -1,4 +1,4 @@
-# VR 多步态人形遥操作 -- 模型代码实现计划
+﻿# VR 多步态人形遥操作 -- 模型代码实现计划
 
 > 基于 readme 的 A+B 架构，参考 HugWBC（算法/网络架构）、FALCON（G1 机器人配置/解耦设计）、unitree_mujoco（MuJoCo G1 模型）
 
@@ -519,3 +519,35 @@ env = G1BaseEnv("unitree_mujoco/unitree_robots/g1/scene.xml")
 - 有/无可行性筛选器（A）对比
 - Phase 0-3 vs 加 Phase 4 对比
 - 手动 Phase vs ADR 对比
+
+---
+
+## Code Sync (2026-03-06)
+
+当前代码已保留两套训练体系，并由 `scripts/train.py` 统一切换：
+
+- `phase`：Phase 0-4 阈值推进课程（默认）。
+- `lp_teacher`：Learning Progress Teacher 自动采样难度。
+
+训练入口：
+
+```bash
+python scripts/train.py --curriculum-system phase --use-intervention
+python scripts/train.py --curriculum-system lp_teacher --use-intervention
+```
+
+对应实现：
+
+- `vr_teleop/curriculum/phase_curriculum.py`
+- `vr_teleop/curriculum/lp_teacher_curriculum.py`
+
+对应配置：
+
+- `configs/curriculum/phase.yaml`
+- `configs/curriculum/lp_teacher.yaml`
+
+说明：
+
+- 两套体系共用同一套 PPO 与环境管线，只改变难度调度逻辑。
+- `phase` 适合可解释、可复现实验。
+- `lp_teacher` 适合自动探索任务前沿。
