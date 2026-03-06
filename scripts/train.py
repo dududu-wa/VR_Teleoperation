@@ -4,8 +4,8 @@ Training entry point for G1 multi-gait intervention-robust locomotion.
 
 Usage:
     python scripts/train.py
-    python scripts/train.py --num-envs 256 --device cuda:0 --sim-backend isaacgym
-    python scripts/train.py --use-intervention --initial-phase 0
+    python scripts/train.py --curriculum-system phase --use-intervention
+    python scripts/train.py --curriculum-system lp_teacher --use-intervention
 """
 
 import os
@@ -22,6 +22,7 @@ sys.path.insert(0, PROJECT_ROOT)
 DEFAULT_ARGS = {
     "num_envs": 256,
     "sim_backend": "isaacgym",
+    "curriculum_system": "phase",
     "max_iterations": 10000,
     "num_steps": 24,
     "save_interval": 100,
@@ -37,6 +38,9 @@ def parse_args():
     parser.add_argument('--sim-backend', type=str, default=DEFAULT_ARGS["sim_backend"],
                         choices=['isaacgym'],
                         help='Simulation backend entrypoint')
+    parser.add_argument('--curriculum-system', type=str, default=DEFAULT_ARGS["curriculum_system"],
+                        choices=['phase', 'lp_teacher'],
+                        help='Training curriculum system')
     parser.add_argument('--device', type=str, default='cuda:0',
                         help='Torch device')
     parser.add_argument('--max-iterations', type=int, default=DEFAULT_ARGS["max_iterations"],
@@ -55,7 +59,7 @@ def parse_args():
     parser.add_argument('--use-intervention', action='store_true',
                         help='Enable upper-body intervention during training')
     parser.add_argument('--initial-phase', type=int, default=DEFAULT_ARGS["initial_phase"],
-                        help='Starting curriculum phase')
+                        help='Starting curriculum phase (phase system only)')
     parser.add_argument('--experiment-config', type=str, default=None,
                         help='Path to configs/experiment/*.yaml')
     return parser.parse_args()
@@ -71,6 +75,10 @@ def main():
     from vr_teleop.envs.domain_rand import DomainRandConfig
     from vr_teleop.agents.runner import OnPolicyRunner
     from vr_teleop.curriculum.phase_curriculum import PhaseCurriculum, PhaseConfig
+    from vr_teleop.curriculum.lp_teacher_curriculum import (
+        LPTeacherCurriculum,
+        LPTeacherCurriculumConfig,
+    )
     from vr_teleop.intervention.intervention_generator import InterventionGenerator, InterventionConfig
     from vr_teleop.intervention.feasibility_filter import FeasibilityFilter, FeasibilityConfig
     from vr_teleop.utils.config_utils import load_experiment_config
@@ -103,6 +111,8 @@ def main():
     _use_cfg("num_steps", algo_cfg.get("num_steps_per_env"))
 
     cur_cfg = experiment_cfg.get("curriculum", {}) if isinstance(experiment_cfg, dict) else {}
+    if isinstance(cur_cfg, dict):
+        _use_cfg("curriculum_system", cur_cfg.get("system"))
     _use_cfg("initial_phase", cur_cfg.get("initial_phase"))
 
     int_cfg = experiment_cfg.get("intervention", {}) if isinstance(experiment_cfg, dict) else {}
@@ -158,13 +168,15 @@ def main():
         print("CUDA not available, falling back to CPU")
         device = 'cpu'
 
-    print(f"Training G1 multi-gait policy")
+    print("Training G1 multi-gait policy")
     print(f"  Envs: {args.num_envs}")
     print(f"  Backend: {args.sim_backend}")
+    print(f"  Curriculum: {args.curriculum_system}")
     print(f"  Device: {device}")
     print(f"  Max iterations: {args.max_iterations}")
     print(f"  Intervention: {args.use_intervention}")
-    print(f"  Initial phase: {args.initial_phase}")
+    if args.curriculum_system == "phase":
+        print(f"  Initial phase: {args.initial_phase}")
 
     # ---- Create configs ----
     robot_cfg = G1Config()
@@ -220,17 +232,44 @@ def main():
     )
 
     # ---- Create curriculum ----
-    phase_cfg = PhaseConfig(initial_phase=args.initial_phase)
-    curriculum = PhaseCurriculum(cfg=phase_cfg)
+    if args.curriculum_system == "phase":
+        phase_cfg = PhaseConfig(initial_phase=args.initial_phase)
+        if isinstance(cur_cfg, dict):
+            if "max_phase" in cur_cfg:
+                phase_cfg.max_phase = int(cur_cfg["max_phase"])
+            if "thresholds" in cur_cfg and isinstance(cur_cfg["thresholds"], dict):
+                phase_cfg.thresholds = cur_cfg["thresholds"]
+            if "velocity_ranges" in cur_cfg and isinstance(cur_cfg["velocity_ranges"], dict):
+                phase_cfg.velocity_ranges = cur_cfg["velocity_ranges"]
+        curriculum = PhaseCurriculum(cfg=phase_cfg)
+    elif args.curriculum_system == "lp_teacher":
+        lp_cfg_raw = {}
+        if isinstance(cur_cfg, dict):
+            lp_cfg_raw = cur_cfg.get("lp_teacher", {})
+            if not isinstance(lp_cfg_raw, dict):
+                lp_cfg_raw = {}
+        lp_cfg = LPTeacherCurriculumConfig(
+            num_bins=int(lp_cfg_raw.get("num_bins", 12)),
+            ema_alpha=float(lp_cfg_raw.get("ema_alpha", 0.1)),
+            exploration_prob=float(lp_cfg_raw.get("exploration_prob", 0.15)),
+            min_samples_per_bin=int(lp_cfg_raw.get("min_samples_per_bin", 5)),
+            temperature=float(lp_cfg_raw.get("temperature", 1.0)),
+            reward_scale=float(lp_cfg_raw.get("reward_scale", 1.0)),
+            fall_penalty=float(lp_cfg_raw.get("fall_penalty", 1.0)),
+            transition_penalty=float(lp_cfg_raw.get("transition_penalty", 0.5)),
+        )
+        curriculum = LPTeacherCurriculum(cfg=lp_cfg, seed=args.seed)
+    else:
+        raise ValueError(f"Unsupported curriculum system: {args.curriculum_system}")
 
     # ---- Create intervention generator ----
     intervention = None
     feasibility_filter = None
     if args.use_intervention:
-        int_cfg = InterventionConfig()
+        int_cfg_obj = InterventionConfig()
         intervention = InterventionGenerator(
             num_envs=args.num_envs,
-            cfg=int_cfg,
+            cfg=int_cfg_obj,
             robot_cfg=robot_cfg,
             device=torch.device(device),
         )
@@ -240,7 +279,10 @@ def main():
             robot_cfg=robot_cfg,
             device=torch.device(device),
         )
-        intervention.set_phase(args.initial_phase)
+        if args.curriculum_system == "phase":
+            intervention.set_phase(args.initial_phase)
+        else:
+            intervention.set_phase(0)
         env.attach_intervention(
             generator=intervention,
             feasibility_filter=feasibility_filter,
@@ -265,12 +307,19 @@ def main():
 
     while iters_done < args.max_iterations:
         # Apply curriculum settings before each chunk
-        cmd_ranges = curriculum.get_command_ranges()
-        env.update_command_ranges(cmd_ranges)
-        env.update_gait_probs(curriculum.get_gait_probs())
-
-        if intervention is not None:
-            intervention.set_phase(curriculum.phase)
+        if args.curriculum_system == "phase":
+            cmd_ranges = curriculum.get_command_ranges()
+            env.update_command_ranges(cmd_ranges)
+            env.update_gait_probs(curriculum.get_gait_probs())
+            if intervention is not None:
+                intervention.set_phase(curriculum.phase)
+        else:
+            curriculum.sample_tasks()
+            cmd_ranges = curriculum.get_command_ranges()
+            env.update_command_ranges(cmd_ranges)
+            env.update_gait_probs(curriculum.get_gait_probs())
+            if intervention is not None:
+                intervention.set_phase(curriculum.get_intervention_phase())
 
         # How many iterations in this chunk
         remaining = args.max_iterations - iters_done
@@ -302,21 +351,30 @@ def main():
             mean_episode_length=ep_len,
         )
 
-        # Check for phase promotion
-        promoted = curriculum.check_promotion()
-        if promoted:
-            print(f"\n*** Phase promoted to {curriculum.phase} "
-                  f"at iteration {iters_done} ***\n")
-
-        # Progress log
         elapsed = time.time() - start_time
         fps = (iters_done * args.num_steps * args.num_envs) / max(elapsed, 1)
-        print(f"Iter {iters_done:5d}/{args.max_iterations} | "
-              f"Phase {curriculum.phase} | "
-              f"Reward {tracking_reward:6.3f} | "
-              f"Fall {total_fall_rate:5.3f} | "
-              f"TransFail {transition_failure:5.3f} | "
-              f"FPS {fps:7.0f}")
+
+        if args.curriculum_system == "phase":
+            promoted = curriculum.check_promotion()
+            if promoted:
+                print(f"\n*** Phase promoted to {curriculum.phase} "
+                      f"at iteration {iters_done} ***\n")
+
+            print(f"Iter {iters_done:5d}/{args.max_iterations} | "
+                  f"Phase {curriculum.phase} | "
+                  f"Reward {tracking_reward:6.3f} | "
+                  f"Fall {total_fall_rate:5.3f} | "
+                  f"TransFail {transition_failure:5.3f} | "
+                  f"FPS {fps:7.0f}")
+        else:
+            summary = curriculum.get_summary()
+            print(f"Iter {iters_done:5d}/{args.max_iterations} | "
+                  f"LP bin {summary['bin']:2d} | "
+                  f"Diff {summary['difficulty']:.3f} | "
+                  f"Signal {summary['signal']:+.3f} | "
+                  f"Reward {tracking_reward:6.3f} | "
+                  f"Fall {total_fall_rate:5.3f} | "
+                  f"FPS {fps:7.0f}")
 
     total_time = time.time() - start_time
     if runner.log_dir is not None:
@@ -325,10 +383,13 @@ def main():
             f"model_{runner.current_learning_iteration}.pt"
         ))
     print(f"\nTraining complete in {total_time:.0f}s")
-    print(f"Final phase: {curriculum.phase}")
+    if args.curriculum_system == "phase":
+        print(f"Final phase: {curriculum.phase}")
+    else:
+        summary = curriculum.get_summary()
+        print(f"Final LP difficulty: {summary['difficulty']:.3f} (bin={summary['bin']})")
     runner.close()
 
 
 if __name__ == '__main__':
     main()
-

@@ -6,6 +6,8 @@ from typing import Any, Dict, Tuple
 _EXPORTS: Dict[str, Tuple[str, str]] = {
     "PhaseCurriculum": ("vr_teleop.curriculum.phase_curriculum", "PhaseCurriculum"),
     "PhaseConfig": ("vr_teleop.curriculum.phase_curriculum", "PhaseConfig"),
+    "LPTeacherCurriculum": ("vr_teleop.curriculum.lp_teacher_curriculum", "LPTeacherCurriculum"),
+    "LPTeacherCurriculumConfig": ("vr_teleop.curriculum.lp_teacher_curriculum", "LPTeacherCurriculumConfig"),
     "ADRScheduler": ("vr_teleop.curriculum.adr_scheduler", "ADRScheduler"),
     "ADRConfig": ("vr_teleop.curriculum.adr_scheduler", "ADRConfig"),
     "LPTeacher": ("vr_teleop.curriculum.lp_teacher", "LPTeacher"),

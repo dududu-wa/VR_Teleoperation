@@ -1,4 +1,5 @@
 curriculum:
+  system: phase
   # Phase-based curriculum configuration
   initial_phase: 0
   max_phase: 4
