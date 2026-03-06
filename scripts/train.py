@@ -349,6 +349,7 @@ def main():
             fall_rate=total_fall_rate,
             transition_failure=transition_failure,
             mean_episode_length=ep_len,
+            num_iterations=this_chunk,
         )
 
         elapsed = time.time() - start_time
