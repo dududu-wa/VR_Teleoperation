@@ -4,4 +4,4 @@ from vr_teleop.utils.math_utils import (
 )
 from vr_teleop.utils.config_utils import get_asset_path
 from vr_teleop.utils.logger import TrainingLogger
-from vr_teleop.utils.symmetry import build_symmetry_matrices
+from vr_teleop.utils.symmetry import build_action_symmetry_matrix, build_obs_symmetry_matrix
