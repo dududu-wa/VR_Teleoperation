@@ -176,7 +176,8 @@ class OnPolicyRunner:
             # ---- Checkpointing ----
             if self.log_dir is not None and it % self.save_interval == 0:
                 infos = self.checkpoint_infos_fn() if self.checkpoint_infos_fn else None
-                self.save(os.path.join(self.log_dir, f'model_{it}.pt'), infos=infos)
+                self.save(os.path.join(self.log_dir, f'model_{it}.pt'),
+                          infos=infos, iteration=it)
 
         # Final save
         self.current_learning_iteration = tot_iter
@@ -216,12 +217,12 @@ class OnPolicyRunner:
             self.current_learning_iteration + num_iterations,
             collection_time, learn_time, mean_std)
 
-    def save(self, path: str, infos: dict = None):
+    def save(self, path: str, infos: dict = None, iteration: int = None):
         """Save model checkpoint."""
         save_dict = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
-            'iter': self.current_learning_iteration,
+            'iter': iteration if iteration is not None else self.current_learning_iteration,
             'infos': infos,
         }
         # Save curriculum state if provided in infos
