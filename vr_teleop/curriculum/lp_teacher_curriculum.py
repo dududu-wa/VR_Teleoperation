@@ -71,6 +71,8 @@ class LPTeacherCurriculum:
         fall_rate: float,
         transition_failure: float = 0.0,
         mean_episode_length: float = 0.0,
+        num_iterations: int = 1,
+        **kwargs,
     ):
         """Update LP teacher with the latest task performance signal."""
         del mean_episode_length  # kept for signature compatibility
