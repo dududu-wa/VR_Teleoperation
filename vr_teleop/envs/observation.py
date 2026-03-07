@@ -1,31 +1,39 @@
 """
 Observation builder and history buffer for G1 multi-gait environment.
 
-Actor obs (58-dim per step):
-    base_ang_vel(3), projected_gravity(3), dof_pos_lower(15), dof_vel_lower(15),
-    last_actions(15), commands_vel(2), command_yaw(1), gait_id(1),
-    intervention_flag(1), clock_input(2)
+Actor obs (67-dim per step):
+    base_ang_vel(3), projected_gravity(3), dof_pos_loco(13), dof_vel_loco(13),
+    last_actions(13), upper_body_pos(16), commands_vel(2), command_yaw(1),
+    gait_id(1), clock_input(2)
 
-History buffer: 5 steps of proprioception-only (51-dim = no commands/clock/flags)
+History buffer: 5 steps of proprioception-only (61-dim = no commands/clock)
 
-Critic obs (99-dim):
-    actor_single_step(58) + privileged_info(41)
+Critic obs (96-dim):
+    actor_single_step(67) + privileged_info(29)
 """
 
 import torch
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+
+# DOF index mappings in 29-DOF full body space
+LOCO_DOF_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14]  # 12 legs + waist_pitch
+VR_DOF_INDICES = [12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]  # waist_yaw/roll + 14 arms
+
+NUM_LOCO_DOFS = len(LOCO_DOF_INDICES)   # 13
+NUM_VR_DOFS = len(VR_DOF_INDICES)        # 16
 
 
 @dataclass
 class ObsConfig:
     """Observation space configuration."""
-    single_step_dim: int = 58
-    history_obs_dim: int = 51       # proprioception only (no commands/clock/flags)
+    single_step_dim: int = 67
+    history_obs_dim: int = 61       # proprioception only (no commands/clock)
     include_history_steps: int = 5
-    critic_extra_dim: int = 41
-    critic_obs_dim: int = 99       # single_step_dim + critic_extra_dim
+    critic_extra_dim: int = 29
+    critic_obs_dim: int = 96        # single_step_dim + critic_extra_dim
     clip_observations: float = 100.0
 
     # Observation scales
@@ -105,20 +113,23 @@ class ObservationBuilder:
     Works with batched tensors (num_envs, dim) for vectorized environments.
     """
 
-    # Proprioception slice indices within the 58-dim actor obs
-    # base_ang_vel(0:3), gravity(3:6), dof_pos(6:21), dof_vel(21:36), actions(36:51)
-    # Non-proprioception: commands_vel(51:53), command_yaw(53:54), gait_id(54:55),
-    #                     intervention_flag(55:56), clock(56:58)
-    PROPRIO_END = 51  # first 51 dims are proprioceptive
+    # Proprioception slice indices within the 67-dim actor obs
+    # base_ang_vel(0:3), gravity(3:6), dof_pos_loco(6:19), dof_vel_loco(19:32),
+    # actions(32:45), upper_body_pos(45:61)
+    # Non-proprioception: commands_vel(61:63), command_yaw(63:64), gait_id(64:65),
+    #                     clock(65:67)
+    PROPRIO_END = 61  # first 61 dims are proprioceptive
 
     def __init__(self, obs_cfg: ObsConfig, num_envs: int,
-                 device: torch.device, lower_body_dofs: int = 15):
+                 device: torch.device, num_loco_dofs: int = NUM_LOCO_DOFS,
+                 num_vr_dofs: int = NUM_VR_DOFS):
         self.cfg = obs_cfg
         self.num_envs = num_envs
         self.device = device
-        self.lower_body_dofs = lower_body_dofs
+        self.num_loco_dofs = num_loco_dofs
+        self.num_vr_dofs = num_vr_dofs
 
-        # Pre-compute scale and noise tensors for actor obs (58-dim)
+        # Pre-compute scale and noise tensors for actor obs (67-dim)
         self.obs_scales = self._build_obs_scales()
         self.noise_vec = self._build_noise_vec() if obs_cfg.add_noise else None
 
@@ -131,9 +142,10 @@ class ObservationBuilder:
         )
 
     def _build_obs_scales(self) -> torch.Tensor:
-        """Build per-element scale factors for 58-dim actor obs."""
+        """Build per-element scale factors for 67-dim actor obs."""
         s = self.cfg.scales
-        n = self.lower_body_dofs  # 15
+        n_loco = self.num_loco_dofs   # 13
+        n_vr = self.num_vr_dofs       # 16
         scales = torch.ones(self.cfg.single_step_dim, device=self.device)
 
         offset = 0
@@ -143,26 +155,30 @@ class ObservationBuilder:
         # projected_gravity: 3
         scales[offset:offset + 3] = s['projected_gravity']
         offset += 3
-        # dof_pos_lower: 15
-        scales[offset:offset + n] = s['dof_pos']
-        offset += n
-        # dof_vel_lower: 15
-        scales[offset:offset + n] = s['dof_vel']
-        offset += n
-        # last_actions: 15
-        scales[offset:offset + n] = 1.0
-        offset += n
+        # dof_pos_loco: 13
+        scales[offset:offset + n_loco] = s['dof_pos']
+        offset += n_loco
+        # dof_vel_loco: 13
+        scales[offset:offset + n_loco] = s['dof_vel']
+        offset += n_loco
+        # last_actions: 13
+        scales[offset:offset + n_loco] = 1.0
+        offset += n_loco
+        # upper_body_pos: 16
+        scales[offset:offset + n_vr] = s['dof_pos']
+        offset += n_vr
         # commands_vel: 2, command_yaw: 1
         scales[offset:offset + 3] = s['commands']
         offset += 3
-        # gait_id: 1, intervention_flag: 1, clock: 2
+        # gait_id: 1, clock: 2
         # leave as 1.0
         return scales
 
     def _build_noise_vec(self) -> torch.Tensor:
-        """Build per-element noise std for 58-dim actor obs."""
+        """Build per-element noise std for 67-dim actor obs."""
         ns = self.cfg.noise_scales
-        n = self.lower_body_dofs
+        n_loco = self.num_loco_dofs
+        n_vr = self.num_vr_dofs
         noise = torch.zeros(self.cfg.single_step_dim, device=self.device)
 
         offset = 0
@@ -172,45 +188,49 @@ class ObservationBuilder:
         # projected_gravity: 3
         noise[offset:offset + 3] = ns['projected_gravity']
         offset += 3
-        # dof_pos_lower: 15
-        noise[offset:offset + n] = ns['dof_pos']
-        offset += n
-        # dof_vel_lower: 15
-        noise[offset:offset + n] = ns['dof_vel']
-        offset += n
-        # remaining (actions, commands, etc): no noise
+        # dof_pos_loco: 13
+        noise[offset:offset + n_loco] = ns['dof_pos']
+        offset += n_loco
+        # dof_vel_loco: 13
+        noise[offset:offset + n_loco] = ns['dof_vel']
+        offset += n_loco
+        # last_actions: 13 - no noise
+        offset += n_loco
+        # upper_body_pos: 16
+        noise[offset:offset + n_vr] = ns['dof_pos']
+        offset += n_vr
+        # remaining (commands, etc): no noise
         return noise * self.cfg.noise_level
 
     def build_actor_obs(
         self,
         base_ang_vel: torch.Tensor,      # (N, 3) body frame
         projected_gravity: torch.Tensor,  # (N, 3)
-        dof_pos_lower: torch.Tensor,      # (N, 15) relative to default
-        dof_vel_lower: torch.Tensor,      # (N, 15)
-        last_actions: torch.Tensor,       # (N, 15)
+        dof_pos_loco: torch.Tensor,      # (N, 13) relative to default
+        dof_vel_loco: torch.Tensor,      # (N, 13)
+        last_actions: torch.Tensor,       # (N, 13)
+        upper_body_pos: torch.Tensor,    # (N, 16) waist_yaw/roll + arms
         commands: torch.Tensor,           # (N, 3) [vx, vy, wz]
         gait_id: torch.Tensor,            # (N, 1) or (N,)
-        intervention_flag: torch.Tensor,  # (N, 1) or (N,)
         clock: torch.Tensor,             # (N, 2) [sin, cos]
     ) -> torch.Tensor:
-        """Build single-step actor observation (N, 58).
+        """Build single-step actor observation (N, 67).
 
         Returns scaled observation (noise added if enabled).
         """
         gait_id = gait_id.view(-1, 1) if gait_id.dim() == 1 else gait_id
-        intervention_flag = intervention_flag.view(-1, 1) if intervention_flag.dim() == 1 else intervention_flag
 
         obs = torch.cat([
             base_ang_vel,       # 3
             projected_gravity,  # 3
-            dof_pos_lower,      # 15
-            dof_vel_lower,      # 15
-            last_actions,       # 15
+            dof_pos_loco,       # 13
+            dof_vel_loco,       # 13
+            last_actions,       # 13
+            upper_body_pos,     # 16
             commands,           # 3 (vx, vy, wz)
             gait_id,            # 1
-            intervention_flag,  # 1
             clock,              # 2
-        ], dim=-1)  # (N, 58)
+        ], dim=-1)  # (N, 67)
 
         # Apply scales
         obs = obs * self.obs_scales.unsqueeze(0)
@@ -226,7 +246,7 @@ class ObservationBuilder:
 
     def build_critic_obs(
         self,
-        actor_obs: torch.Tensor,          # (N, 58) single step
+        actor_obs: torch.Tensor,          # (N, 67) single step
         base_lin_vel: torch.Tensor,        # (N, 3) body frame
         base_height: torch.Tensor,         # (N, 1) or (N,)
         foot_contact_forces: torch.Tensor, # (N, 2) left, right magnitudes
@@ -234,12 +254,11 @@ class ObservationBuilder:
         mass_offset: torch.Tensor,         # (N, 1)
         motor_strength: torch.Tensor,      # (N, 1)
         pd_gain_mult: torch.Tensor,        # (N, 2) kp_mult, kd_mult
-        upper_dof_pos: torch.Tensor,       # (N, 14)
-        upper_dof_vel: torch.Tensor,       # (N, 14)
+        upper_dof_vel: torch.Tensor,       # (N, 16) waist_yaw/roll + arms velocity
         intervention_amp: torch.Tensor,    # (N, 1)
         intervention_freq: torch.Tensor,   # (N, 1)
     ) -> torch.Tensor:
-        """Build critic observation (N, 99) = actor_obs(58) + privileged(41)."""
+        """Build critic observation (N, 96) = actor_obs(67) + privileged(29)."""
         base_height = base_height.view(-1, 1) if base_height.dim() == 1 else base_height
         friction_coeff = friction_coeff.view(-1, 1) if friction_coeff.dim() == 1 else friction_coeff
         mass_offset = mass_offset.view(-1, 1) if mass_offset.dim() == 1 else mass_offset
@@ -255,18 +274,17 @@ class ObservationBuilder:
             mass_offset,          # 1
             motor_strength,       # 1
             pd_gain_mult,         # 2
-            upper_dof_pos,        # 14
-            upper_dof_vel,        # 14
+            upper_dof_vel,        # 16
             intervention_amp,     # 1
             intervention_freq,    # 1
-        ], dim=-1)  # (N, 41)
+        ], dim=-1)  # (N, 29)
 
-        critic_obs = torch.cat([actor_obs, privileged], dim=-1)  # (N, 99)
+        critic_obs = torch.cat([actor_obs, privileged], dim=-1)  # (N, 96)
         critic_obs = torch.clamp(critic_obs, -self.cfg.clip_observations, self.cfg.clip_observations)
         return critic_obs
 
     def extract_proprioception(self, actor_obs: torch.Tensor) -> torch.Tensor:
-        """Extract proprioceptive components (first 51 dims) from actor obs."""
+        """Extract proprioceptive components (first 61 dims) from actor obs."""
         return actor_obs[:, :self.PROPRIO_END]
 
     def update_history(self, actor_obs: torch.Tensor):
@@ -283,11 +301,11 @@ class ObservationBuilder:
         """Get full actor input: current obs + flattened history.
 
         Returns:
-            (N, 58 + 51 * 5) = (N, 313) tensor
+            (N, 67 + 61 * 5) = (N, 372) tensor
         """
         history = self.history_buffer.get_flattened()
         return torch.cat([actor_obs, history], dim=-1)
 
     def get_history_3d(self) -> torch.Tensor:
-        """Get 3D history for HistoryEncoder: (N, H, 51)."""
+        """Get 3D history for HistoryEncoder: (N, H, 61)."""
         return self.history_buffer.get_3d()

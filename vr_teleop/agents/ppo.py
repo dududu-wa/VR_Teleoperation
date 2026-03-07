@@ -50,6 +50,8 @@ class PPO:
         desired_kl: float = 0.01,
         # Observation dim for symmetry matrix
         single_step_obs_dim: int = 58,
+        # Distillation
+        distillation_loss=None,
         device: str = 'cpu',
     ):
         self.device = device
@@ -98,6 +100,9 @@ class PPO:
             self._proprio_dim = 51  # from ObsConfig
             self._proprio_perm_mat = self._obs_perm_mat[:self._proprio_dim,
                                                          :self._proprio_dim].clone()
+
+        # Distillation loss (optional, for teacher-student training)
+        self.distillation_loss = distillation_loss
 
     def reset_noise_std(self):
         """Reset action noise std to init_noise_std for fresh exploration.
@@ -259,6 +264,12 @@ class PPO:
                 sym_loss = self._compute_symmetry_loss(
                     obs_batch, critic_obs_batch)
 
+            # ---- Distillation loss (teacher-student) ----
+            distill_loss = torch.tensor(0.0, device=self.device)
+            if self.distillation_loss is not None:
+                distill_loss = self.distillation_loss.compute(
+                    actions_batch, obs_batch)
+
             # ---- Total loss ----
             loss = (
                 surrogate_loss
@@ -266,6 +277,7 @@ class PPO:
                 - self.entropy_coef * entropy_batch.mean()
                 + sym_loss
                 + adaptation_loss
+                + distill_loss
             )
 
             # ---- Gradient step ----
@@ -281,6 +293,7 @@ class PPO:
             metrics['entropy'] += entropy_batch.mean().item()
             metrics['sym_loss'] += sym_loss.item()
             metrics['adaptation_loss'] += adaptation_loss.item()
+            metrics['distillation_loss'] += distill_loss.item()
             metrics['learning_rate'] += self.learning_rate
             metrics['ratio'] += ratio.mean().item()
 
@@ -290,6 +303,12 @@ class PPO:
             metrics[k] /= num_updates
 
         self.storage.clear()
+
+        # Decay distillation coefficient after each PPO update
+        if self.distillation_loss is not None:
+            metrics['distillation_coef'] = self.distillation_loss.coef
+            self.distillation_loss.step()
+
         return dict(metrics)
 
     def _compute_symmetry_loss(

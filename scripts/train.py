@@ -71,6 +71,8 @@ def parse_args():
                         help='Starting curriculum phase (phase system only)')
     parser.add_argument('--experiment-config', type=str, default=None,
                         help='Path to configs/experiment/*.yaml')
+    parser.add_argument('--teacher-model', type=str, default=None,
+                        help='Path to Unitree pretrained JIT model for knowledge distillation')
     return parser.parse_args()
 
 
@@ -229,7 +231,9 @@ def main():
     # ---- Create configs ----
     robot_cfg = G1Config()
     obs_cfg = ObsConfig()
-    term_cfg = TerminationConfig(episode_length=max_episode_length)
+    term_cfg_blob = experiment_cfg.get("termination", {}) if isinstance(experiment_cfg, dict) else {}
+    grace_period = term_cfg_blob.get("grace_period", 0) if isinstance(term_cfg_blob, dict) else 0
+    term_cfg = TerminationConfig(episode_length=max_episode_length, grace_period=grace_period)
     rand_cfg = DomainRandConfig()
 
     # ---- Create environment ----
@@ -306,6 +310,22 @@ def main():
         log_dir=log_dir,
         device=device,
     )
+
+    # ---- Teacher model for knowledge distillation ----
+    if args.teacher_model:
+        from vr_teleop.agents.pretrained_adapter import UnitreeTeacher, DistillationLoss
+        print(f"  Loading teacher model from {args.teacher_model}")
+        teacher = UnitreeTeacher(
+            model_path=args.teacher_model,
+            num_envs=args.num_envs,
+            device=device,
+        )
+        distill_coef = float(algo_yaml.get('distillation_coef', 1.0))
+        distill_decay = float(algo_yaml.get('distillation_decay', 0.9995))
+        distill_loss = DistillationLoss(
+            teacher=teacher, coef=distill_coef, decay_rate=distill_decay)
+        runner.alg.distillation_loss = distill_loss
+        print(f"  Distillation enabled (coef={distill_coef}, decay={distill_decay})")
 
     # ---- Create curriculum ----
     if args.curriculum_system == "phase":

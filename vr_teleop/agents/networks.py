@@ -62,9 +62,9 @@ class MlpAdaptModel(nn.Module):
 
     def __init__(
         self,
-        act_dim: int,                    # 15 (lower body DOFs)
-        proprioception_dim: int,         # 51 (from obs config)
-        cmd_dim: int,                    # 7 (commands + flags + clock)
+        act_dim: int,                    # 13 (locomotion DOFs)
+        proprioception_dim: int,         # 61 (from obs config)
+        cmd_dim: int,                    # 6 (commands + clock)
         privileged_recon_dim: int = 3,   # state estimator output dim
         latent_dim: int = 32,            # history encoder output dim
         history_length: int = 5,         # number of history steps
@@ -115,10 +115,10 @@ class MlpAdaptModel(nn.Module):
         """Forward pass.
 
         Supports two input formats:
-          2D flat: (B, current_obs(58) + history_proprio(H*51))
-                   = (B, 58 + 5*51) = (B, 313)
-          3D:      (B, H, single_step_dim) where single_step_dim = 58
-                   Each step has proprio(51) + cmd(7)
+          2D flat: (B, current_obs(67) + history_proprio(H*61))
+                   = (B, 67 + 5*61) = (B, 372)
+          3D:      (B, H, single_step_dim) where single_step_dim = 67
+                   Each step has proprio(61) + cmd(6)
 
         Args:
             x: Actor observations in either format
@@ -128,21 +128,21 @@ class MlpAdaptModel(nn.Module):
         Returns:
             (batch, act_dim) actions
         """
-        single_dim = self.proprioception_dim + self.cmd_dim  # 58
+        single_dim = self.proprioception_dim + self.cmd_dim  # 67
 
         if x.dim() == 3:
-            # 3D: (B, H, 58) - extract from structured history
-            pro_obs_seq = x[..., :self.proprioception_dim]  # (B, H, 51)
-            cmd = x[:, -1, self.proprioception_dim:single_dim]  # (B, 7)
-            current_proprio = x[:, -1, :self.proprioception_dim]  # (B, 51)
-            history_flat = pro_obs_seq.flatten(-2, -1)  # (B, H*51)
+            # 3D: (B, H, 67) - extract from structured history
+            pro_obs_seq = x[..., :self.proprioception_dim]  # (B, H, 61)
+            cmd = x[:, -1, self.proprioception_dim:single_dim]  # (B, 6)
+            current_proprio = x[:, -1, :self.proprioception_dim]  # (B, 61)
+            history_flat = pro_obs_seq.flatten(-2, -1)  # (B, H*61)
         else:
-            # 2D flat: (B, 58 + H*51) = (B, 313)
-            # Layout: [current_obs(58), flattened_history_proprio(H*51)]
-            current_obs = x[:, :single_dim]           # (B, 58)
-            history_flat = x[:, single_dim:]           # (B, H*51 = 255)
-            current_proprio = current_obs[:, :self.proprioception_dim]  # (B, 51)
-            cmd = current_obs[:, self.proprioception_dim:single_dim]    # (B, 7)
+            # 2D flat: (B, 67 + H*61) = (B, 372)
+            # Layout: [current_obs(67), flattened_history_proprio(H*61)]
+            current_obs = x[:, :single_dim]           # (B, 67)
+            history_flat = x[:, single_dim:]           # (B, H*61 = 305)
+            current_proprio = current_obs[:, :self.proprioception_dim]  # (B, 61)
+            cmd = current_obs[:, self.proprioception_dim:single_dim]    # (B, 6)
 
         # History encoding
         latent = self.history_encoder(history_flat)  # (B, latent)
@@ -160,8 +160,8 @@ class MlpAdaptModel(nn.Module):
         # Adaptation loss (privileged info reconstruction)
         if sync_update and privileged_obs is not None:
             # Extract ground truth privileged info from critic obs
-            # In critic_obs: actor_obs(58) + [base_lin_vel(3), ...]
-            # base_lin_vel is at indices 58:61
+            # In critic_obs: actor_obs(67) + [base_lin_vel(3), ...]
+            # base_lin_vel is at indices 67:70
             priv_start = single_dim
             priv_gt = privileged_obs[:, priv_start:priv_start + self.privileged_recon_dim]
             self.privileged_recon_loss = 2.0 * (privileged_pred - priv_gt.detach()).pow(2).mean()

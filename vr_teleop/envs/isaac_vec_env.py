@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import torch
 
 from vr_teleop.envs.observation import ObsConfig, ObservationBuilder
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES, VR_DOF_INDICES, NUM_LOCO_DOFS
 from vr_teleop.utils.config_utils import get_asset_path
 from vr_teleop.utils.math_utils import (
     compute_projected_gravity,
@@ -80,8 +81,12 @@ class IsaacVecEnv:
         self.headless = bool(headless)
 
         self.num_dofs = int(self.cfg.num_dofs)
-        self.num_actions = int(self.cfg.lower_body_dofs)
+        self.num_actions = NUM_LOCO_DOFS  # 13 (12 legs + waist_pitch)
         self.backend_name = "isaac_native_local"
+
+        # Pre-compute index tensors for split control mapping
+        self._loco_indices = torch.tensor(LOCO_DOF_INDICES, dtype=torch.long, device=self.device)
+        self._vr_indices = torch.tensor(VR_DOF_INDICES, dtype=torch.long, device=self.device)
         self.using_fallback = False
         self.requested_backend = "isaacgym"
 
@@ -321,7 +326,7 @@ class IsaacVecEnv:
         self.last_last_actions = torch.zeros(self.num_envs, self.num_actions, device=self.device)
         self.full_actions_29 = torch.zeros(self.num_envs, self.num_dofs, device=self.device)
         self.upper_body_actions = torch.zeros(
-            self.num_envs, self.num_dofs - self.num_actions, device=self.device
+            self.num_envs, len(VR_DOF_INDICES), device=self.device
         )
 
         self.torques = torch.zeros(self.num_envs, self.num_dofs, device=self.device)
@@ -347,7 +352,7 @@ class IsaacVecEnv:
             obs_cfg=self.obs_cfg,
             num_envs=self.num_envs,
             device=self.device,
-            lower_body_dofs=self.cfg.lower_body_dofs,
+            lower_body_dofs=NUM_LOCO_DOFS,
         )
         total_obs_dim = (
             self.obs_cfg.single_step_dim
@@ -432,8 +437,8 @@ class IsaacVecEnv:
 
     def _refresh_default_observations(self, reset_env_ids: Optional[torch.Tensor] = None):
         dof_pos_rel = self.get_dof_pos_relative()
-        lower_pos = dof_pos_rel[:, : self.cfg.lower_body_dofs]
-        lower_vel = self.dof_vel[:, : self.cfg.lower_body_dofs]
+        lower_pos = dof_pos_rel[:, self._loco_indices]
+        lower_vel = self.dof_vel[:, self._loco_indices]
 
         actor_obs = self.obs_builder.build_actor_obs(
             base_ang_vel=self.base_ang_vel_body,
@@ -461,8 +466,8 @@ class IsaacVecEnv:
             mass_offset=self.mass_offsets,
             motor_strength=self.motor_strengths,
             pd_gain_mult=torch.stack([self.kp_multipliers, self.kd_multipliers], dim=-1),
-            upper_dof_pos=dof_pos_rel[:, self.cfg.lower_body_dofs :],
-            upper_dof_vel=self.dof_vel[:, self.cfg.lower_body_dofs :],
+            upper_dof_pos=dof_pos_rel[:, self._vr_indices],
+            upper_dof_vel=self.dof_vel[:, self._vr_indices],
             intervention_amp=self._command_context["intervention_amp"],
             intervention_freq=self._command_context["intervention_freq"],
         )
@@ -550,8 +555,8 @@ class IsaacVecEnv:
 
         actions = torch.clamp(actions, -self.cfg.action_clip_value, self.cfg.action_clip_value).to(self.device)
         self.actions[:] = actions
-        self.full_actions_29[:, : self.cfg.lower_body_dofs] = actions
-        self.full_actions_29[:, self.cfg.lower_body_dofs :] = self.upper_body_actions
+        self.full_actions_29[:, self._loco_indices] = actions
+        self.full_actions_29[:, self._vr_indices] = self.upper_body_actions
 
         for _ in range(self.decimation):
             torques = self._build_torques()

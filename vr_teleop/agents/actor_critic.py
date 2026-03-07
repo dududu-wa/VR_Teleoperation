@@ -20,12 +20,12 @@ class ActorCritic(nn.Module):
 
     def __init__(
         self,
-        num_actor_obs: int,          # history_steps * single_step_dim (e.g. 5*58=290)
-        num_critic_obs: int,         # 99
-        num_actions: int,            # 15
+        num_actor_obs: int,          # history_steps * single_step_dim (e.g. 5*67=335)
+        num_critic_obs: int,         # 96
+        num_actions: int,            # 13
         # Actor config
-        proprioception_dim: int = 51,
-        cmd_dim: int = 7,
+        proprioception_dim: int = 61,
+        cmd_dim: int = 6,
         history_length: int = 5,
         latent_dim: int = 32,
         privileged_recon_dim: int = 3,

@@ -9,6 +9,9 @@ _EXPORTS: Dict[str, Tuple[str, str]] = {
     "RolloutStorage": ("vr_teleop.agents.rollout_storage", "RolloutStorage"),
     "OnPolicyRunner": ("vr_teleop.agents.runner", "OnPolicyRunner"),
     "MlpAdaptModel": ("vr_teleop.agents.networks", "MlpAdaptModel"),
+    "UnitreeTeacher": ("vr_teleop.agents.pretrained_adapter", "UnitreeTeacher"),
+    "UpperBodyDefaultPolicy": ("vr_teleop.agents.pretrained_adapter", "UpperBodyDefaultPolicy"),
+    "DistillationLoss": ("vr_teleop.agents.pretrained_adapter", "DistillationLoss"),
 }
 
 __all__ = list(_EXPORTS.keys())

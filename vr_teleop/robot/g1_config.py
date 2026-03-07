@@ -16,6 +16,7 @@ class G1Config:
     # ---- DOF counts ----
     num_dofs: int = 29
     lower_body_dofs: int = 15   # 12 leg + 3 waist
+    loco_dofs: int = 13         # 12 leg + waist_pitch (policy-controlled)
     upper_body_dofs: int = 14   # 7 left arm + 7 right arm
     num_bodies: int = 32
 
@@ -79,6 +80,14 @@ class G1Config:
     lower_sym_left_op: List[int] = field(default_factory=lambda: [1, 2, 5])
     lower_sym_right_no: List[int] = field(default_factory=lambda: [6, 9, 10])
     lower_sym_right_op: List[int] = field(default_factory=lambda: [7, 8, 11])
+
+    # Locomotion (13-DOF) symmetric indices: 12 leg + waist_pitch
+    # loco order: L_leg[0:6], R_leg[6:12], waist_pitch[12]
+    loco_sym_left_no: List[int] = field(default_factory=lambda: [0, 3, 4])
+    loco_sym_left_op: List[int] = field(default_factory=lambda: [1, 2, 5])
+    loco_sym_right_no: List[int] = field(default_factory=lambda: [6, 9, 10])
+    loco_sym_right_op: List[int] = field(default_factory=lambda: [7, 8, 11])
+    loco_sym_waist_no: List[int] = field(default_factory=lambda: [12])  # waist_pitch: same sign
 
     # ---- Joint position limits (rad) ----
     dof_pos_lower: List[float] = field(default_factory=lambda: [

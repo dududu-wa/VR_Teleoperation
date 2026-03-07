@@ -20,6 +20,7 @@ class TerminationConfig:
     max_pitch: float = 1.0      # rad
     min_height: float = 0.3     # m
     episode_length: int = 1000  # max steps
+    grace_period: int = 0       # steps before termination checks begin
 
 
 class TerminationChecker:
@@ -63,6 +64,13 @@ class TerminationChecker:
 
         # Height termination
         height_term = base_height < self.cfg.min_height
+
+        # Grace period: skip all terminations during initial steps
+        if self.cfg.grace_period > 0:
+            in_grace = episode_length_buf < self.cfg.grace_period
+            contact_term = contact_term & (~in_grace)
+            orientation_term = orientation_term & (~in_grace)
+            height_term = height_term & (~in_grace)
 
         # Timeout
         timeout = episode_length_buf >= self.cfg.episode_length

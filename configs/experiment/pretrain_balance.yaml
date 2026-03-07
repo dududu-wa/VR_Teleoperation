@@ -47,7 +47,14 @@ rewards:
     weight: 1.0
     sigma: 0.5
 
+termination:
+  grace_period: 50  # no early termination for first 50 steps
+
+rewards:
+  termination:
+    weight: -50.0  # reduced from -200 for pretraining
+
 algo:
   max_iterations: 5000
   save_interval: 100
-  init_noise_std: 0.8
+  init_noise_std: 0.3

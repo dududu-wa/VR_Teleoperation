@@ -21,6 +21,7 @@ import numpy as np
 from typing import Tuple, Union, Optional, Dict
 
 from vr_teleop.robot.g1_config import G1Config
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES, VR_DOF_INDICES, NUM_LOCO_DOFS
 from vr_teleop.envs.observation import ObservationBuilder, ObsConfig
 from vr_teleop.envs.reward import RewardComputer, RewardConfig
 from vr_teleop.envs.termination import TerminationChecker, TerminationConfig
@@ -75,7 +76,7 @@ class G1MultigaitEnv:
         self.sim_backend = sim_backend.lower()
 
         # Action dimensions
-        self.num_actions = self.robot_cfg.lower_body_dofs  # 15
+        self.num_actions = NUM_LOCO_DOFS  # 13 (12 legs + waist_pitch)
         self.num_obs = self.obs_cfg.single_step_dim + self.obs_cfg.history_obs_dim * self.obs_cfg.include_history_steps  # 58 + 51*5 = 313
         self.num_privileged_obs = self.obs_cfg.critic_obs_dim  # 99
 
@@ -94,7 +95,7 @@ class G1MultigaitEnv:
             obs_cfg=self.obs_cfg,
             num_envs=num_envs,
             device=self.device,
-            lower_body_dofs=self.robot_cfg.lower_body_dofs,
+            lower_body_dofs=NUM_LOCO_DOFS,
         )
 
         # ---- Reward computer ----
@@ -149,7 +150,11 @@ class G1MultigaitEnv:
         self.intervention_flag = torch.zeros(num_envs, device=self.device)
         self.intervention_amp = torch.zeros(num_envs, device=self.device)
         self.intervention_freq = torch.zeros(num_envs, device=self.device)
-        self.upper_body_actions = torch.zeros(num_envs, self.robot_cfg.upper_body_dofs, device=self.device)
+        self.upper_body_actions = torch.zeros(num_envs, len(VR_DOF_INDICES), device=self.device)
+
+        # Pre-compute index tensors on device for fast slicing
+        self._loco_indices = torch.tensor(LOCO_DOF_INDICES, dtype=torch.long, device=self.device)
+        self._vr_indices = torch.tensor(VR_DOF_INDICES, dtype=torch.long, device=self.device)
 
         # ---- Output buffers ----
         self.obs_buf = torch.zeros(num_envs, self.num_obs, device=self.device)
@@ -210,7 +215,7 @@ class G1MultigaitEnv:
         """Execute one policy step.
 
         Args:
-            actions: (num_envs, 15) lower body actions from policy
+            actions: (num_envs, 13) locomotion actions from policy
 
         Returns:
             (obs_buf, privileged_obs_buf, rew_buf, reset_buf, extras)
@@ -315,7 +320,7 @@ class G1MultigaitEnv:
         self.upper_body_actions[env_ids] = 0.0
 
         # Reset intervention modules with current upper-body pose.
-        current_upper_pos = self.vec_env.dof_pos[env_ids, self.robot_cfg.lower_body_dofs:]
+        current_upper_pos = self.vec_env.dof_pos[env_ids][:, self._vr_indices]
         if self.intervention_generator is not None:
             self.intervention_generator.reset(env_ids, current_upper_pos=current_upper_pos)
         if self.feasibility_filter is not None:
@@ -411,11 +416,11 @@ class G1MultigaitEnv:
         self.transition_timer = (self.transition_timer - self.dt).clamp(min=0.0)
 
     def _build_actor_obs_single_step(self) -> torch.Tensor:
-        """Build single-step actor observation (N, 58)."""
-        # Lower body relative DOF positions
+        """Build single-step actor observation (N, 46)."""
+        # Locomotion DOF positions and velocities (13 each)
         dof_pos_rel = self.vec_env.get_dof_pos_relative()
-        lower_dof_pos = dof_pos_rel[:, :self.robot_cfg.lower_body_dofs]
-        lower_dof_vel = self.vec_env.dof_vel[:, :self.robot_cfg.lower_body_dofs]
+        lower_dof_pos = dof_pos_rel[:, self._loco_indices]
+        lower_dof_vel = self.vec_env.dof_vel[:, self._loco_indices]
 
         return self.obs_builder.build_actor_obs(
             base_ang_vel=self.vec_env.base_ang_vel_body,
@@ -465,8 +470,8 @@ class G1MultigaitEnv:
                 self.vec_env.kp_multipliers,
                 self.vec_env.kd_multipliers
             ], dim=-1),
-            upper_dof_pos=dof_pos_rel[:, self.robot_cfg.lower_body_dofs:],
-            upper_dof_vel=self.vec_env.dof_vel[:, self.robot_cfg.lower_body_dofs:],
+            upper_dof_pos=dof_pos_rel[:, self._vr_indices],
+            upper_dof_vel=self.vec_env.dof_vel[:, self._vr_indices],
             intervention_amp=self.intervention_amp,
             intervention_freq=self.intervention_freq,
         )
@@ -474,7 +479,7 @@ class G1MultigaitEnv:
     def _update_intervention(self, policy_lower_actions: torch.Tensor):
         """Generate and apply upper-body intervention for current step."""
         transition_mask = self.transition_timer > 0.0
-        current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+        current_upper_pos = self.vec_env.dof_pos[:, self._vr_indices]
 
         upper_actions, mask, amp, freq = self.intervention_generator.step(
             dt=self.dt,
@@ -527,9 +532,9 @@ class G1MultigaitEnv:
             actions=self.vec_env.actions,
             last_actions=self.vec_env.last_actions,
             last_last_actions=self.last_last_actions,
-            torques=self.vec_env.torques[:, :self.robot_cfg.lower_body_dofs],
-            dof_vel=self.vec_env.dof_vel[:, :self.robot_cfg.lower_body_dofs],
-            last_dof_vel=self.vec_env.last_dof_vel[:, :self.robot_cfg.lower_body_dofs],
+            torques=self.vec_env.torques[:, self._loco_indices],
+            dof_vel=self.vec_env.dof_vel[:, self._loco_indices],
+            last_dof_vel=self.vec_env.last_dof_vel[:, self._loco_indices],
             foot_contact_forces=self.vec_env.foot_contact_forces,
             foot_contact_forces_3d=self.vec_env.foot_contact_forces_3d,
             foot_velocities=self.vec_env.foot_velocities,
@@ -591,13 +596,13 @@ class G1MultigaitEnv:
 
         if generator is not None:
             env_ids = torch.arange(self.num_envs, device=self.device)
-            current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+            current_upper_pos = self.vec_env.dof_pos[:, self._vr_indices]
             generator.reset(env_ids, current_upper_pos=current_upper_pos)
             self.interrupt_mask = generator.interrupt_mask.clone()
             self.intervention_flag = self.interrupt_mask.float()
         if feasibility_filter is not None:
             env_ids = torch.arange(self.num_envs, device=self.device)
-            current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+            current_upper_pos = self.vec_env.dof_pos[:, self._vr_indices]
             feasibility_filter.reset(env_ids, current_pos=current_upper_pos)
 
     def set_intervention(self, upper_actions: torch.Tensor,
@@ -607,7 +612,7 @@ class G1MultigaitEnv:
         """Set upper body intervention signals.
 
         Args:
-            upper_actions: (N, 14) upper body joint targets
+            upper_actions: (N, 16) upper body joint targets (VR DOFs)
             mask: (N,) bool, which envs have active intervention
             amp: (N,) intervention amplitude (for critic obs)
             freq: (N,) intervention frequency (for critic obs)
@@ -660,7 +665,7 @@ class G1MultigaitEnv:
 
         # Optional safety filtering in joint space.
         if self.feasibility_filter is not None:
-            current_upper_pos = self.vec_env.dof_pos[:, self.robot_cfg.lower_body_dofs:]
+            current_upper_pos = self.vec_env.dof_pos[:, self._vr_indices]
             upper_abs_t, safety_mask = self.feasibility_filter.filter(
                 raw_targets=upper_abs_t,
                 current_upper_pos=current_upper_pos,
@@ -673,7 +678,7 @@ class G1MultigaitEnv:
         upper_actions = self.feasibility_filter.absolute_to_action_scale(
             upper_abs_t, self.robot_cfg.action_scale
         ) if self.feasibility_filter is not None else (
-            (upper_abs_t - self.vec_env.default_dof_pos[:, self.robot_cfg.lower_body_dofs:])
+            (upper_abs_t - self.vec_env.default_dof_pos[:, self._vr_indices])
             / self.robot_cfg.action_scale
         )
 
