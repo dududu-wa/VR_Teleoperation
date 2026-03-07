@@ -575,10 +575,13 @@ class G1MultigaitEnv:
         # Log termination types
         if 'termination' in self.extras:
             term = self.extras['termination']
+            height = term.get('height', torch.zeros_like(term['contact']))
+            fell = term['contact'] | term['orientation'] | height
             self.extras['episode']['timeout_rate'] = term['timeout'][reset_ids].float().mean().item()
             self.extras['episode']['contact_fall_rate'] = term['contact'][reset_ids].float().mean().item()
             self.extras['episode']['orientation_fall_rate'] = term['orientation'][reset_ids].float().mean().item()
-            fell = term['contact'] | term['orientation']
+            self.extras['episode']['height_fall_rate'] = height[reset_ids].float().mean().item()
+            self.extras['episode']['fall_rate'] = fell[reset_ids].float().mean().item()
             in_transition = term.get('in_transition', torch.zeros_like(fell))
             transition_failure = fell & in_transition
             self.extras['episode']['transition_failure_rate'] = (

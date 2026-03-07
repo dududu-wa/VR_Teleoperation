@@ -204,30 +204,41 @@ def main():
     config_dir = get_config_path()
 
     # Rewards config: YAML → RewardConfig
+    def _apply_reward_overrides(reward_cfg_obj: RewardConfig, reward_defs):
+        """Apply reward weights and params from a config mapping."""
+        if not isinstance(reward_defs, dict):
+            return
+        for reward_name, reward_def in reward_defs.items():
+            if not (isinstance(reward_def, dict) and "weight" in reward_def):
+                continue
+
+            reward_cfg_obj.weights[reward_name] = float(reward_def["weight"])
+
+            if reward_name == "tracking_lin_vel" and "sigma" in reward_def:
+                reward_cfg_obj.tracking_sigma = float(reward_def["sigma"])
+            if reward_name == "base_height":
+                for tgt_key, attr_name in [
+                    ("target_stand", "base_height_target_stand"),
+                    ("target_walk", "base_height_target_walk"),
+                    ("target_run", "base_height_target_run"),
+                ]:
+                    if tgt_key in reward_def:
+                        setattr(reward_cfg_obj, attr_name, float(reward_def[tgt_key]))
+            if reward_name == "feet_contact_forces" and "max_force" in reward_def:
+                reward_cfg_obj.max_contact_force = float(reward_def["max_force"])
+            if reward_name == "transition_stability" and "window" in reward_def:
+                reward_cfg_obj.transition_window = float(reward_def["window"])
+            if reward_name == "feet_air_time" and "target_air_time" in reward_def:
+                reward_cfg_obj.target_air_time = float(reward_def["target_air_time"])
+
     rewards_yaml_path = os.path.join(config_dir, "rewards", "g1_rewards.yaml")
     reward_cfg = RewardConfig()
     if os.path.isfile(rewards_yaml_path):
         rewards_yaml = load_yaml(rewards_yaml_path).get("rewards", {})
-        for reward_name, reward_def in rewards_yaml.items():
-            if isinstance(reward_def, dict) and "weight" in reward_def:
-                reward_cfg.weights[reward_name] = float(reward_def["weight"])
-                # Also load non-weight parameters
-                if reward_name == "tracking_lin_vel" and "sigma" in reward_def:
-                    reward_cfg.tracking_sigma = float(reward_def["sigma"])
-                if reward_name == "base_height":
-                    for tgt_key, attr_name in [
-                        ("target_stand", "base_height_target_stand"),
-                        ("target_walk", "base_height_target_walk"),
-                        ("target_run", "base_height_target_run"),
-                    ]:
-                        if tgt_key in reward_def:
-                            setattr(reward_cfg, attr_name, float(reward_def[tgt_key]))
-                if reward_name == "feet_contact_forces" and "max_force" in reward_def:
-                    reward_cfg.max_contact_force = float(reward_def["max_force"])
-                if reward_name == "transition_stability" and "window" in reward_def:
-                    reward_cfg.transition_window = float(reward_def["window"])
-                if reward_name == "feet_air_time" and "target_air_time" in reward_def:
-                    reward_cfg.target_air_time = float(reward_def["target_air_time"])
+        _apply_reward_overrides(reward_cfg, rewards_yaml)
+
+    exp_rewards_cfg = experiment_cfg.get("rewards", {}) if isinstance(experiment_cfg, dict) else {}
+    _apply_reward_overrides(reward_cfg, exp_rewards_cfg)
 
     # Algo config: YAML → ppo_cfg dict
     algo_yaml_path = os.path.join(config_dir, "algo", "ppo.yaml")
@@ -496,9 +507,7 @@ def main():
             tracking_reward = 0.5 * (tracking_lin + tracking_ang)
         else:
             tracking_reward = ep_info.get('reward_mean', 0.0)
-        fall_rate = ep_info.get('contact_fall_rate', 0.0)
-        orientation_fall = ep_info.get('orientation_fall_rate', 0.0)
-        total_fall_rate = fall_rate + orientation_fall
+        total_fall_rate = ep_info.get('fall_rate', 0.0)
         transition_failure = ep_info.get('transition_failure_rate', 0.0)
         ep_len = ep_info.get('episode_length_mean', 0.0)
 
