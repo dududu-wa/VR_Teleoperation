@@ -236,3 +236,84 @@ python scripts/train.py --curriculum-system lp_teacher --use-intervention
 - 两套体系共用同一套 PPO、环境和奖励实现。
 - `phase` 更适合可控、可解释、好复现实验。
 - `lp_teacher` 更适合自动探索任务难度前沿。
+
+---
+
+## 14. 训练失败诊断与修复 (2026-03-07)
+
+### 14.1 问题现象
+
+对 `phase` 和 `lp_teacher` 两套体系各运行 10,000 次迭代，均完全失败：
+
+| 指标 | Phase 训练 | LP-Teacher 训练 |
+|------|-----------|----------------|
+| Fall Rate | 1.000（100%） | ~0.96-1.02（接近 100%） |
+| 最终 Reward | 0.078 | 0.079 |
+| Phase 提升 | 始终停留 Phase 0 | N/A（在低 bin 徘徊） |
+| Action Noise Std | 0.82（不变） | 0.80 → 0.09 → **0.00**（崩溃） |
+
+机器人在整个训练过程中 **每个 episode 都立即摔倒**，策略从未学会站立。
+
+### 14.2 根因分析
+
+**核心问题：奖励权重严重失衡，惩罚项远大于正向激励，策略学会了"立即摔倒"。**
+
+1. **`standing_still` 惩罚过大**（权重 -10.0）：15 个动作维度 × 初始噪声 0.8 → 每步惩罚约 -48，而最大正向奖励仅 ~5.2/步。Phase 0 中约 35-40% 的环境触发此惩罚。存活 5 步的累计 standing_still 惩罚已超过摔倒的一次性惩罚（-200），**策略学到"摔倒比活着好"**。
+2. **`base_height` 惩罚过大**（权重 -40.0）：早期随机探索中身体轻微晃动即产生大量负奖励。
+3. **`torso_orientation` 惩罚过大**（权重 -20.0）：同上。
+4. **`alive` 奖励过小**（权重 0.2）：存活激励完全被惩罚项淹没。
+5. **`entropy_coef` 过小**（0.01）：LP-Teacher 中噪声 std 崩溃至 0，探索完全消失。
+6. **噪声 std 报告不准确**：`runner.py` 读取原始参数值而非 clamp 后的实际值，显示 0.00 具有误导性。
+
+### 14.3 修复内容
+
+#### 奖励权重重新平衡 (`configs/rewards/g1_rewards.yaml` + `vr_teleop/envs/reward.py`)
+
+| 参数 | 修改前 | 修改后 | 说明 |
+|------|--------|--------|------|
+| `alive` | 0.2 | **1.5** | 增强存活激励 |
+| `torso_orientation` | -20.0 | **-5.0** | 降低姿态惩罚，容许早期探索 |
+| `base_height` | -40.0 | **-8.0** | 降低高度惩罚 |
+| `standing_still` | -10.0 | **-0.5** | 大幅降低，消除"摔倒优于存活"的激励 |
+
+#### standing_still 惩罚归一化 (`vr_teleop/envs/reward.py`)
+
+`_standing_still()` 中的惩罚改为按动作/关节维度归一化（除以 `num_dofs` / `num_acts`），消除维度数量对惩罚幅度的影响。
+
+#### 熵系数调整 (`configs/algo/ppo.yaml` + `vr_teleop/agents/ppo.py`)
+
+| 参数 | 修改前 | 修改后 |
+|------|--------|--------|
+| `entropy_coef` | 0.01 | **0.03** |
+
+防止 LP-Teacher 训练中策略噪声崩溃。
+
+#### 噪声 std 报告修复 (`vr_teleop/agents/runner.py`)
+
+`mean_std` 日志改为读取 clamp 后的实际采样值（而非原始参数），避免误报 0.00。
+
+---
+
+## 15. 代码审查修复 (2026-03-07)
+
+在代码审查中发现并修复了以下问题：
+
+### Critical
+
+| # | 问题 | 文件 | 修复 |
+|---|------|------|------|
+| C1 | `_compute_rewards` 仅使用接触终止，遗漏姿态/高度终止 | `vr_teleop/envs/g1_multigait_env.py` | 终止信号改为 contact \| orientation \| height 的完整组合 |
+| C2 | 缺少 `extras['time_outs']`，PPO 无法对超时做 value bootstrapping | `vr_teleop/envs/g1_multigait_env.py` | 添加 `extras['time_outs']` 字段 |
+| C3 | 奖励分量仅记录最后一步快照而非 episode 累积值 | `vr_teleop/envs/g1_multigait_env.py` | 改为 episode 级累积后再记录 |
+| C4 | `InterventionGenerator.set_phase()` 未根据 phase 设置 `curriculum_factor` | `vr_teleop/intervention/intervention_generator.py` | `set_phase()` 中按 phase 映射 `curriculum_factor` |
+| C5 | PD 力矩仅在 decimation 循环外计算一次（50Hz），应在循环内每步重算（200Hz） | `vr_teleop/envs/g1_multigait_env.py` | 将力矩计算移入 decimation 循环内 |
+| C6 | checkpoint 不保存/加载课程状态，恢复训练后课程进度丢失 | `vr_teleop/agents/runner.py` | checkpoint 增加课程状态的保存与加载 |
+| C7 | `DomainRandConfig` 字段名与 eval.py/sim2sim_runner.py 中使用的名称不匹配 | `scripts/eval.py`, `vr_teleop/deploy/sim2sim_runner.py` | 修正字段名以匹配配置类定义 |
+
+### Medium
+
+| # | 问题 | 文件 | 修复 |
+|---|------|------|------|
+| M1 | `dof_vel` 观测噪声 `noise_scale=1.5` 过大，淹没真实信号 | `vr_teleop/envs/observation.py` | 降低为 0.2 |
+| M4 | `rewbuffer`/`lenbuffer` 在每次 `learn()` 调用时被重新创建，导致跨 chunk 统计丢失 | `vr_teleop/agents/runner.py` | 移至 `__init__` 中初始化，`learn()` 不再重建 |
+| M5 | mini-batch 随机排列仅生成一次，所有 PPO epoch 复用相同顺序 | `vr_teleop/agents/rollout_storage.py` | `torch.randperm` 移入 epoch 循环内，每轮重新生成 |

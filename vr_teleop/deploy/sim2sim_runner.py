@@ -136,7 +136,7 @@ class Sim2SimRunner:
             rand_cfg = DomainRandConfig(
                 randomize_friction=True,
                 friction_range=[fric, fric],  # fixed friction
-                randomize_mass=False,
+                randomize_base_mass=False,
                 randomize_pd_gains=False,
                 randomize_motor_strength=False,
                 push_robots=False,
@@ -160,8 +160,8 @@ class Sim2SimRunner:
         for offset in mass_offsets:
             rand_cfg = DomainRandConfig(
                 randomize_friction=False,
-                randomize_mass=True,
-                mass_offset_range=[offset, offset],  # fixed offset
+                randomize_base_mass=True,
+                added_mass_range=[offset, offset],  # fixed offset
                 randomize_pd_gains=False,
                 randomize_motor_strength=False,
                 push_robots=False,
@@ -185,10 +185,10 @@ class Sim2SimRunner:
         for scale in scales:
             rand_cfg = DomainRandConfig(
                 randomize_friction=False,
-                randomize_mass=False,
+                randomize_base_mass=False,
                 randomize_pd_gains=True,
-                kp_multiplier_range=[scale, scale],
-                kd_multiplier_range=[scale, scale],
+                kp_range=[scale, scale],
+                kd_range=[scale, scale],
                 randomize_motor_strength=False,
                 push_robots=False,
             )

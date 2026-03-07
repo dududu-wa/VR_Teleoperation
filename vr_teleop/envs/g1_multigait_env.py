@@ -162,6 +162,9 @@ class G1MultigaitEnv:
         self.episode_reward_sums = torch.zeros(num_envs, device=self.device)
         self.reward_components = {}
 
+        # Per-component episode sums for accurate curriculum metrics
+        self.episode_component_sums = {}
+
         # ---- Previous action for second-order action rate ----
         self.last_last_actions = torch.zeros(num_envs, self.num_actions, device=self.device)
 
@@ -236,14 +239,22 @@ class G1MultigaitEnv:
         # Compute observations
         self._compute_observations()
 
-        # Compute rewards
-        self._compute_rewards()
-
-        # Check terminations
+        # Check terminations first (rewards need termination info)
         self._check_terminations()
+
+        # Compute rewards (uses termination result for penalty)
+        self._compute_rewards()
 
         # Accumulate episode rewards
         self.episode_reward_sums += self.rew_buf
+
+        # Accumulate per-component sums for episode-level metrics
+        for name, vals in self.reward_components.items():
+            if name != 'total':
+                if name not in self.episode_component_sums:
+                    self.episode_component_sums[name] = torch.zeros(
+                        self.num_envs, device=self.device)
+                self.episode_component_sums[name] += vals
 
         # Update transition timer
         self._update_transition_state()
@@ -284,6 +295,8 @@ class G1MultigaitEnv:
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = False
         self.episode_reward_sums[env_ids] = 0.0
+        for sums in self.episode_component_sums.values():
+            sums[env_ids] = 0.0
         self.command_timer[env_ids] = 0
 
         # Reset transition state
@@ -491,6 +504,15 @@ class G1MultigaitEnv:
         is_timeout = self.episode_length_buf >= self.max_episode_length
         transition_mask = self.transition_timer > 0.0
 
+        # Use masked termination signals so penalty matches actual reset logic
+        # (contacts during intervention are masked and should not be penalized)
+        term = self.extras.get('termination', {})
+        is_terminated = (
+            term.get('contact', torch.zeros(self.num_envs, dtype=torch.bool, device=self.device))
+            | term.get('orientation', torch.zeros(self.num_envs, dtype=torch.bool, device=self.device))
+            | term.get('height', torch.zeros(self.num_envs, dtype=torch.bool, device=self.device))
+        )
+
         self.reward_components = self.reward_computer.compute_all(
             commands=self.commands,
             base_lin_vel=self.vec_env.base_lin_vel_body,
@@ -506,7 +528,7 @@ class G1MultigaitEnv:
             last_dof_vel=self.vec_env.last_dof_vel[:, :self.robot_cfg.lower_body_dofs],
             foot_contact_forces=self.vec_env.foot_contact_forces,
             foot_velocities=self.vec_env.foot_velocities,
-            is_terminated=self.vec_env.has_contact_termination,
+            is_terminated=is_terminated,
             is_timed_out=is_timeout,
             transition_mask=transition_mask,
             interrupt_mask=self.interrupt_mask,
@@ -526,17 +548,20 @@ class G1MultigaitEnv:
         term_result['in_transition'] = self.transition_timer > 0.0
         self.reset_buf = term_result['reset']
         self.extras['termination'] = term_result
+        # PPO expects 'time_outs' key for timeout bootstrapping
+        self.extras['time_outs'] = term_result['timeout']
 
     def _log_episode_info(self, reset_ids: torch.Tensor):
         """Log episode statistics for environments being reset."""
+        ep_lengths = self.episode_length_buf[reset_ids].float().clamp(min=1)
         self.extras['episode'] = {
             'reward_mean': self.episode_reward_sums[reset_ids].mean().item(),
-            'episode_length_mean': self.episode_length_buf[reset_ids].float().mean().item(),
+            'episode_length_mean': ep_lengths.mean().item(),
         }
-        # Log individual reward components
-        for name, vals in self.reward_components.items():
-            if name != 'total':
-                self.extras['episode'][f'reward_{name}'] = vals[reset_ids].mean().item()
+        # Log per-component episode averages (not single-step snapshots)
+        for name, sums in self.episode_component_sums.items():
+            avg = sums[reset_ids] / ep_lengths
+            self.extras['episode'][f'reward_{name}'] = avg.mean().item()
 
         # Log termination types
         if 'termination' in self.extras:

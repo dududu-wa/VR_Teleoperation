@@ -7,15 +7,15 @@ rewards:
     weight: 3.0
     sigma: 0.25
   alive:
-    weight: 0.2
+    weight: 1.5
 
   # Penalties (negative weights)
   torso_orientation:
-    weight: -20.0
+    weight: -5.0
   ang_vel_xy:
     weight: -0.5
   base_height:
-    weight: -40.0
+    weight: -8.0
     target_stand: 0.793
     target_walk: 0.75
     target_run: 0.72
@@ -36,6 +36,6 @@ rewards:
     weight: -5.0
     window: 0.5    # seconds around transition
   standing_still:
-    weight: -10.0
+    weight: -0.5
   termination:
     weight: -200.0

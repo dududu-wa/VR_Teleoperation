@@ -43,7 +43,7 @@ class ObsConfig:
     noise_scales: Dict[str, float] = field(default_factory=lambda: {
         'base_ang_vel': 0.2,
         'dof_pos': 0.01,
-        'dof_vel': 1.5,
+        'dof_vel': 0.2,
         'projected_gravity': 0.05,
     })
 

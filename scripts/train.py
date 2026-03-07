@@ -52,13 +52,13 @@ def parse_args():
                         help='Torch device')
     parser.add_argument('--max-iterations', type=int, default=DEFAULT_ARGS["max_iterations"],
                         help='Maximum training iterations')
-    parser.add_argument('--num-steps', type=int, default=DEFAULT_ARGS["num_steps"],
+    parser.add_argument('--num-steps', type=int, default=None,
                         help='Rollout steps per env per iteration')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')
     parser.add_argument('--log-dir', type=str, default='logs',
                         help='TensorBoard log directory')
-    parser.add_argument('--save-interval', type=int, default=DEFAULT_ARGS["save_interval"],
+    parser.add_argument('--save-interval', type=int, default=None,
                         help='Checkpoint save interval (iterations)')
     parser.add_argument('--experiment-name', type=str, default=DEFAULT_ARGS["experiment_name"],
                         help='Experiment name for logging')
@@ -88,7 +88,7 @@ def main():
     )
     from vr_teleop.intervention.intervention_generator import InterventionGenerator, InterventionConfig
     from vr_teleop.intervention.feasibility_filter import FeasibilityFilter, FeasibilityConfig
-    from vr_teleop.utils.config_utils import load_experiment_config
+    from vr_teleop.utils.config_utils import load_experiment_config, load_yaml, get_config_path, deep_merge_dict
 
     # Set seed
     torch.manual_seed(args.seed)
@@ -103,7 +103,8 @@ def main():
     def _use_cfg(arg_name: str, cfg_value):
         if cfg_value is None:
             return
-        if getattr(args, arg_name) == DEFAULT_ARGS[arg_name]:
+        current = getattr(args, arg_name)
+        if current is None or current == DEFAULT_ARGS.get(arg_name):
             setattr(args, arg_name, cfg_value)
 
     _use_cfg("sim_backend", experiment_cfg.get("sim_backend"))
@@ -185,10 +186,45 @@ def main():
     if args.curriculum_system == "phase":
         print(f"  Initial phase: {args.initial_phase}")
 
+    # ---- Load component YAML configs ----
+    config_dir = get_config_path()
+
+    # Rewards config: YAML → RewardConfig
+    rewards_yaml_path = os.path.join(config_dir, "rewards", "g1_rewards.yaml")
+    reward_cfg = RewardConfig()
+    if os.path.isfile(rewards_yaml_path):
+        rewards_yaml = load_yaml(rewards_yaml_path).get("rewards", {})
+        for reward_name, reward_def in rewards_yaml.items():
+            if isinstance(reward_def, dict) and "weight" in reward_def:
+                reward_cfg.weights[reward_name] = float(reward_def["weight"])
+                # Also load non-weight parameters
+                if reward_name == "tracking_lin_vel" and "sigma" in reward_def:
+                    reward_cfg.tracking_sigma = float(reward_def["sigma"])
+                if reward_name == "base_height":
+                    for tgt_key, attr_name in [
+                        ("target_stand", "base_height_target_stand"),
+                        ("target_walk", "base_height_target_walk"),
+                        ("target_run", "base_height_target_run"),
+                    ]:
+                        if tgt_key in reward_def:
+                            setattr(reward_cfg, attr_name, float(reward_def[tgt_key]))
+                if reward_name == "feet_contact_forces" and "max_force" in reward_def:
+                    reward_cfg.max_contact_force = float(reward_def["max_force"])
+                if reward_name == "transition_stability" and "window" in reward_def:
+                    reward_cfg.transition_window = float(reward_def["window"])
+
+    # Algo config: YAML → ppo_cfg dict
+    algo_yaml_path = os.path.join(config_dir, "algo", "ppo.yaml")
+    algo_yaml = {}
+    if os.path.isfile(algo_yaml_path):
+        algo_yaml = load_yaml(algo_yaml_path).get("algo", {})
+    # Merge: experiment config overrides YAML defaults
+    if algo_cfg:
+        algo_yaml = deep_merge_dict(algo_yaml, algo_cfg)
+
     # ---- Create configs ----
     robot_cfg = G1Config()
     obs_cfg = ObsConfig()
-    reward_cfg = RewardConfig()
     term_cfg = TerminationConfig(episode_length=max_episode_length)
     rand_cfg = DomainRandConfig()
 
@@ -216,14 +252,43 @@ def main():
     print(f"  Resolved backend: {resolved_backend}")
 
     # ---- Config dicts for runner ----
-    actor_critic_cfg = {}  # use defaults from ActorCritic
-    ppo_cfg = {
-        'num_learning_epochs': int(algo_cfg.get('num_learning_epochs', 8)),
-        'num_mini_batches': int(algo_cfg.get('num_mini_batches', 4)),
-    }
+    # ActorCritic config from algo YAML
+    network_cfg = algo_yaml.get('network', {})
+    actor_net = network_cfg.get('actor', {})
+    critic_net = network_cfg.get('critic', {})
+    actor_critic_cfg = {}
+    if actor_net.get('history_encoder_dims'):
+        actor_critic_cfg['history_encoder_hidden'] = actor_net['history_encoder_dims']
+    if actor_net.get('state_estimator_dims'):
+        actor_critic_cfg['state_estimator_hidden'] = actor_net['state_estimator_dims']
+    if actor_net.get('controller_dims'):
+        actor_critic_cfg['controller_hidden'] = actor_net['controller_dims']
+    if critic_net.get('hidden_dims'):
+        actor_critic_cfg['critic_hidden_dims'] = critic_net['hidden_dims']
+    if 'init_noise_std' in algo_yaml:
+        actor_critic_cfg['init_noise_std'] = float(algo_yaml['init_noise_std'])
+    if 'min_noise_std' in algo_yaml:
+        actor_critic_cfg['min_std'] = float(algo_yaml['min_noise_std'])
+    if 'max_noise_std' in algo_yaml:
+        actor_critic_cfg['max_std'] = float(algo_yaml['max_noise_std'])
+
+    # PPO config: consume all relevant keys from algo YAML
+    ppo_keys = [
+        'num_learning_epochs', 'num_mini_batches', 'clip_param',
+        'gamma', 'lam', 'value_loss_coef', 'entropy_coef',
+        'learning_rate', 'max_grad_norm', 'use_clipped_value_loss',
+        'use_symmetry_loss', 'symmetry_loss_coef',
+        'sync_update', 'adaptation_loss_coef',
+        'schedule', 'desired_kl',
+    ]
+    ppo_cfg = {}
+    for key in ppo_keys:
+        if key in algo_yaml:
+            ppo_cfg[key] = algo_yaml[key]
+
     runner_cfg = {
-        'num_steps_per_env': args.num_steps,
-        'save_interval': args.save_interval,
+        'num_steps_per_env': int(args.num_steps if args.num_steps is not None else algo_yaml.get('num_steps_per_env', DEFAULT_ARGS['num_steps'])),
+        'save_interval': int(args.save_interval if args.save_interval is not None else algo_yaml.get('save_interval', DEFAULT_ARGS['save_interval'])),
     }
 
     log_dir = os.path.join(args.log_dir, args.experiment_name)
@@ -269,6 +334,9 @@ def main():
     else:
         raise ValueError(f"Unsupported curriculum system: {args.curriculum_system}")
 
+    # Wire curriculum state into periodic checkpoints
+    runner.checkpoint_infos_fn = lambda: {'curriculum_state': curriculum.state_dict()}
+
     # ---- Create intervention generator ----
     intervention = None
     feasibility_filter = None
@@ -299,7 +367,11 @@ def main():
     # ---- Resume from checkpoint ----
     if args.resume:
         print(f"Resuming from {args.resume}")
-        runner.load(args.resume)
+        loaded_infos = runner.load(args.resume)
+        # Restore curriculum state if saved
+        if loaded_infos and 'curriculum_state' in loaded_infos:
+            curriculum.load_state_dict(loaded_infos['curriculum_state'])
+            print(f"  Restored curriculum state (phase={getattr(curriculum, 'phase', 'N/A')})")
 
     # ---- Training ----
     print(f"\nStarting training for {args.max_iterations} iterations...")
@@ -360,7 +432,7 @@ def main():
         )
 
         elapsed = time.time() - start_time
-        fps = (iters_done * args.num_steps * args.num_envs) / max(elapsed, 1)
+        fps = (iters_done * runner_cfg['num_steps_per_env'] * args.num_envs) / max(elapsed, 1)
 
         if args.curriculum_system == "phase":
             promoted = curriculum.check_promotion()
@@ -386,10 +458,13 @@ def main():
 
     total_time = time.time() - start_time
     if runner.log_dir is not None:
-        runner.save(os.path.join(
-            runner.log_dir,
-            f"model_{runner.current_learning_iteration}.pt"
-        ))
+        runner.save(
+            os.path.join(
+                runner.log_dir,
+                f"model_{runner.current_learning_iteration}.pt"
+            ),
+            infos={'curriculum_state': curriculum.state_dict()},
+        )
     print(f"\nTraining complete in {total_time:.0f}s")
     if args.curriculum_system == "phase":
         print(f"Final phase: {curriculum.phase}")

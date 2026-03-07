@@ -166,6 +166,13 @@ class InterventionGenerator:
         self._hold_T_range = params.get('hold_T', [3.0, 5.0])
         self._replay_mixing = params.get('replay_mixing_ratio', 0.0)
 
+        # Set curriculum_factor: phase 0 has no intervention (factor=0),
+        # higher phases activate curriculum blending (factor=1).
+        if phase > 0:
+            self.curriculum_factor[:] = 1.0
+        else:
+            self.curriculum_factor[:] = 0.0
+
     def reset(self, env_ids: torch.Tensor, current_upper_pos: torch.Tensor = None):
         """Reset intervention state for specified environments.
 
@@ -213,8 +220,7 @@ class InterventionGenerator:
             n, self.disturb_dim, device=self.device).uniform_(
             max(self._freq_range[0], 0.1), max(self._freq_range[1], 0.5))
 
-        # Reset curriculum factor
-        self.curriculum_factor[env_ids] = 0.0
+        # Keep curriculum_factor from set_phase; do not reset per-env.
 
     def step(
         self,

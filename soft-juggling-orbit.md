@@ -40,9 +40,9 @@
 | 5 | `vr_teleop/utils/symmetry.py` | FALCON yaml `symmetric_dofs_idx` + HugWBC PPO 对称损失 | G1 15-DOF 下肢对称置换矩阵 + 观测置换矩阵 |
 | 6 | `configs/base.yaml` | FALCON `config/base.yaml` | Hydra defaults 入口 |
 | 7 | `configs/robot/g1.yaml` | FALCON G1 yaml | 关节名/限位/PD增益 |
-| 8 | `configs/algo/ppo.yaml` | HugWBC PPO 默认参数 | clip=0.2, gamma=0.99, lam=0.95, lr=1e-4, symmetry_coef=0.5 |
+| 8 | `configs/algo/ppo.yaml` | HugWBC PPO 默认参数 | clip=0.2, gamma=0.99, lam=0.95, lr=1e-4, symmetry_coef=0.5, entropy_coef=0.03 |
 | 9 | `configs/obs/g1_obs.yaml` | 规划文档 2.3 节 | actor 单步 58 维；history 采用 proprio 51 维 × H=5（255）；critic ~99 维 |
-| 10 | `configs/rewards/g1_rewards.yaml` | 规划文档 2.6 节 | 13 项奖励权重 |
+| 10 | `configs/rewards/g1_rewards.yaml` | 规划文档 2.6 节 | 13 项奖励权重（已修复平衡：alive=1.5, standing_still=-0.5, base_height=-8, torso_orientation=-5） |
 | 11 | `configs/env/g1_multigait.yaml` | — | episode_length, decimation=4, sim_dt=0.005, action_scale |
 | 12 | `configs/domain_rand/default.yaml` | FALCON `domain_rand_rl_gym.yaml` | 摩擦/质量/PD增益/延迟随机化范围 |
 | 13 | `configs/curriculum/phase.yaml` | 规划文档 2.7 节 | Phase 0-4 阈值 + ADR 参数 |
@@ -216,3 +216,48 @@ python scripts/train.py --curriculum-system lp_teacher --use-intervention
 
 - 要可控、好复现：选 `phase`。
 - 要自动探索任务前沿：选 `lp_teacher`。
+
+---
+
+## Code Sync (2026-03-07): 训练失败修复
+
+两次训练（phase / lp_teacher 各 10K 迭代）均 100% 摔倒，根因为奖励权重失衡导致策略学会"立即摔倒"。
+
+### 修复内容
+
+**奖励权重重新平衡** (`configs/rewards/g1_rewards.yaml` + `vr_teleop/envs/reward.py`)：
+
+| 参数 | 修改前 | 修改后 | 说明 |
+|------|--------|--------|------|
+| `alive` | 0.2 | **1.5** | 增强存活激励 |
+| `torso_orientation` | -20.0 | **-5.0** | 降低以容许早期探索 |
+| `base_height` | -40.0 | **-8.0** | 降低以容许早期探索 |
+| `standing_still` | -10.0 | **-0.5** | 消除"摔倒优于存活"激励 |
+
+**standing_still 归一化**：惩罚按动作/关节维度数归一化，消除 DOF 数量对惩罚幅度的影响。
+
+**熵系数** (`configs/algo/ppo.yaml` + `vr_teleop/agents/ppo.py`)：0.01 → **0.03**，防止噪声崩溃。
+
+**噪声日志修复** (`vr_teleop/agents/runner.py`)：报告 clamp 后实际值而非原始参数。
+
+---
+
+## 代码审查修复 (2026-03-07)
+
+代码审查发现并修复了以下 Critical 与 Medium 级别问题：
+
+### Critical 修复
+
+- **C1**: `_compute_rewards` 终止信号不完整 -- 改为 contact | orientation | height 完整组合 (`g1_multigait_env.py`)
+- **C2**: 缺少 `extras['time_outs']` -- PPO 无法对超时做 value bootstrapping (`g1_multigait_env.py`)
+- **C3**: 奖励分量仅记录单步快照 -- 改为 episode 级累积 (`g1_multigait_env.py`)
+- **C4**: `InterventionGenerator.set_phase()` 未设置 `curriculum_factor` -- 按 phase 映射 (`intervention_generator.py`)
+- **C5**: PD 力矩在 decimation 循环外计算（50Hz）-- 移入循环内（200Hz）(`g1_multigait_env.py`)
+- **C6**: checkpoint 不保存课程状态 -- 增加课程状态保存/加载 (`runner.py`)
+- **C7**: `DomainRandConfig` 字段名不匹配 -- 修正 `eval.py` 和 `sim2sim_runner.py` 中的字段名
+
+### Medium 修复
+
+- **M1**: `dof_vel` 观测噪声 `noise_scale` 1.5 → 0.2 (`observation.py`)
+- **M4**: `rewbuffer`/`lenbuffer` 从 `learn()` 移至 `__init__` 以保持跨 chunk 统计 (`runner.py`)
+- **M5**: mini-batch 随机排列改为每个 PPO epoch 重新生成 (`rollout_storage.py`)

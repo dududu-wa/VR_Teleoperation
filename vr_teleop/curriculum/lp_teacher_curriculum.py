@@ -103,6 +103,35 @@ class LPTeacherCurriculum:
             "signal": self._last_signal,
         }
 
+    def state_dict(self) -> dict:
+        """Serialize curriculum state for checkpointing."""
+        return {
+            "iteration": self.iteration,
+            "current_bin": self.current_bin,
+            "current_difficulty": self.current_difficulty,
+            "last_signal": self._last_signal,
+            "teacher_reward_ema": self.teacher.reward_ema.tolist(),
+            "teacher_prev_reward_ema": self.teacher.prev_reward_ema.tolist(),
+            "teacher_lp_scores": self.teacher.lp_scores.tolist(),
+            "teacher_sample_count": self.teacher.sample_count.tolist(),
+        }
+
+    def load_state_dict(self, state: dict):
+        """Restore curriculum state from checkpoint."""
+        self.iteration = state["iteration"]
+        self.current_bin = state["current_bin"]
+        self.current_difficulty = state["current_difficulty"]
+        self._last_signal = state.get("last_signal", 0.0)
+
+        self.teacher.reward_ema[:] = state["teacher_reward_ema"]
+        self.teacher.prev_reward_ema[:] = state["teacher_prev_reward_ema"]
+        self.teacher.lp_scores[:] = state["teacher_lp_scores"]
+        self.teacher.sample_count[:] = state["teacher_sample_count"]
+
+        # Rebuild derived fields from restored difficulty
+        self._command_ranges = self._build_command_ranges(self.current_difficulty)
+        self._gait_probs = self._build_gait_probs(self.current_difficulty)
+
     def _build_command_ranges(self, difficulty: float) -> Dict[str, dict]:
         d = float(np.clip(difficulty, 0.0, 1.0))
 

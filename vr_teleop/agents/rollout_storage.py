@@ -138,10 +138,6 @@ class RolloutStorage:
         """
         batch_size = self.num_envs * self.num_transitions_per_env
         mini_batch_size = batch_size // num_mini_batches
-        indices = torch.randperm(
-            num_mini_batches * mini_batch_size,
-            requires_grad=False, device=self.device)
-
         # Flatten time and env dimensions
         observations = self.observations.flatten(0, 1)
         if self.privileged_observations is not None:
@@ -158,6 +154,9 @@ class RolloutStorage:
         old_sigma = self.sigma.flatten(0, 1)
 
         for epoch in range(num_epochs):
+            indices = torch.randperm(
+                num_mini_batches * mini_batch_size,
+                requires_grad=False, device=self.device)
             for i in range(num_mini_batches):
                 start = i * mini_batch_size
                 end = (i + 1) * mini_batch_size

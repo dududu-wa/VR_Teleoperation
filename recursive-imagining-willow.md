@@ -256,7 +256,7 @@ Critic 网络:
 - `clip_param=0.2`, `gamma=0.99`, `lam=0.95`
 - `num_learning_epochs=5`, `num_mini_batches=4`
 - `learning_rate=1e-4`, adaptive KL schedule (`desired_kl=0.01`)
-- `value_loss_coef=1.0`, `entropy_coef=0.01`
+- `value_loss_coef=1.0`, `entropy_coef=0.03`
 - `max_grad_norm=1.0`
 - `use_symmetry_loss=True`, `symmetry_loss_coef=0.5`
 - `sync_update=True`（启用特权信息重建损失）
@@ -280,17 +280,17 @@ L = L_surrogate + value_loss_coef * L_value - entropy_coef * H
 |--------|------|------|------|
 | tracking_lin_vel | 正向 | +2.0 | exp(-‖v_cmd - v_actual‖²/σ²), σ=0.25 |
 | tracking_ang_vel | 正向 | +3.0 | exp(-(wz_cmd - wz_actual)²/σ²) |
-| alive | 正向 | +0.2 | 存活奖励 |
-| torso_orientation | 惩罚 | -20.0 | 躯干 roll/pitch 偏离 |
+| alive | 正向 | +1.5 | 存活奖励（增强存活激励） |
+| torso_orientation | 惩罚 | -5.0 | 躯干 roll/pitch 偏离（降低以容许早期探索） |
 | ang_vel_xy | 惩罚 | -0.5 | 横滚/俯仰角速度 |
-| base_height | 惩罚 | -40.0 | 离目标高度偏差 |
+| base_height | 惩罚 | -8.0 | 离目标高度偏差（降低以容许早期探索） |
 | action_rate | 惩罚 | -0.01 | 动作变化率 + 二阶变化 |
 | torques | 惩罚 | -5e-6 | 下肢力矩平方和 |
 | dof_acc | 惩罚 | -2.5e-7 | 关节加速度 |
 | foot_slip | 惩罚 | -0.2 | 足地接触时水平滑移 |
 | feet_contact_forces | 惩罚 | -0.2 | 过大接触力 |
 | transition_stability | 惩罚 | -5.0 | 步态切换窗口额外稳定性惩罚 |
-| standing_still | 惩罚 | -10.0 | stand 命令时关节不应动 |
+| standing_still | 惩罚 | -0.5 | stand 命令时关节不应动（降低以避免"摔倒优于存活"，按维度归一化） |
 | termination | 惩罚 | -200.0 | 非超时终止惩罚 |
 
 ### 2.7 课程系统 -- `vr_teleop/curriculum/phase_curriculum.py`
@@ -551,3 +551,41 @@ python scripts/train.py --curriculum-system lp_teacher --use-intervention
 - 两套体系共用同一套 PPO 与环境管线，只改变难度调度逻辑。
 - `phase` 适合可解释、可复现实验。
 - `lp_teacher` 适合自动探索任务前沿。
+
+---
+
+## Code Sync (2026-03-07): 训练失败修复
+
+两套训练体系（phase / lp_teacher）各 10K 迭代均完全失败（100% 摔倒率），根因为奖励权重失衡。
+
+### 修复的文件
+
+| 文件 | 修改 |
+|------|------|
+| `configs/rewards/g1_rewards.yaml` | alive: 0.2→1.5, torso_orientation: -20→-5, base_height: -40→-8, standing_still: -10→-0.5 |
+| `vr_teleop/envs/reward.py` | 默认权重同步 + `_standing_still()` 按维度归一化 |
+| `configs/algo/ppo.yaml` | entropy_coef: 0.01→0.03 |
+| `vr_teleop/agents/ppo.py` | entropy_coef 默认值同步 |
+| `vr_teleop/agents/runner.py` | mean_std 日志改为 clamp 后的实际值 |
+
+---
+
+## 代码审查修复 (2026-03-07)
+
+代码审查发现并修复了以下 Critical 与 Medium 级别问题：
+
+### Critical 修复
+
+- **C1**: `_compute_rewards` 终止信号不完整 -- 改为 contact | orientation | height 的完整组合 (`g1_multigait_env.py`)
+- **C2**: 缺少 `extras['time_outs']` -- PPO 无法对超时做 value bootstrapping (`g1_multigait_env.py`)
+- **C3**: 奖励分量仅记录单步快照 -- 改为 episode 级累积 (`g1_multigait_env.py`)
+- **C4**: `InterventionGenerator.set_phase()` 未设置 `curriculum_factor` -- 按 phase 映射 (`intervention_generator.py`)
+- **C5**: PD 力矩在 decimation 循环外计算（50Hz）-- 移入循环内（200Hz）(`g1_multigait_env.py`)
+- **C6**: checkpoint 不保存课程状态 -- 增加课程状态保存/加载 (`runner.py`)
+- **C7**: `DomainRandConfig` 字段名不匹配 -- 修正 `eval.py` 和 `sim2sim_runner.py` 中的字段名
+
+### Medium 修复
+
+- **M1**: `dof_vel` 观测噪声 `noise_scale` 1.5 → 0.2 (`observation.py`)
+- **M4**: `rewbuffer`/`lenbuffer` 从 `learn()` 移至 `__init__` 以保持跨 chunk 统计 (`runner.py`)
+- **M5**: mini-batch 随机排列改为每个 PPO epoch 重新生成 (`rollout_storage.py`)

@@ -61,10 +61,20 @@ class TrainingLogger:
         self.writer.add_scalar("Perf/collection_time", collection_time, iteration)
         self.writer.add_scalar("Perf/learning_time", learn_time, iteration)
 
-    def log_policy_info(self, learning_rate: float, mean_std: float, iteration: int):
-        """Log policy-related info."""
+    def log_policy_info(self, learning_rate: float, mean_std: float, iteration: int,
+                        raw_std: float = None):
+        """Log policy-related info.
+
+        Args:
+            learning_rate: Current learning rate.
+            mean_std: Clamped mean action noise std (actual sampling value).
+            iteration: Current iteration.
+            raw_std: Raw (unclamped) mean std parameter for diagnostics.
+        """
         self.writer.add_scalar("Loss/learning_rate", learning_rate, iteration)
         self.writer.add_scalar("Policy/mean_noise_std", mean_std, iteration)
+        if raw_std is not None:
+            self.writer.add_scalar("Policy/raw_noise_std", raw_std, iteration)
 
     def log_curriculum(self, phase: int, params: dict, iteration: int):
         """Log curriculum state."""

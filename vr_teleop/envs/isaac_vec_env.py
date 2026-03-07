@@ -549,19 +549,18 @@ class IsaacVecEnv:
         self.full_actions_29[:, : self.cfg.lower_body_dofs] = actions
         self.full_actions_29[:, self.cfg.lower_body_dofs :] = self.upper_body_actions
 
-        torques = self._build_torques()
-        self._actuation_forces.zero_()
-        self._actuation_forces[:, : self.num_dofs] = torques.to(self._sim_tensor_device)
-
         for _ in range(self.decimation):
+            torques = self._build_torques()
+            self._actuation_forces.zero_()
+            self._actuation_forces[:, : self.num_dofs] = torques.to(self._sim_tensor_device)
             self.gym.set_dof_actuation_force_tensor(self.sim, self._unwrap(self._actuation_forces.view(-1)))
             self.gym.simulate(self.sim)
             self.gym.fetch_results(self.sim, True)
             if self.viewer is not None:
                 self.gym.step_graphics(self.sim)
                 self.gym.draw_viewer(self.viewer, self.sim, True)
+            self._refresh_sim_tensors()
 
-        self._refresh_sim_tensors()
         self._sync_from_sim()
         self.episode_length_buf += 1
         self.rew_buf.zero_()

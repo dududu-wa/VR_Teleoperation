@@ -23,10 +23,10 @@ class RewardConfig:
     weights: Dict[str, float] = field(default_factory=lambda: {
         'tracking_lin_vel': 2.0,
         'tracking_ang_vel': 3.0,
-        'alive': 0.2,
-        'torso_orientation': -20.0,
+        'alive': 1.5,
+        'torso_orientation': -5.0,
         'ang_vel_xy': -0.5,
-        'base_height': -40.0,
+        'base_height': -8.0,
         'action_rate': -0.01,
         'action_rate_second_order': -0.005,
         'torques': -5.0e-6,
@@ -34,7 +34,7 @@ class RewardConfig:
         'foot_slip': -0.2,
         'feet_contact_forces': -0.2,
         'transition_stability': -5.0,
-        'standing_still': -10.0,
+        'standing_still': -0.5,
         'termination': -200.0,
     })
 
@@ -241,14 +241,17 @@ class RewardComputer:
         """Penalize motion when standing (commands near zero).
 
         Only active when commanded velocity is near zero.
+        Normalized by number of dimensions to keep scale independent of DOF count.
         """
         # Standing = all velocity commands near zero
         cmd_mag = torch.norm(commands, dim=-1)
         is_standing = (cmd_mag < 0.1).float()  # (N,)
 
-        # Penalize joint velocities + actions when standing
+        # Penalize joint velocities + actions when standing (normalized by dim)
+        num_dofs = dof_vel.shape[-1]
+        num_acts = actions.shape[-1]
         motion_penalty = (
-            torch.sum(torch.abs(dof_vel), dim=-1) * 0.1 +
-            torch.sum(torch.abs(actions), dim=-1) * 0.5
+            torch.sum(torch.abs(dof_vel), dim=-1) / num_dofs * 0.1 +
+            torch.sum(torch.abs(actions), dim=-1) / num_acts * 0.5
         )
         return motion_penalty * is_standing

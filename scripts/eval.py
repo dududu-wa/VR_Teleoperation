@@ -96,7 +96,7 @@ def main():
     rand_cfg = DomainRandConfig()
     if args.no_domain_rand:
         rand_cfg.randomize_friction = False
-        rand_cfg.randomize_mass = False
+        rand_cfg.randomize_base_mass = False
         rand_cfg.randomize_pd_gains = False
         rand_cfg.randomize_motor_strength = False
         rand_cfg.push_robots = False

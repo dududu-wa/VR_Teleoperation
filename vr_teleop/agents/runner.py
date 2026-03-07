@@ -89,6 +89,15 @@ class OnPolicyRunner:
 
         # Training state
         self.current_learning_iteration = 0
+        self.checkpoint_infos_fn = None
+
+        # Episode tracking (persistent across learn() calls)
+        self.rewbuffer = deque(maxlen=100)
+        self.lenbuffer = deque(maxlen=100)
+        self.cur_reward_sum = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device)
+        self.cur_episode_length = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device)
 
         # Reset environment
         self.env.reset_all()
@@ -110,13 +119,11 @@ class OnPolicyRunner:
         critic_obs = self.env.get_privileged_observations().to(self.device)
         self.alg.train_mode()
 
-        # Episode tracking
-        rewbuffer = deque(maxlen=100)
-        lenbuffer = deque(maxlen=100)
-        cur_reward_sum = torch.zeros(
-            self.env.num_envs, dtype=torch.float, device=self.device)
-        cur_episode_length = torch.zeros(
-            self.env.num_envs, dtype=torch.float, device=self.device)
+        # Use persistent episode tracking buffers
+        rewbuffer = self.rewbuffer
+        lenbuffer = self.lenbuffer
+        cur_reward_sum = self.cur_reward_sum
+        cur_episode_length = self.cur_episode_length
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
@@ -168,7 +175,8 @@ class OnPolicyRunner:
 
             # ---- Checkpointing ----
             if self.log_dir is not None and it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, f'model_{it}.pt'))
+                infos = self.checkpoint_infos_fn() if self.checkpoint_infos_fn else None
+                self.save(os.path.join(self.log_dir, f'model_{it}.pt'), infos=infos)
 
         # Final save
         self.current_learning_iteration = tot_iter
@@ -176,18 +184,23 @@ class OnPolicyRunner:
             self.log_dir is not None
             and self.current_learning_iteration % self.save_interval == 0
         ):
+            infos = self.checkpoint_infos_fn() if self.checkpoint_infos_fn else None
             self.save(os.path.join(
-                self.log_dir, f'model_{self.current_learning_iteration}.pt'))
+                self.log_dir, f'model_{self.current_learning_iteration}.pt'), infos=infos)
 
     def _log(self, iteration: int, num_iterations: int, metrics: dict,
              rewbuffer, lenbuffer, collection_time: float, learn_time: float):
         """Log training metrics to TensorBoard and console."""
-        mean_std = self.alg.actor_critic.std.mean().item()
+        raw_std = self.alg.actor_critic.std.mean().item()
+        mean_std = torch.clamp(self.alg.actor_critic.std,
+                               min=self.alg.actor_critic.min_std,
+                               max=self.alg.actor_critic.max_std).mean().item()
 
         # TensorBoard logging
         self.logger.log_metrics(metrics, iteration)
         self.logger.log_policy_info(
-            self.alg.learning_rate, mean_std, iteration)
+            self.alg.learning_rate, mean_std, iteration,
+            raw_std=raw_std)
         self.logger.log_performance(
             collection_time, learn_time,
             self.num_steps_per_env, self.env.num_envs, iteration)
@@ -205,12 +218,16 @@ class OnPolicyRunner:
 
     def save(self, path: str, infos: dict = None):
         """Save model checkpoint."""
-        torch.save({
+        save_dict = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
             'infos': infos,
-        }, path)
+        }
+        # Save curriculum state if provided in infos
+        if infos and 'curriculum_state' in infos:
+            save_dict['curriculum_state'] = infos['curriculum_state']
+        torch.save(save_dict, path)
         print(f"Saved checkpoint to {path}")
 
     def load(self, path: str, load_optimizer: bool = True) -> dict:
