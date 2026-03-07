@@ -18,17 +18,17 @@ class UnitreeTeacher:
     """Wrapper for Unitree's pretrained 12-DOF TorchScript JIT locomotion model.
 
     The Unitree model is an LSTM(47->64) + MLP(64->32->12) that controls 12 leg DOFs.
-    This class handles observation mapping from our 58-dim obs format to the
+    This class handles observation mapping from our 67-dim obs format to the
     Unitree 47-dim format and maintains per-env LSTM hidden/cell state.
 
     Unitree obs (47-dim):
         base_ang_vel(3), projected_gravity(3), dof_pos(12), dof_vel(12),
         last_actions(12), commands(3), gait_phase(2)
 
-    Our actor obs (58-dim per step):
-        base_ang_vel(3), projected_gravity(3), dof_pos_lower(15), dof_vel_lower(15),
-        last_actions(15), commands_vel(2), command_yaw(1), gait_id(1),
-        intervention_flag(1), clock_input(2)
+    Our actor obs (67-dim per step):
+        base_ang_vel(3), projected_gravity(3), dof_pos_loco(13), dof_vel_loco(13),
+        last_actions(13), upper_body_pos(16), commands_vel(2), command_yaw(1),
+        gait_id(1), clock_input(2)
     """
 
     # Observation scales used by Unitree's pretrained model
@@ -61,19 +61,19 @@ class UnitreeTeacher:
             self.cell_state[:, env_ids] = 0.0
 
     def map_obs(self, our_obs: torch.Tensor) -> torch.Tensor:
-        """Map our 58-dim single-step obs to Unitree's 47-dim format.
+        """Map our 67-dim single-step obs to Unitree's 47-dim format.
 
-        Our obs layout (58-dim):
+        Our obs layout (67-dim):
             [0:3]   base_ang_vel        -> Unitree [0:3] (already scaled by 0.25 in our obs)
             [3:6]   projected_gravity   -> Unitree [3:6]
-            [6:21]  dof_pos_lower(15)   -> Unitree [6:18] (take first 12 = legs only)
-            [21:36] dof_vel_lower(15)   -> Unitree [18:30] (take first 12 = legs only)
-            [36:51] last_actions(15)    -> Unitree [30:42] (take first 12 = legs only)
-            [51:53] commands_vel(2)     -> Unitree [42:44] (need rescale: our=1.0, unitree=2.0)
-            [53:54] command_yaw(1)      -> Unitree [44:45] (need rescale: our=1.0, unitree=0.25)
-            [54:55] gait_id(1)          -> not used by Unitree
-            [55:56] intervention_flag   -> not used by Unitree
-            [56:58] clock_input(2)      -> Unitree [45:47]
+            [6:19]  dof_pos_loco(13)    -> Unitree [6:18] (take first 12 = legs only)
+            [19:32] dof_vel_loco(13)    -> Unitree [18:30] (take first 12 = legs only)
+            [32:45] last_actions(13)    -> Unitree [30:42] (take first 12 = legs only)
+            [45:61] upper_body_pos(16)  -> not used by Unitree
+            [61:63] commands_vel(2)     -> Unitree [42:44] (need rescale: our=1.0, unitree=2.0)
+            [63:64] command_yaw(1)      -> Unitree [44:45] (need rescale: our=1.0, unitree=0.25)
+            [64:65] gait_id(1)          -> not used by Unitree
+            [65:67] clock_input(2)      -> Unitree [45:47]
 
         Note: Our obs already applies scales (ang_vel*0.25, dof_vel*0.05).
         Unitree expects the same scales, so we can pass them through directly
@@ -82,11 +82,11 @@ class UnitreeTeacher:
         """
         # Handle batched obs: extract the current step (last step if 3D)
         if our_obs.dim() == 3:
-            # (B, H, 58) -> take last step
+            # (B, H, 67) -> take last step
             obs = our_obs[:, -1, :]
-        elif our_obs.dim() == 2 and our_obs.shape[-1] > 58:
-            # Flat (B, 313) = [current_obs(58), history(255)] -> take first 58
-            obs = our_obs[:, :58]
+        elif our_obs.dim() == 2 and our_obs.shape[-1] > 67:
+            # Flat (B, 372) = [current_obs(67), history(305)] -> take first 67
+            obs = our_obs[:, :67]
         else:
             obs = our_obs
 
@@ -97,18 +97,18 @@ class UnitreeTeacher:
         unitree_obs[:, 0:3] = obs[:, 0:3]
         # projected_gravity
         unitree_obs[:, 3:6] = obs[:, 3:6]
-        # dof_pos (12 leg joints only, skip 3 waist)
+        # dof_pos (12 leg joints only, skip waist_pitch at index 12 in loco)
         unitree_obs[:, 6:18] = obs[:, 6:18]
-        # dof_vel (12 leg joints only, skip 3 waist)
-        unitree_obs[:, 18:30] = obs[:, 21:33]
-        # last_actions (12 leg joints only, skip 3 waist)
-        unitree_obs[:, 30:42] = obs[:, 36:48]
+        # dof_vel (12 leg joints only, skip waist_pitch)
+        unitree_obs[:, 18:30] = obs[:, 19:31]
+        # last_actions (12 leg joints only, skip waist_pitch)
+        unitree_obs[:, 30:42] = obs[:, 32:44]
         # commands: lin_vel_x, lin_vel_y (rescale from our 1.0 to Unitree 2.0)
-        unitree_obs[:, 42:44] = obs[:, 51:53] * 2.0
+        unitree_obs[:, 42:44] = obs[:, 61:63] * 2.0
         # command_yaw (rescale from our 1.0 to Unitree 0.25)
-        unitree_obs[:, 44:45] = obs[:, 53:54] * 0.25
+        unitree_obs[:, 44:45] = obs[:, 63:64] * 0.25
         # gait_phase / clock input
-        unitree_obs[:, 45:47] = obs[:, 56:58]
+        unitree_obs[:, 45:47] = obs[:, 65:67]
 
         return unitree_obs
 
@@ -117,7 +117,7 @@ class UnitreeTeacher:
         """Get 12-DOF leg actions from the teacher model.
 
         Args:
-            our_obs: (N, 58) or (N, 313) or (N, H, 58) actor observations
+            our_obs: (N, 67) or (N, 372) or (N, H, 67) actor observations
 
         Returns:
             (N, 12) teacher leg joint actions

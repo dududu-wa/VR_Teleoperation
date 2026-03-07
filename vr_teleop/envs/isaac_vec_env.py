@@ -352,7 +352,7 @@ class IsaacVecEnv:
             obs_cfg=self.obs_cfg,
             num_envs=self.num_envs,
             device=self.device,
-            lower_body_dofs=NUM_LOCO_DOFS,
+            num_loco_dofs=NUM_LOCO_DOFS,
         )
         total_obs_dim = (
             self.obs_cfg.single_step_dim
@@ -440,15 +440,17 @@ class IsaacVecEnv:
         lower_pos = dof_pos_rel[:, self._loco_indices]
         lower_vel = self.dof_vel[:, self._loco_indices]
 
+        upper_pos = dof_pos_rel[:, self._vr_indices]
+
         actor_obs = self.obs_builder.build_actor_obs(
             base_ang_vel=self.base_ang_vel_body,
             projected_gravity=self.projected_gravity,
-            dof_pos_lower=lower_pos,
-            dof_vel_lower=lower_vel,
+            dof_pos_loco=lower_pos,
+            dof_vel_loco=lower_vel,
             last_actions=self.last_actions,
+            upper_body_pos=upper_pos,
             commands=self._command_context["commands"],
             gait_id=self._command_context["gait_id"],
-            intervention_flag=self._command_context["intervention_flag"],
             clock=self._command_context["clock"],
         )
         if reset_env_ids is not None and len(reset_env_ids) > 0:
@@ -466,7 +468,6 @@ class IsaacVecEnv:
             mass_offset=self.mass_offsets,
             motor_strength=self.motor_strengths,
             pd_gain_mult=torch.stack([self.kp_multipliers, self.kd_multipliers], dim=-1),
-            upper_dof_pos=dof_pos_rel[:, self._vr_indices],
             upper_dof_vel=self.dof_vel[:, self._vr_indices],
             intervention_amp=self._command_context["intervention_amp"],
             intervention_freq=self._command_context["intervention_freq"],

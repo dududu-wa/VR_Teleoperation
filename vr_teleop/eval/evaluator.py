@@ -14,6 +14,8 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES
+
 
 @dataclass
 class EvalConfig:
@@ -168,7 +170,7 @@ class Evaluator:
             ep_tracking_error_sum += tracking_err
 
             # Torque cost
-            torques = self.env.vec_env.torques[:, :self.env.robot_cfg.lower_body_dofs]
+            torques = self.env.vec_env.torques[:, LOCO_DOF_INDICES]
             torque_cost = torch.sum(torques ** 2, dim=-1) * self.env.dt
             ep_torque_cost_sum += torque_cost
 

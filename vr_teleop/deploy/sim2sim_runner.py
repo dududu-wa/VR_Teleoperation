@@ -23,6 +23,7 @@ from vr_teleop.envs.reward import RewardConfig
 from vr_teleop.envs.termination import TerminationConfig
 from vr_teleop.envs.domain_rand import DomainRandConfig
 from vr_teleop.agents.actor_critic import ActorCritic
+from vr_teleop.envs.dof_indices import NUM_LOCO_DOFS
 from vr_teleop.eval.evaluator import Evaluator, EvalConfig, EvalResult
 
 
@@ -60,7 +61,7 @@ class Sim2SimRunner:
         num_actor_obs = obs_cfg.single_step_dim + \
             obs_cfg.history_obs_dim * obs_cfg.include_history_steps
         num_critic_obs = obs_cfg.critic_obs_dim
-        num_actions = robot_cfg.lower_body_dofs
+        num_actions = NUM_LOCO_DOFS
 
         actor_critic = ActorCritic(
             num_actor_obs=num_actor_obs,

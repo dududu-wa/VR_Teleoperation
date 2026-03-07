@@ -95,7 +95,7 @@ class G1MultigaitEnv:
             obs_cfg=self.obs_cfg,
             num_envs=num_envs,
             device=self.device,
-            lower_body_dofs=NUM_LOCO_DOFS,
+            num_loco_dofs=NUM_LOCO_DOFS,
         )
 
         # ---- Reward computer ----
@@ -416,21 +416,22 @@ class G1MultigaitEnv:
         self.transition_timer = (self.transition_timer - self.dt).clamp(min=0.0)
 
     def _build_actor_obs_single_step(self) -> torch.Tensor:
-        """Build single-step actor observation (N, 46)."""
+        """Build single-step actor observation (N, 67)."""
         # Locomotion DOF positions and velocities (13 each)
         dof_pos_rel = self.vec_env.get_dof_pos_relative()
         lower_dof_pos = dof_pos_rel[:, self._loco_indices]
         lower_dof_vel = self.vec_env.dof_vel[:, self._loco_indices]
+        upper_body_pos = dof_pos_rel[:, self._vr_indices]
 
         return self.obs_builder.build_actor_obs(
             base_ang_vel=self.vec_env.base_ang_vel_body,
             projected_gravity=self.vec_env.projected_gravity,
-            dof_pos_lower=lower_dof_pos,
-            dof_vel_lower=lower_dof_vel,
+            dof_pos_loco=lower_dof_pos,
+            dof_vel_loco=lower_dof_vel,
             last_actions=self.vec_env.last_actions,
+            upper_body_pos=upper_body_pos,
             commands=self.commands,
             gait_id=self.gait_id.float(),
-            intervention_flag=self.intervention_flag,
             clock=self.clock_input,
         )
 
@@ -457,7 +458,6 @@ class G1MultigaitEnv:
         self.obs_buf = self.obs_builder.get_actor_obs_with_history(actor_obs)
 
         # Critic obs (privileged)
-        dof_pos_rel = self.vec_env.get_dof_pos_relative()
         self.privileged_obs_buf = self.obs_builder.build_critic_obs(
             actor_obs=actor_obs,
             base_lin_vel=self.vec_env.base_lin_vel_body,
@@ -470,7 +470,6 @@ class G1MultigaitEnv:
                 self.vec_env.kp_multipliers,
                 self.vec_env.kd_multipliers
             ], dim=-1),
-            upper_dof_pos=dof_pos_rel[:, self._vr_indices],
             upper_dof_vel=self.vec_env.dof_vel[:, self._vr_indices],
             intervention_amp=self.intervention_amp,
             intervention_freq=self.intervention_freq,

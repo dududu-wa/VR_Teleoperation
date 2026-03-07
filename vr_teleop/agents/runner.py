@@ -54,7 +54,7 @@ class OnPolicyRunner:
         # Observation dimensions from env
         num_actor_obs = env.num_obs           # 313 (58 + 51*5) flat
         num_critic_obs = env.num_privileged_obs  # 99
-        num_actions = env.num_actions          # 15
+        num_actions = env.num_actions          # 13
 
         # Create actor-critic model
         actor_critic = ActorCritic(

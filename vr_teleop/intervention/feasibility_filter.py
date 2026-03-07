@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Tuple
 
 from vr_teleop.robot.g1_config import G1Config
+from vr_teleop.envs.dof_indices import VR_DOF_INDICES, NUM_VR_DOFS
 
 
 @dataclass
@@ -47,19 +48,19 @@ class FeasibilityFilter:
         self.robot_cfg = robot_cfg or G1Config()
         self.num_envs = num_envs
         self.device = device or torch.device('cpu')
-        self.upper_dim = self.robot_cfg.upper_body_dofs  # 14
+        self.upper_dim = NUM_VR_DOFS  # 16
 
         # Joint limits for upper body
         pos_lower, pos_upper = self.robot_cfg.get_pos_limits()
-        self.upper_pos_lower = pos_lower[self.robot_cfg.upper_body_indices].to(self.device)
-        self.upper_pos_upper = pos_upper[self.robot_cfg.upper_body_indices].to(self.device)
+        self.upper_pos_lower = pos_lower[VR_DOF_INDICES].to(self.device)
+        self.upper_pos_upper = pos_upper[VR_DOF_INDICES].to(self.device)
         self.upper_default = self.robot_cfg.get_default_dof_pos()[
-            self.robot_cfg.upper_body_indices
+            VR_DOF_INDICES
         ].to(self.device)
 
         # Velocity limits for upper body
         vel_limits = torch.tensor(self.robot_cfg.dof_vel_limit, dtype=torch.float32)
-        self.upper_vel_limit = vel_limits[self.robot_cfg.upper_body_indices].to(self.device)
+        self.upper_vel_limit = vel_limits[VR_DOF_INDICES].to(self.device)
 
         # Smoothed output buffer
         self.smoothed_targets = torch.zeros(
@@ -73,7 +74,7 @@ class FeasibilityFilter:
 
         Args:
             env_ids: (K,) environment indices
-            current_pos: (K, 14) current upper body positions (absolute)
+            current_pos: (K, 16) current upper body positions (absolute)
         """
         if len(env_ids) == 0:
             return
@@ -95,14 +96,14 @@ class FeasibilityFilter:
         """Apply feasibility filter pipeline.
 
         Args:
-            raw_targets: (N, 14) raw intervention targets (absolute joint pos)
-            current_upper_pos: (N, 14) current upper body positions
+            raw_targets: (N, 16) raw intervention targets (absolute joint pos)
+            current_upper_pos: (N, 16) current upper body positions
             torso_euler: (N, 3) torso roll/pitch/yaw in radians
             dt: Policy timestep
             mask: (N,) bool, which envs have active intervention
 
         Returns:
-            filtered_targets: (N, 14) filtered absolute joint positions
+            filtered_targets: (N, 16) filtered absolute joint positions
             safety_mask: (N,) bool, updated mask (False if safety triggered)
         """
         if not self.cfg.enable:
@@ -174,11 +175,11 @@ class FeasibilityFilter:
         """Convert action-scale targets to absolute joint positions.
 
         Args:
-            action_targets: (N, 14) targets in action-scale (relative to default)
+            action_targets: (N, 16) targets in action-scale (relative to default)
             action_scale: Action scaling factor
 
         Returns:
-            (N, 14) absolute joint positions
+            (N, 16) absolute joint positions
         """
         return action_targets * action_scale + self.upper_default.unsqueeze(0)
 
@@ -188,11 +189,11 @@ class FeasibilityFilter:
         """Convert absolute joint positions to action-scale targets.
 
         Args:
-            abs_targets: (N, 14) absolute joint positions
+            abs_targets: (N, 16) absolute joint positions
             action_scale: Action scaling factor
 
         Returns:
-            (N, 14) action-scale targets
+            (N, 16) action-scale targets
         """
         return (abs_targets - self.upper_default.unsqueeze(0)) / action_scale
 

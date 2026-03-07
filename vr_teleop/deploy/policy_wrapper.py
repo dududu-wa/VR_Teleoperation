@@ -8,7 +8,7 @@ Suitable for real-time deployment on real robot or sim2sim.
 Interface:
     wrapper = PolicyWrapper.from_checkpoint('model.pt')
     wrapper.reset()
-    actions = wrapper.get_action(obs_dict)  # returns (15,) numpy
+    actions = wrapper.get_action(obs_dict)  # returns (13,) numpy
 """
 
 import torch
@@ -17,6 +17,7 @@ from typing import Dict, Optional
 
 from vr_teleop.robot.g1_config import G1Config
 from vr_teleop.envs.observation import ObservationBuilder, ObsConfig
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES, VR_DOF_INDICES, NUM_LOCO_DOFS, NUM_VR_DOFS
 from vr_teleop.agents.actor_critic import ActorCritic
 from vr_teleop.utils.math_utils import (
     compute_projected_gravity, quat_rotate_inverse, get_euler_xyz
@@ -46,16 +47,20 @@ class PolicyWrapper:
             obs_cfg=self.obs_cfg,
             num_envs=1,
             device=self.device,
-            lower_body_dofs=self.robot_cfg.lower_body_dofs,
+            num_loco_dofs=NUM_LOCO_DOFS,
         )
 
         # Default DOF positions
         self.default_dof_pos = self.robot_cfg.get_default_dof_pos().to(
             self.device).unsqueeze(0)
 
+        # Pre-compute index tensors
+        self._loco_indices = torch.tensor(LOCO_DOF_INDICES, dtype=torch.long, device=self.device)
+        self._vr_indices = torch.tensor(VR_DOF_INDICES, dtype=torch.long, device=self.device)
+
         # State
         self.last_actions = torch.zeros(
-            1, self.robot_cfg.lower_body_dofs, device=self.device)
+            1, NUM_LOCO_DOFS, device=self.device)
         self.gait_phase = 0.0
         self.walk_freq = 2.0
         self.run_freq = 3.0
@@ -85,7 +90,7 @@ class PolicyWrapper:
         num_actor_obs = obs_cfg.single_step_dim + \
             obs_cfg.history_obs_dim * obs_cfg.include_history_steps
         num_critic_obs = obs_cfg.critic_obs_dim
-        num_actions = robot_cfg.lower_body_dofs
+        num_actions = NUM_LOCO_DOFS
 
         actor_critic = ActorCritic(
             num_actor_obs=num_actor_obs,
@@ -124,7 +129,7 @@ class PolicyWrapper:
             commands: (3,) [vx, vy, wz] velocity commands
 
         Returns:
-            (15,) lower body joint action targets (action-scale space)
+            (13,) locomotion joint action targets (action-scale space)
         """
         if commands is None:
             commands = np.zeros(3, dtype=np.float32)
@@ -152,8 +157,9 @@ class PolicyWrapper:
 
         # Relative DOF positions
         dof_pos_rel = dof_pos - self.default_dof_pos
-        lower_dof_pos = dof_pos_rel[:, :self.robot_cfg.lower_body_dofs]
-        lower_dof_vel = dof_vel[:, :self.robot_cfg.lower_body_dofs]
+        lower_dof_pos = dof_pos_rel[:, self._loco_indices]
+        lower_dof_vel = dof_vel[:, self._loco_indices]
+        upper_body_pos = dof_pos_rel[:, self._vr_indices]
 
         # Gait clock
         freq = 0.0
@@ -169,18 +175,16 @@ class PolicyWrapper:
             clock[0, 0] = np.sin(phase_rad)
             clock[0, 1] = np.cos(phase_rad)
 
-        intervention_flag = torch.zeros(1, device=self.device)
-
         # Build observation
         actor_obs = self.obs_builder.build_actor_obs(
             base_ang_vel=base_ang_vel_body,
             projected_gravity=projected_gravity,
-            dof_pos_lower=lower_dof_pos,
-            dof_vel_lower=lower_dof_vel,
+            dof_pos_loco=lower_dof_pos,
+            dof_vel_loco=lower_dof_vel,
             last_actions=self.last_actions,
+            upper_body_pos=upper_body_pos,
             commands=cmd,
             gait_id=torch.tensor([float(gait_id)], device=self.device),
-            intervention_flag=intervention_flag,
             clock=clock,
         )
         self.obs_builder.update_history(actor_obs)
@@ -201,7 +205,7 @@ class PolicyWrapper:
             flat_obs: (num_actor_obs,) pre-built observation
 
         Returns:
-            (15,) lower body joint actions
+            (13,) locomotion joint actions
         """
         obs = torch.tensor(flat_obs, dtype=torch.float32).unsqueeze(0).to(
             self.device)

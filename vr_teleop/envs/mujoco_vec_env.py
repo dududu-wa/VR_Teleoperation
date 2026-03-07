@@ -19,6 +19,7 @@ from vr_teleop.robot.g1_config import G1Config
 from vr_teleop.envs.g1_base_env import G1BaseEnv
 from vr_teleop.envs.domain_rand import DomainRandomizer, DomainRandConfig
 from vr_teleop.envs.observation import ObservationBuilder, ObsConfig
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES, VR_DOF_INDICES, NUM_LOCO_DOFS, NUM_VR_DOFS
 from vr_teleop.utils.math_utils import (
     mujoco_quat_to_isaac, compute_projected_gravity,
     quat_rotate_inverse, get_euler_xyz
@@ -56,7 +57,7 @@ class MujocoVecEnv:
         self.max_episode_length = max_episode_length
         self.device = torch.device(device)
         self.num_dofs = self.cfg.num_dofs  # 29
-        self.num_actions = self.cfg.lower_body_dofs  # 15 (lower body policy)
+        self.num_actions = NUM_LOCO_DOFS  # 13 (12 legs + waist_pitch)
 
         # Resolve model path
         if model_path is None:
@@ -64,6 +65,10 @@ class MujocoVecEnv:
             model_path = os.path.join(asset_root, self.cfg.mujoco_scene_file)
             if not os.path.exists(model_path):
                 model_path = os.path.join(asset_root, self.cfg.mujoco_model_file)
+
+        # Pre-compute index tensors for split control mapping
+        self._loco_indices = torch.tensor(LOCO_DOF_INDICES, dtype=torch.long, device=self.device)
+        self._vr_indices = torch.tensor(VR_DOF_INDICES, dtype=torch.long, device=self.device)
 
         # ---- Create N MuJoCo instances ----
         self._envs = []
@@ -139,7 +144,7 @@ class MujocoVecEnv:
             obs_cfg=self.obs_cfg,
             num_envs=self.num_envs,
             device=self.device,
-            lower_body_dofs=self.cfg.lower_body_dofs,
+            num_loco_dofs=NUM_LOCO_DOFS,
         )
         self.obs_buf = torch.zeros(
             self.num_envs,
@@ -214,7 +219,7 @@ class MujocoVecEnv:
         """Execute one policy step across all environments.
 
         Args:
-            actions: (num_envs, num_actions) tensor of policy outputs (15-DOF lower body)
+            actions: (num_envs, num_actions) tensor of policy outputs (13-DOF locomotion)
 
         Returns:
             tuple: (obs, privileged_obs, rewards, resets, extras)
@@ -229,7 +234,7 @@ class MujocoVecEnv:
         self.actions[:] = torch.clamp(actions, -self.cfg.action_clip_value, self.cfg.action_clip_value)
 
         # Build full 29-DOF action (lower body from policy, upper body zeros or from intervention)
-        self.full_actions_29[:, :self.cfg.lower_body_dofs] = self.actions
+        self.full_actions_29[:, self._loco_indices] = self.actions
 
         # Convert to numpy and step each environment
         actions_np = self.full_actions_29.cpu().numpy()
@@ -390,18 +395,19 @@ class MujocoVecEnv:
     def _refresh_default_observations(self, reset_env_ids: Optional[torch.Tensor] = None):
         """Build actor/critic observations for direct VecEnv compatibility."""
         dof_pos_rel = self.get_dof_pos_relative()
-        lower_pos = dof_pos_rel[:, :self.cfg.lower_body_dofs]
-        lower_vel = self.dof_vel[:, :self.cfg.lower_body_dofs]
+        lower_pos = dof_pos_rel[:, self._loco_indices]
+        lower_vel = self.dof_vel[:, self._loco_indices]
+        upper_pos = dof_pos_rel[:, self._vr_indices]
 
         actor_obs = self.obs_builder.build_actor_obs(
             base_ang_vel=self.base_ang_vel_body,
             projected_gravity=self.projected_gravity,
-            dof_pos_lower=lower_pos,
-            dof_vel_lower=lower_vel,
+            dof_pos_loco=lower_pos,
+            dof_vel_loco=lower_vel,
             last_actions=self.last_actions,
+            upper_body_pos=upper_pos,
             commands=self._command_context["commands"],
             gait_id=self._command_context["gait_id"],
-            intervention_flag=self._command_context["intervention_flag"],
             clock=self._command_context["clock"],
         )
         if reset_env_ids is not None and len(reset_env_ids) > 0:
@@ -419,8 +425,7 @@ class MujocoVecEnv:
             mass_offset=self.mass_offsets,
             motor_strength=self.motor_strengths,
             pd_gain_mult=torch.stack([self.kp_multipliers, self.kd_multipliers], dim=-1),
-            upper_dof_pos=dof_pos_rel[:, self.cfg.lower_body_dofs:],
-            upper_dof_vel=self.dof_vel[:, self.cfg.lower_body_dofs:],
+            upper_dof_vel=self.dof_vel[:, self._vr_indices],
             intervention_amp=self._command_context["intervention_amp"],
             intervention_freq=self._command_context["intervention_freq"],
         )
@@ -429,13 +434,13 @@ class MujocoVecEnv:
         """Set upper body DOF targets (from intervention or VR).
 
         Args:
-            upper_actions: (N, 14) or (K, 14) upper body actions
+            upper_actions: (N, 16) or (K, 16) upper body actions
             env_ids: optional subset of env indices
         """
         if env_ids is None:
-            self.full_actions_29[:, self.cfg.lower_body_dofs:] = upper_actions
+            self.full_actions_29[:, self._vr_indices] = upper_actions
         else:
-            self.full_actions_29[env_ids, self.cfg.lower_body_dofs:] = upper_actions
+            self.full_actions_29[env_ids][:, self._vr_indices] = upper_actions
 
     def get_dof_pos_relative(self) -> torch.Tensor:
         """Get joint positions relative to default stance (N, 29)."""

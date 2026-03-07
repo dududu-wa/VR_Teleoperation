@@ -22,6 +22,7 @@ from typing import Optional
 
 from vr_teleop.robot.g1_config import G1Config
 from vr_teleop.deploy.policy_wrapper import PolicyWrapper
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES, NUM_LOCO_DOFS
 
 
 @dataclass
@@ -240,7 +241,7 @@ class DDSBridge:
                 # Convert action-scale to absolute position
                 # target = default + action * action_scale
                 target_pos = self.default_dof_pos.copy()
-                target_pos[:self.robot_cfg.lower_body_dofs] += \
+                target_pos[LOCO_DOF_INDICES] += \
                     actions * self.cfg.action_scale
 
                 # Startup ramp: blend from initial to policy output

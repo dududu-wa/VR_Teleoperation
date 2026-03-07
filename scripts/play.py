@@ -27,6 +27,7 @@ import mujoco.viewer
 from vr_teleop.robot.g1_config import G1Config
 from vr_teleop.envs.g1_base_env import G1BaseEnv
 from vr_teleop.envs.observation import ObservationBuilder, ObsConfig
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES, VR_DOF_INDICES, NUM_LOCO_DOFS
 from vr_teleop.agents.actor_critic import ActorCritic
 from vr_teleop.utils.math_utils import (
     mujoco_quat_to_isaac, compute_projected_gravity,
@@ -90,14 +91,14 @@ class PolicyPlayer:
             obs_cfg=self.obs_cfg,
             num_envs=1,
             device=self.device,
-            lower_body_dofs=self.robot_cfg.lower_body_dofs,
+            num_loco_dofs=NUM_LOCO_DOFS,
         )
 
         # Load actor-critic
         num_actor_obs = self.obs_cfg.single_step_dim + \
             self.obs_cfg.history_obs_dim * self.obs_cfg.include_history_steps
         num_critic_obs = self.obs_cfg.critic_obs_dim
-        num_actions = self.robot_cfg.lower_body_dofs
+        num_actions = NUM_LOCO_DOFS
 
         self.actor_critic = ActorCritic(
             num_actor_obs=num_actor_obs,
@@ -166,22 +167,24 @@ class PolicyPlayer:
         }
 
     def _build_single_step_obs(self, gait_id: int, commands: torch.Tensor,
-                                intervention_flag: torch.Tensor,
                                 clock: torch.Tensor) -> torch.Tensor:
-        """Build single-step actor obs (1, 58)."""
+        """Build single-step actor obs (1, 67)."""
         state = self._get_state_tensors()
-        lower_dof_pos = state['dof_pos_rel'][:, :self.robot_cfg.lower_body_dofs]
-        lower_dof_vel = state['dof_vel'][:, :self.robot_cfg.lower_body_dofs]
+        loco_indices = torch.tensor(LOCO_DOF_INDICES, device=self.device)
+        vr_indices = torch.tensor(VR_DOF_INDICES, device=self.device)
+        dof_pos_loco = state['dof_pos_rel'][:, loco_indices]
+        dof_vel_loco = state['dof_vel'][:, loco_indices]
+        upper_body_pos = state['dof_pos_rel'][:, vr_indices]
 
         return self.obs_builder.build_actor_obs(
             base_ang_vel=state['base_ang_vel_body'],
             projected_gravity=state['projected_gravity'],
-            dof_pos_lower=lower_dof_pos,
-            dof_vel_lower=lower_dof_vel,
+            dof_pos_loco=dof_pos_loco,
+            dof_vel_loco=dof_vel_loco,
             last_actions=self.last_actions,
+            upper_body_pos=upper_body_pos,
             commands=commands,
             gait_id=torch.tensor([float(gait_id)], device=self.device),
-            intervention_flag=intervention_flag,
             clock=clock,
         )
 
@@ -213,7 +216,7 @@ class PolicyPlayer:
 
         # Build observation
         actor_obs = self._build_single_step_obs(
-            gait_id, commands, intervention_flag, clock)
+            gait_id, commands, clock)
         self.obs_builder.update_history(actor_obs)
         full_obs = self.obs_builder.get_actor_obs_with_history(actor_obs)
 
@@ -226,7 +229,7 @@ class PolicyPlayer:
 
         # Step physics
         actions_np = torch.zeros(self.robot_cfg.num_dofs, dtype=torch.float32)
-        actions_np[:self.robot_cfg.lower_body_dofs] = actions.cpu()
+        actions_np[LOCO_DOF_INDICES] = actions.cpu()
         self.base_env.step(actions_np.numpy())
 
         return actions.cpu().numpy()
