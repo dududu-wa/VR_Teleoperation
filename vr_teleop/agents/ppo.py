@@ -36,6 +36,8 @@ class PPO:
         value_loss_coef: float = 1.0,
         entropy_coef: float = 0.01,
         learning_rate: float = 1e-4,
+        min_learning_rate: float = None,
+        max_learning_rate: float = None,
         weight_decay: float = 1e-2,
         max_grad_norm: float = 1.0,
         use_clipped_value_loss: bool = True,
@@ -60,6 +62,18 @@ class PPO:
         self.desired_kl = desired_kl
         self.schedule = schedule
         self.learning_rate = learning_rate
+        self.min_learning_rate = (
+            float(min_learning_rate)
+            if min_learning_rate is not None
+            else float(learning_rate) * 0.2
+        )
+        self.max_learning_rate = (
+            float(max_learning_rate)
+            if max_learning_rate is not None
+            else float(learning_rate) * 2.0
+        )
+        if self.max_learning_rate < self.min_learning_rate:
+            self.max_learning_rate = self.min_learning_rate
 
         # Symmetry
         self.use_symmetry_loss = use_symmetry_loss
@@ -240,10 +254,15 @@ class PPO:
                         axis=-1)
                     kl_mean = torch.mean(kl)
 
-                    if kl_mean > self.desired_kl * 2.0:
-                        self.learning_rate = max(1e-5, self.learning_rate / 1.5)
-                    elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                        self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                    if torch.isfinite(kl_mean):
+                        if kl_mean > self.desired_kl * 2.0:
+                            self.learning_rate = max(
+                                self.min_learning_rate, self.learning_rate / 1.2
+                            )
+                        elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
+                            self.learning_rate = min(
+                                self.max_learning_rate, self.learning_rate * 1.2
+                            )
 
                     for param_group in self.optimizer.param_groups:
                         param_group['lr'] = self.learning_rate

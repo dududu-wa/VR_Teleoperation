@@ -39,6 +39,14 @@ curriculum:
 termination:
   grace_period: 50  # no early termination for first 50 steps
 
+obs:
+  add_noise: false
+  noise_level: 0.0
+
+robot:
+  control:
+    action_clip_value: 2.0
+
 rewards:
   alive:
     weight: 0.5
@@ -55,9 +63,16 @@ rewards:
 algo:
   max_iterations: 5000
   save_interval: 100
-  init_noise_std: 0.3
-  learning_rate: 5.0e-5
-  distillation_coef: 0.2
-  distillation_decay: 0.9995
-  distillation_target_clip: 1.0
+  init_noise_std: 0.15
+  min_noise_std: 0.05
+  learning_rate: 3.0e-5
+  min_learning_rate: 1.0e-5
+  max_learning_rate: 6.0e-5
+  schedule: fixed
+  entropy_coef: 0.005
+  use_symmetry_loss: false
+  sync_update: false
+  distillation_coef: 0.6
+  distillation_decay: 0.9998
+  distillation_target_clip: 1.5
   distillation_use_smooth_l1: true

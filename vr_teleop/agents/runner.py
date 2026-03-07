@@ -98,6 +98,7 @@ class OnPolicyRunner:
         # Training state
         self.current_learning_iteration = 0
         self.checkpoint_infos_fn = None
+        self.last_metrics = {}
 
         # Episode tracking (persistent across learn() calls)
         self.rewbuffer = deque(maxlen=100)
@@ -170,6 +171,7 @@ class OnPolicyRunner:
 
             # ---- PPO update ----
             metrics = self.alg.update()
+            self.last_metrics = metrics
             learn_time = time.time() - start
 
             # ---- Curriculum (if env supports it) ----

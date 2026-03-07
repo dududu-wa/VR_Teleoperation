@@ -129,8 +129,17 @@ def main():
     _use_cfg("initial_phase", cur_cfg.get("initial_phase"))
 
     int_cfg = experiment_cfg.get("intervention", {}) if isinstance(experiment_cfg, dict) else {}
-    if isinstance(int_cfg, dict) and "use_disturb" in int_cfg and not args.use_intervention:
-        args.use_intervention = bool(int_cfg["use_disturb"])
+    if isinstance(int_cfg, dict) and "use_disturb" in int_cfg:
+        cfg_use_intervention = bool(int_cfg["use_disturb"])
+        if args.use_intervention and not cfg_use_intervention:
+            print(
+                "Warning: --use-intervention ignored because experiment config "
+                "sets intervention.use_disturb=false."
+            )
+        if cfg_use_intervention:
+            args.use_intervention = True
+        else:
+            args.use_intervention = False
 
     env_cfg_blob = experiment_cfg.get("env", {}) if isinstance(experiment_cfg, dict) else {}
     # Support both styles:
@@ -232,6 +241,35 @@ def main():
     # ---- Create configs ----
     robot_cfg = G1Config()
     obs_cfg = ObsConfig()
+
+    robot_cfg_blob = experiment_cfg.get("robot", {}) if isinstance(experiment_cfg, dict) else {}
+    robot_cfg_raw = (
+        robot_cfg_blob.get("robot", robot_cfg_blob)
+        if isinstance(robot_cfg_blob, dict)
+        else {}
+    )
+    if isinstance(robot_cfg_raw, dict):
+        control_cfg = robot_cfg_raw.get("control", {})
+        if isinstance(control_cfg, dict):
+            if "action_scale" in control_cfg:
+                robot_cfg.action_scale = float(control_cfg["action_scale"])
+            if "action_clip_value" in control_cfg:
+                robot_cfg.action_clip_value = float(control_cfg["action_clip_value"])
+
+    obs_cfg_blob = experiment_cfg.get("obs", {}) if isinstance(experiment_cfg, dict) else {}
+    obs_cfg_raw = (
+        obs_cfg_blob.get("obs", obs_cfg_blob)
+        if isinstance(obs_cfg_blob, dict)
+        else {}
+    )
+    if isinstance(obs_cfg_raw, dict):
+        if "add_noise" in obs_cfg_raw:
+            obs_cfg.add_noise = bool(obs_cfg_raw["add_noise"])
+        if "noise_level" in obs_cfg_raw:
+            obs_cfg.noise_level = float(obs_cfg_raw["noise_level"])
+        if "clip_observations" in obs_cfg_raw:
+            obs_cfg.clip_observations = float(obs_cfg_raw["clip_observations"])
+
     term_cfg_blob = experiment_cfg.get("termination", {}) if isinstance(experiment_cfg, dict) else {}
     grace_period = term_cfg_blob.get("grace_period", 0) if isinstance(term_cfg_blob, dict) else 0
     term_cfg = TerminationConfig(episode_length=max_episode_length, grace_period=grace_period)
@@ -289,6 +327,7 @@ def main():
         'use_symmetry_loss', 'symmetry_loss_coef',
         'sync_update', 'adaptation_loss_coef',
         'schedule', 'desired_kl',
+        'min_learning_rate', 'max_learning_rate',
     ]
     ppo_cfg = {}
     for key in ppo_keys:
@@ -473,6 +512,10 @@ def main():
 
         elapsed = time.time() - start_time
         fps = (iters_done * runner_cfg['num_steps_per_env'] * args.num_envs) / max(elapsed, 1)
+        last_metrics = getattr(runner, 'last_metrics', {}) or {}
+        update_frac = float(last_metrics.get('valid_update_fraction', 1.0))
+        skipped_nf = float(last_metrics.get('skipped_nonfinite_batches', 0.0))
+        learn_lr = float(last_metrics.get('learning_rate', runner.alg.learning_rate))
 
         if args.curriculum_system == "phase":
             promoted = curriculum.check_promotion()
@@ -485,6 +528,9 @@ def main():
                   f"Reward {tracking_reward:6.3f} | "
                   f"Fall {total_fall_rate:5.3f} | "
                   f"TransFail {transition_failure:5.3f} | "
+                  f"LR {learn_lr:.2e} | "
+                  f"ValidUpd {update_frac:.2f} | "
+                  f"SkipNF {skipped_nf:4.1f} | "
                   f"FPS {fps:7.0f}")
         else:
             summary = curriculum.get_summary()
@@ -494,6 +540,9 @@ def main():
                   f"Signal {summary['signal']:+.3f} | "
                   f"Reward {tracking_reward:6.3f} | "
                   f"Fall {total_fall_rate:5.3f} | "
+                  f"LR {learn_lr:.2e} | "
+                  f"ValidUpd {update_frac:.2f} | "
+                  f"SkipNF {skipped_nf:4.1f} | "
                   f"FPS {fps:7.0f}")
 
     total_time = time.time() - start_time
