@@ -302,17 +302,9 @@ def main():
 
     log_dir = os.path.join(args.log_dir, args.experiment_name)
 
-    # ---- Create runner (creates actor-critic + PPO internally) ----
-    runner = OnPolicyRunner(
-        env=env,
-        actor_critic_cfg=actor_critic_cfg,
-        ppo_cfg=ppo_cfg,
-        runner_cfg=runner_cfg,
-        log_dir=log_dir,
-        device=device,
-    )
-
     # ---- Teacher model for knowledge distillation ----
+    # Build BEFORE runner so the teacher_actions buffer is allocated in init_storage.
+    distill_loss = None
     if args.teacher_model:
         from vr_teleop.agents.pretrained_adapter import UnitreeTeacher, DistillationLoss
         print(f"  Loading teacher model from {args.teacher_model}")
@@ -325,8 +317,18 @@ def main():
         distill_decay = float(algo_yaml.get('distillation_decay', 0.9995))
         distill_loss = DistillationLoss(
             teacher=teacher, coef=distill_coef, decay_rate=distill_decay)
-        runner.alg.distillation_loss = distill_loss
         print(f"  Distillation enabled (coef={distill_coef}, decay={distill_decay})")
+
+    # ---- Create runner (creates actor-critic + PPO + storage internally) ----
+    runner = OnPolicyRunner(
+        env=env,
+        actor_critic_cfg=actor_critic_cfg,
+        ppo_cfg=ppo_cfg,
+        runner_cfg=runner_cfg,
+        log_dir=log_dir,
+        device=device,
+        distillation_loss=distill_loss,
+    )
 
     # ---- Create curriculum ----
     if args.curriculum_system == "phase":

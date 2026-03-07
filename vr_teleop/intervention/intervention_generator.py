@@ -1,7 +1,7 @@
 ﻿"""
 Upper-body intervention signal generator for G1 multi-gait training.
 
-Generates 14-DOF (left arm 7 + right arm 7) intervention targets that
+Generates 16-DOF (waist_yaw/roll + left arm 7 + right arm 7) intervention targets that
 perturb the robot's upper body during training, building robustness
 for real VR teleoperation.
 
@@ -25,13 +25,14 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from vr_teleop.robot.g1_config import G1Config
+from vr_teleop.envs.dof_indices import VR_DOF_INDICES, NUM_VR_DOFS
 
 
 @dataclass
 class InterventionConfig:
     """Configuration for intervention signal generation."""
     use_disturb: bool = True
-    disturb_dim: int = 14  # upper body DOFs
+    disturb_dim: int = NUM_VR_DOFS  # 16 upper-body VR DOFs
 
     # Enabled modes
     gaussian: bool = True
@@ -88,15 +89,16 @@ class InterventionGenerator:
         self.robot_cfg = robot_cfg or G1Config()
         self.num_envs = num_envs
         self.device = device or torch.device('cpu')
-        self.disturb_dim = self.cfg.disturb_dim  # 14
+        self.disturb_dim = NUM_VR_DOFS  # 16
+        self.cfg.disturb_dim = self.disturb_dim
 
-        # Joint limits for upper body (indices 15-28 in full 29-DOF)
+        # Joint limits for VR upper body (waist_yaw/roll + arms in full 29-DOF)
         pos_lower, pos_upper = self.robot_cfg.get_pos_limits()
-        self.upper_pos_lower = pos_lower[self.robot_cfg.upper_body_indices].to(self.device)  # (14,)
-        self.upper_pos_upper = pos_upper[self.robot_cfg.upper_body_indices].to(self.device)  # (14,)
+        self.upper_pos_lower = pos_lower[VR_DOF_INDICES].to(self.device)  # (16,)
+        self.upper_pos_upper = pos_upper[VR_DOF_INDICES].to(self.device)  # (16,)
         self.upper_default = self.robot_cfg.get_default_dof_pos()[
-            self.robot_cfg.upper_body_indices
-        ].to(self.device)  # (14,)
+            VR_DOF_INDICES
+        ].to(self.device)  # (16,)
 
         # ---- State buffers ----
         # Intervention targets (relative to default, in action-scale units)
@@ -178,7 +180,7 @@ class InterventionGenerator:
 
         Args:
             env_ids: (K,) environment indices to reset
-            current_upper_pos: (K, 14) current upper body joint positions (absolute)
+            current_upper_pos: (K, 16) current upper body joint positions (absolute)
         """
         if len(env_ids) == 0:
             return
@@ -233,12 +235,12 @@ class InterventionGenerator:
 
         Args:
             dt: Policy timestep (seconds)
-            current_upper_pos: (N, 14) current upper body positions (absolute)
-            policy_lower_actions: (N, 15) policy output (for curriculum blending)
+            current_upper_pos: (N, 16) current upper body positions (absolute)
+            policy_lower_actions: (N, 13) policy output (for curriculum blending)
             transition_mask: (N,) bool, envs currently in gait transition
 
         Returns:
-            upper_actions: (N, 14) upper body joint targets (action-scale)
+            upper_actions: (N, 16) upper body joint targets (action-scale)
             mask: (N,) bool, active intervention mask
             amp: (N,) per-env amplitude (for critic obs)
             freq: (N,) per-env frequency (for critic obs)
@@ -355,7 +357,7 @@ class InterventionGenerator:
     ) -> torch.Tensor:
         """Gaussian noise around current joint positions.
 
-        Returns: (K, 14) action-scale targets
+        Returns: (K, 16) action-scale targets
         """
         n = len(env_ids)
         amp = self.env_amp[env_ids].unsqueeze(-1)  # (K, 1)
@@ -376,17 +378,17 @@ class InterventionGenerator:
     def _generate_uniform(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Uniform random within scaled joint range.
 
-        Returns: (K, 14) action-scale targets
+        Returns: (K, 16) action-scale targets
         """
         n = len(env_ids)
         amp = self.env_amp[env_ids].unsqueeze(-1)  # (K, 1)
 
         # Sample uniformly in [lower + margin, upper - margin]
-        joint_range = self.upper_pos_upper - self.upper_pos_lower  # (14,)
-        center = (self.upper_pos_upper + self.upper_pos_lower) / 2.0  # (14,)
+        joint_range = self.upper_pos_upper - self.upper_pos_lower  # (16,)
+        center = (self.upper_pos_upper + self.upper_pos_lower) / 2.0  # (16,)
 
         # Scale range by amplitude
-        half_range = joint_range / 2.0 * amp  # (K, 14)
+        half_range = joint_range / 2.0 * amp  # (K, 16)
         targets_abs = center.unsqueeze(0) + (
             2.0 * torch.rand(n, self.disturb_dim, device=self.device) - 1.0
         ) * half_range
@@ -403,13 +405,13 @@ class InterventionGenerator:
     def _generate_sinusoidal(self, env_ids: torch.Tensor) -> torch.Tensor:
         """Time-varying sinusoidal sweep.
 
-        Returns: (K, 14) action-scale targets
+        Returns: (K, 16) action-scale targets
         """
         amp = self.env_amp[env_ids].unsqueeze(-1)  # (K, 1)
-        phase = self.sin_phase[env_ids]  # (K, 14)
+        phase = self.sin_phase[env_ids]  # (K, 16)
 
         # Sinusoidal offset from default
-        joint_range = self.upper_pos_upper - self.upper_pos_lower  # (14,)
+        joint_range = self.upper_pos_upper - self.upper_pos_lower  # (16,)
         offset = torch.sin(phase) * joint_range.unsqueeze(0) / 2.0 * amp
 
         targets_abs = self.upper_default.unsqueeze(0) + offset
@@ -432,7 +434,7 @@ class InterventionGenerator:
         - Arm swing: opposing shoulder pitch oscillation (natural gait)
         - Turning gesture: asymmetric shoulder roll/yaw
 
-        Returns: (K, 14) action-scale targets
+        Returns: (K, 16) action-scale targets
         """
         n = len(env_ids)
         amp = self.env_amp[env_ids].unsqueeze(-1)
@@ -447,14 +449,14 @@ class InterventionGenerator:
             swing_ids = arm_swing_mask.nonzero(as_tuple=False).squeeze(-1)
             phase = self.sin_phase[env_ids[swing_ids], 0]  # use first channel
 
-            # Left shoulder pitch (index 0 in upper body = joint 15)
-            targets[swing_ids, 0] = torch.sin(phase) * amp[swing_ids, 0] * 0.5
-            # Right shoulder pitch (index 7 in upper body = joint 22)
-            targets[swing_ids, 7] = -torch.sin(phase) * amp[swing_ids, 0] * 0.5
+            # Layout: [waist_yaw, waist_roll, left_arm(7), right_arm(7)]
+            # Left shoulder pitch index = 2, right shoulder pitch index = 9
+            targets[swing_ids, 2] = torch.sin(phase) * amp[swing_ids, 0] * 0.5
+            targets[swing_ids, 9] = -torch.sin(phase) * amp[swing_ids, 0] * 0.5
 
-            # Left elbow (index 3) and right elbow (index 10) for natural motion
-            targets[swing_ids, 3] = torch.cos(phase) * amp[swing_ids, 0] * 0.3
-            targets[swing_ids, 10] = -torch.cos(phase) * amp[swing_ids, 0] * 0.3
+            # Left elbow index = 5, right elbow index = 12
+            targets[swing_ids, 5] = torch.cos(phase) * amp[swing_ids, 0] * 0.3
+            targets[swing_ids, 12] = -torch.cos(phase) * amp[swing_ids, 0] * 0.3
 
         # ---- Turning gesture pattern ----
         turning_ids = (~arm_swing_mask).nonzero(as_tuple=False).squeeze(-1)
@@ -462,12 +464,12 @@ class InterventionGenerator:
             phase = self.sin_phase[env_ids[turning_ids], 1]
 
             # Asymmetric shoulder roll: left up, right down (or vice versa)
-            targets[turning_ids, 1] = torch.sin(phase) * amp[turning_ids, 0] * 0.4
-            targets[turning_ids, 8] = -torch.sin(phase) * amp[turning_ids, 0] * 0.4
+            targets[turning_ids, 3] = torch.sin(phase) * amp[turning_ids, 0] * 0.4
+            targets[turning_ids, 10] = -torch.sin(phase) * amp[turning_ids, 0] * 0.4
 
             # Shoulder yaw for reaching gesture
-            targets[turning_ids, 2] = torch.cos(phase) * amp[turning_ids, 0] * 0.3
-            targets[turning_ids, 9] = torch.cos(phase) * amp[turning_ids, 0] * 0.3
+            targets[turning_ids, 4] = torch.cos(phase) * amp[turning_ids, 0] * 0.3
+            targets[turning_ids, 11] = torch.cos(phase) * amp[turning_ids, 0] * 0.3
 
         # Convert amplitude to absolute positions, then to action scale
         targets_offset = targets  # already in joint-angle offset from default
@@ -493,7 +495,7 @@ class InterventionGenerator:
           1 (clip_mean): curriculum shifts center toward current joint pos
           2 (clip_mean_rad): curriculum scales both center and radius
 
-        Returns: (N, 14) blended upper-body actions
+        Returns: (N, 16) blended upper-body actions
         """
         method = self.cfg.curriculum_method
         curriculum = self.curriculum_factor  # (N,)

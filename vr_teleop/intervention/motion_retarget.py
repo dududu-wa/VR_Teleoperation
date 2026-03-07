@@ -111,7 +111,7 @@ class MotionRetargeter:
             mask: (N,) bool, which envs to retarget
 
         Returns:
-            upper_joints: (N, 14) upper body joint angles
+            upper_joints: (N, 16) upper body joint angles [waist_yaw, waist_roll, left_arm(7), right_arm(7)]
         """
         # Transform VR poses to robot base frame
         left_robot_pos = self._vr_to_robot_pos(left_hand_pos)
@@ -136,14 +136,20 @@ class MotionRetargeter:
             right_robot_quat = self._rotate_quat_batch(
                 right_robot_quat, base_quat_wxyz)
 
-        # Solve IK
-        upper_joints = self.ik_solver.solve_to_full_upper(
+        # Solve IK - returns (N, 14) = left_arm(7) + right_arm(7)
+        arm_joints = self.ik_solver.solve_to_full_upper(
             left_target_pos=left_robot_pos,
             left_target_quat=left_robot_quat,
             right_target_pos=right_robot_pos,
             right_target_quat=right_robot_quat,
             mask=mask,
         )
+
+        # Prepend waist_yaw and waist_roll zeros to match 16-DOF VR layout:
+        # [waist_yaw(1), waist_roll(1), left_arm(7), right_arm(7)] = 16 DOFs
+        N = arm_joints.shape[0]
+        waist_zeros = np.zeros((N, 2), dtype=arm_joints.dtype)
+        upper_joints = np.concatenate([waist_zeros, arm_joints], axis=-1)
 
         return upper_joints
 

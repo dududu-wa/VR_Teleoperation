@@ -293,18 +293,19 @@ class RewardComputer:
         contact = foot_contact_forces > 1.0  # (N, 2) bool
         # Increment air time for feet not in contact
         self.feet_air_time += self.dt
-        # Reset air time when foot makes contact
-        self.feet_air_time *= ~contact
 
         # Reward on first contact (transition from air to ground)
         first_contact = contact & ~self.last_contacts  # (N, 2)
-        self.last_contacts = contact
 
-        # Reward = sum over feet of clamp(air_time - target, 0, max)
+        # Compute reward BEFORE zeroing air time
         target = self.cfg.target_air_time
         air_time_reward = torch.sum(
             (self.feet_air_time - target).clamp(min=0.0) * first_contact, dim=-1
         )
+
+        # Reset air time when foot makes contact (AFTER reward computation)
+        self.feet_air_time *= ~contact
+        self.last_contacts = contact
 
         # Only active for walking/running (gait_id > 0)
         is_moving = (gait_id > 0).float()

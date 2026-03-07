@@ -17,13 +17,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-
-# DOF index mappings in 29-DOF full body space
-LOCO_DOF_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14]  # 12 legs + waist_pitch
-VR_DOF_INDICES = [12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]  # waist_yaw/roll + 14 arms
-
-NUM_LOCO_DOFS = len(LOCO_DOF_INDICES)   # 13
-NUM_VR_DOFS = len(VR_DOF_INDICES)        # 16
+from vr_teleop.envs.dof_indices import LOCO_DOF_INDICES, VR_DOF_INDICES, NUM_LOCO_DOFS, NUM_VR_DOFS
 
 
 @dataclass

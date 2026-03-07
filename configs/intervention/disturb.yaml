@@ -1,7 +1,7 @@
 intervention:
   # Upper body intervention configuration
   use_disturb: true
-  disturb_dim: 14  # upper body DOFs
+  disturb_dim: 16  # waist_yaw/roll + arms
 
   # Intervention signal modes
   modes:

@@ -38,7 +38,7 @@ curriculum:
 
 rewards:
   alive:
-    weight: 0.15
+    weight: 0.5
   tracking_lin_vel:
     sigma: 0.5
 

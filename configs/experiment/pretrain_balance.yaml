@@ -41,7 +41,7 @@ termination:
 
 rewards:
   alive:
-    weight: 0.15
+    weight: 0.5
   torso_orientation:
     weight: -8.0
   base_height:

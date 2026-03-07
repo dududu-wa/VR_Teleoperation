@@ -440,7 +440,9 @@ class MujocoVecEnv:
         if env_ids is None:
             self.full_actions_29[:, self._vr_indices] = upper_actions
         else:
-            self.full_actions_29[env_ids][:, self._vr_indices] = upper_actions
+            subset = self.full_actions_29[env_ids]
+            subset[:, self._vr_indices] = upper_actions
+            self.full_actions_29[env_ids] = subset
 
     def get_dof_pos_relative(self) -> torch.Tensor:
         """Get joint positions relative to default stance (N, 29)."""

@@ -32,6 +32,7 @@ class OnPolicyRunner:
         runner_cfg: dict,
         log_dir: str = None,
         device: str = 'cuda:0',
+        distillation_loss=None,
     ):
         """Initialize the runner.
 
@@ -42,6 +43,9 @@ class OnPolicyRunner:
             runner_cfg: Config dict with num_steps_per_env, save_interval, etc.
             log_dir: Directory for TensorBoard logs and checkpoints
             device: Torch device string
+            distillation_loss: Optional DistillationLoss for teacher-student training.
+                Must be passed here (not set on alg afterwards) so that init_storage
+                can allocate the teacher_actions buffer correctly.
         """
         self.device = device
         self.env = env
@@ -52,8 +56,8 @@ class OnPolicyRunner:
         self.log_interval = runner_cfg.get('log_interval', 1)
 
         # Observation dimensions from env
-        num_actor_obs = env.num_obs           # 313 (58 + 51*5) flat
-        num_critic_obs = env.num_privileged_obs  # 99
+        num_actor_obs = env.num_obs           # 372 (67 + 61*5) flat
+        num_critic_obs = env.num_privileged_obs  # 96
         num_actions = env.num_actions          # 13
 
         # Create actor-critic model
@@ -71,8 +75,12 @@ class OnPolicyRunner:
             **ppo_cfg,
         )
 
-        # Initialize rollout storage
-        # Actor obs is flat: (N, 313)
+        # Set distillation loss BEFORE init_storage so the teacher_actions
+        # buffer is allocated correctly inside RolloutStorage.
+        if distillation_loss is not None:
+            self.alg.distillation_loss = distillation_loss
+
+        # Initialize rollout storage (actor obs flat: (N, 372))
         actor_obs_shape = [num_actor_obs]
         critic_obs_shape = [num_critic_obs]
         action_shape = [num_actions]

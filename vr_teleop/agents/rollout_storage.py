@@ -25,13 +25,15 @@ class RolloutStorage:
             self.actions_log_prob = None
             self.action_mean = None
             self.action_sigma = None
+            self.teacher_actions = None  # pre-computed distillation targets
 
         def clear(self):
             self.__init__()
 
     def __init__(self, num_envs: int, num_transitions_per_env: int,
                  obs_shape: list, privileged_obs_shape: list,
-                 actions_shape: list, device: str = 'cpu'):
+                 actions_shape: list, device: str = 'cpu',
+                 teacher_actions_shape: list = None):
         """Initialize rollout storage.
 
         Args:
@@ -80,6 +82,13 @@ class RolloutStorage:
         self.sigma = torch.zeros(
             num_transitions_per_env, num_envs, *actions_shape, device=device)
 
+        # Optional teacher action buffer for knowledge distillation
+        if teacher_actions_shape is not None:
+            self.teacher_actions = torch.zeros(
+                num_transitions_per_env, num_envs, *teacher_actions_shape, device=device)
+        else:
+            self.teacher_actions = None
+
         self.step = 0
 
     def add_transitions(self, transition: 'RolloutStorage.Transition'):
@@ -97,6 +106,8 @@ class RolloutStorage:
         self.actions_log_prob[self.step].copy_(transition.actions_log_prob.view(-1, 1))
         self.mu[self.step].copy_(transition.action_mean)
         self.sigma[self.step].copy_(transition.action_sigma)
+        if self.teacher_actions is not None and transition.teacher_actions is not None:
+            self.teacher_actions[self.step].copy_(transition.teacher_actions)
         self.step += 1
 
     def clear(self):
@@ -153,6 +164,11 @@ class RolloutStorage:
         old_mu = self.mu.flatten(0, 1)
         old_sigma = self.sigma.flatten(0, 1)
 
+        teacher_actions_flat = (
+            self.teacher_actions.flatten(0, 1)
+            if self.teacher_actions is not None else None
+        )
+
         for epoch in range(num_epochs):
             indices = torch.randperm(
                 num_mini_batches * mini_batch_size,
@@ -174,4 +190,5 @@ class RolloutStorage:
                     old_sigma[batch_idx],
                     (None, None),  # hidden states (unused for MLP)
                     None,          # masks (unused for MLP)
+                    teacher_actions_flat[batch_idx] if teacher_actions_flat is not None else None,
                 )

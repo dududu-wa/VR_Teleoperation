@@ -50,6 +50,9 @@ class UnitreeTeacher:
         # LSTM hidden/cell state: (1, num_envs, 64)
         self.hidden_state = torch.zeros(1, num_envs, 64, device=device)
         self.cell_state = torch.zeros(1, num_envs, 64, device=device)
+        self._has_internal_state = (
+            hasattr(self.model, "hidden_state") and hasattr(self.model, "cell_state")
+        )
 
     def reset(self, env_ids: torch.Tensor = None):
         """Reset LSTM state for specified environments (or all if None)."""
@@ -59,6 +62,19 @@ class UnitreeTeacher:
         else:
             self.hidden_state[:, env_ids] = 0.0
             self.cell_state[:, env_ids] = 0.0
+
+        # Some TorchScript teachers keep hidden state inside model buffers.
+        if self._has_internal_state:
+            self.model.hidden_state.zero_()
+            self.model.cell_state.zero_()
+
+    def _ensure_external_state(self, batch_size: int):
+        """Match external LSTM state shape to current batch size."""
+        if self.hidden_state.shape[1] != batch_size:
+            self.hidden_state = torch.zeros(
+                1, batch_size, 64, device=self.device)
+            self.cell_state = torch.zeros(
+                1, batch_size, 64, device=self.device)
 
     def map_obs(self, our_obs: torch.Tensor) -> torch.Tensor:
         """Map our 67-dim single-step obs to Unitree's 47-dim format.
@@ -123,22 +139,45 @@ class UnitreeTeacher:
             (N, 12) teacher leg joint actions
         """
         unitree_obs = self.map_obs(our_obs)
+        batch_size = unitree_obs.shape[0]
 
-        # Run through JIT model
-        # The model expects obs and (hidden, cell) state
+        # 1) Try explicit-state recurrent signature: model(seq, (h, c))
         try:
+            self._ensure_external_state(batch_size)
             actions, (self.hidden_state, self.cell_state) = self.model(
-                unitree_obs.unsqueeze(0),  # (1, N, 47) for LSTM seq_len=1
+                unitree_obs.unsqueeze(0),  # (1, N, 47)
                 (self.hidden_state, self.cell_state),
             )
-            actions = actions.squeeze(0)  # (N, 12)
+            return actions.squeeze(0)  # (N, 12)
         except Exception:
-            # Fallback: some JIT models take flat input
+            pass
+
+        # 2) Try direct batched signature: model(obs)
+        try:
+            # For internal-state models, distillation uses shuffled mini-batches.
+            # Reset teacher state to keep targets stateless and batch-safe.
+            if self._has_internal_state:
+                self.model.hidden_state.zero_()
+                self.model.cell_state.zero_()
             actions = self.model(unitree_obs)
             if actions.dim() == 1:
                 actions = actions.unsqueeze(0)
+            return actions
+        except Exception:
+            pass
 
-        return actions
+        # 3) Fallback: per-sample inference for models with fixed internal state
+        # (e.g., hidden_state shape locked to [1, 1, 64]).
+        actions_list = []
+        for i in range(batch_size):
+            if self._has_internal_state:
+                self.model.hidden_state.zero_()
+                self.model.cell_state.zero_()
+            sample_actions = self.model(unitree_obs[i:i+1])
+            if sample_actions.dim() == 1:
+                sample_actions = sample_actions.unsqueeze(0)
+            actions_list.append(sample_actions)
+        return torch.cat(actions_list, dim=0)
 
 
 class UpperBodyDefaultPolicy:
@@ -196,6 +235,8 @@ class DistillationLoss:
     so the student gradually relies on its own reward signal.
     """
 
+    teacher_action_dim = 12  # Unitree model produces 12-DOF leg actions
+
     def __init__(self, teacher: UnitreeTeacher, coef: float = 1.0,
                  decay_rate: float = 0.9995):
         self.teacher = teacher
@@ -204,17 +245,27 @@ class DistillationLoss:
 
     def compute(self, student_actions: torch.Tensor,
                 obs: torch.Tensor) -> torch.Tensor:
-        """Compute distillation loss.
+        """Compute distillation loss (calls teacher inference inline).
+
+        Prefer compute_precomputed() for training to avoid slow per-batch
+        teacher inference and LSTM hidden state contamination.
+        """
+        teacher_actions = self.teacher.get_action(obs)
+        loss = F.mse_loss(student_actions[:, :self.teacher_action_dim], teacher_actions)
+        return self.coef * loss
+
+    def compute_precomputed(self, student_actions: torch.Tensor,
+                            teacher_actions: torch.Tensor) -> torch.Tensor:
+        """Compute distillation loss using pre-computed teacher actions.
 
         Args:
-            student_actions: (N, 13+) student policy actions; first 12 are legs
-            obs: (N, ...) actor observations for teacher input
+            student_actions: (N, 13+) student policy action means
+            teacher_actions: (N, 12) pre-computed teacher actions from rollout
 
         Returns:
             Scalar distillation loss (coef * MSE)
         """
-        teacher_actions = self.teacher.get_action(obs)
-        loss = F.mse_loss(student_actions[:, :12], teacher_actions)
+        loss = F.mse_loss(student_actions[:, :self.teacher_action_dim], teacher_actions)
         return self.coef * loss
 
     def step(self):

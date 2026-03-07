@@ -118,10 +118,15 @@ class PPO:
                      actor_obs_shape: list, critic_obs_shape: list,
                      action_shape: list):
         """Initialize rollout storage buffer."""
+        teacher_actions_shape = (
+            [self.distillation_loss.teacher_action_dim]
+            if self.distillation_loss is not None else None
+        )
         self.storage = RolloutStorage(
             num_envs, num_transitions_per_env,
             actor_obs_shape, critic_obs_shape, action_shape,
-            self.device)
+            self.device,
+            teacher_actions_shape=teacher_actions_shape)
 
     def test_mode(self):
         self.actor_critic.eval()
@@ -151,6 +156,12 @@ class PPO:
         self.transition.observations = obs
         self.transition.critic_observations = critic_obs
 
+        # Pre-compute teacher targets during rollout (avoids LSTM contamination
+        # from shuffled mini-batches and removes teacher inference from inner loop)
+        if self.distillation_loss is not None:
+            self.transition.teacher_actions = self.distillation_loss.teacher.get_action(
+                obs).detach()
+
         return self.transition.actions
 
     def process_env_step(self, rewards: torch.Tensor, dones: torch.Tensor,
@@ -174,6 +185,14 @@ class PPO:
         self.storage.add_transitions(self.transition)
         self.transition.clear()
 
+        # Reset teacher LSTM hidden state for terminated environments so that
+        # the next episode's teacher targets are not contaminated by the previous
+        # episode's recurrent state.
+        if self.distillation_loss is not None:
+            done_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+            if done_ids.numel() > 0:
+                self.distillation_loss.teacher.reset(done_ids)
+
     def compute_returns(self, last_critic_obs: torch.Tensor):
         """Compute GAE returns using last critic observation."""
         last_values = self.actor_critic.evaluate(last_critic_obs).detach()
@@ -193,7 +212,8 @@ class PPO:
         for (obs_batch, critic_obs_batch, actions_batch,
              target_values_batch, advantages_batch, returns_batch,
              old_actions_log_prob_batch, old_mu_batch, old_sigma_batch,
-             hid_states_batch, masks_batch) in generator:
+             hid_states_batch, masks_batch,
+             teacher_actions_batch) in generator:
 
             # Forward pass through actor
             self.actor_critic.act(
@@ -266,9 +286,9 @@ class PPO:
 
             # ---- Distillation loss (teacher-student) ----
             distill_loss = torch.tensor(0.0, device=self.device)
-            if self.distillation_loss is not None:
-                distill_loss = self.distillation_loss.compute(
-                    actions_batch, obs_batch)
+            if self.distillation_loss is not None and teacher_actions_batch is not None:
+                distill_loss = self.distillation_loss.compute_precomputed(
+                    mu_batch, teacher_actions_batch)
 
             # ---- Total loss ----
             loss = (
@@ -320,9 +340,9 @@ class PPO:
         the action should also be mirrored. We enforce:
             ||act(obs) - S_a @ act(S_o @ obs)||^2
 
-        For flat (B, 313) obs = [current_obs(58), history_proprio(5*51)]:
-            - Mirror current_obs(58) with S_obs(58, 58)
-            - Mirror each 51-dim proprioception step with S_proprio(51, 51)
+        For flat (B, 372) obs = [current_obs(67), history_proprio(5*61)]:
+            - Mirror current_obs(67) with S_obs(67, 67)
+            - Mirror each 61-dim proprioception step with S_proprio(61, 61)
         """
         # Get original actions (deterministic)
         origin_act, _ = self.actor_critic.act_inference(
@@ -333,10 +353,10 @@ class PPO:
             # (B, H, 58) -> apply obs_perm to each step
             mirror_obs = torch.matmul(obs_batch, self._obs_perm_mat)
         else:
-            # (B, 313) flat = [current_obs(58), history_proprio(H*51)]
+            # (B, 372) flat = [current_obs(67), history_proprio(H*61)]
             B = obs_batch.shape[0]
-            current_obs = obs_batch[:, :self._obs_sym_dim]  # (B, 58)
-            history_flat = obs_batch[:, self._obs_sym_dim:]  # (B, 255)
+            current_obs = obs_batch[:, :self._obs_sym_dim]  # (B, 67)
+            history_flat = obs_batch[:, self._obs_sym_dim:]  # (B, 305)
 
             # Mirror current observation
             mirror_current = torch.matmul(current_obs, self._obs_perm_mat)
