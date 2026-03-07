@@ -102,15 +102,24 @@ def build_obs_symmetry_matrix(obs_dim: int, cfg: G1Config = None) -> torch.Tenso
     S[idx:idx+n_loco, idx:idx+n_loco] = S_act
     idx += n_loco
 
-    # upper_body_pos (16): 8 left arm + 8 right arm (7 joints + 1 gripper each)
-    # Left arm joints: shoulder_pitch(no), shoulder_roll(op), shoulder_yaw(op),
-    #                  elbow(no), wrist_roll(op), wrist_pitch(no), wrist_yaw(op), gripper(no)
-    # Same structure for right arm
-    n_arm = 8  # 7 joints + 1 gripper per arm
-    # Swap left <-> right arms with appropriate sign flips
-    # same sign: shoulder_pitch(0), elbow(3), wrist_pitch(5), gripper(7)
+    # upper_body_pos (16): waist_yaw(1) + waist_roll(1) + left_arm(7) + right_arm(7)
+    # VR_DOF_INDICES = [12, 13, 15..21, 22..28]
+    # Within the 16-dim block:
+    #   [0]    waist_yaw  -> negate (left-right flip)
+    #   [1]    waist_roll -> negate
+    #   [2:9]  left arm:  shoulder_pitch(no), shoulder_roll(op), shoulder_yaw(op),
+    #                     elbow(no), wrist_roll(op), wrist_pitch(no), wrist_yaw(op)
+    #   [9:16] right arm: same structure
+    # waist: negate on mirror
+    S[idx, idx] = -1.0      # waist_yaw -> -waist_yaw
+    S[idx+1, idx+1] = -1.0  # waist_roll -> -waist_roll
+    idx += 2
+
+    # Arms: swap left(7) <-> right(7) with sign flips
+    n_arm = 7
+    # same sign: shoulder_pitch(0), elbow(3), wrist_pitch(5)
     # opposite sign: shoulder_roll(1), shoulder_yaw(2), wrist_roll(4), wrist_yaw(6)
-    arm_same = [0, 3, 5, 7]
+    arm_same = [0, 3, 5]
     arm_opp = [1, 2, 4, 6]
     for j in arm_same:
         S[idx + j, idx + n_arm + j] = 1.0        # left -> right (same sign)
@@ -118,7 +127,7 @@ def build_obs_symmetry_matrix(obs_dim: int, cfg: G1Config = None) -> torch.Tenso
     for j in arm_opp:
         S[idx + j, idx + n_arm + j] = -1.0        # left -> right (negate)
         S[idx + n_arm + j, idx + j] = -1.0         # right -> left (negate)
-    idx += 2 * n_arm  # 16
+    idx += 2 * n_arm  # 14
 
     # commands: vx (keep), vy (negate)
     if idx < obs_dim:

@@ -49,7 +49,7 @@ class PPO:
         schedule: str = 'adaptive',
         desired_kl: float = 0.01,
         # Observation dim for symmetry matrix
-        single_step_obs_dim: int = 58,
+        single_step_obs_dim: int = 67,
         # Distillation
         distillation_loss=None,
         device: str = 'cpu',
@@ -95,9 +95,9 @@ class PPO:
             self._obs_perm_mat = build_obs_symmetry_matrix(
                 single_step_obs_dim).to(self.device)
             self._obs_sym_dim = single_step_obs_dim
-            # Proprioception symmetry (first 51 dims of obs symmetry)
+            # Proprioception symmetry (first 61 dims of obs symmetry)
             # Used for mirroring the history buffer
-            self._proprio_dim = 51  # from ObsConfig
+            self._proprio_dim = 61  # from ObsConfig (PROPRIO_END)
             self._proprio_perm_mat = self._obs_perm_mat[:self._proprio_dim,
                                                          :self._proprio_dim].clone()
 
