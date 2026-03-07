@@ -1,0 +1,53 @@
+# Pretrain: Standing balance foundation
+# Learn basic balance, joint coordination, gravity compensation
+# Use --pretrained-model <path> with finetune_full.yaml after this
+
+defaults:
+  - /base
+
+experiment:
+  name: pretrain_balance
+  seed: 42
+
+env:
+  num_envs: 2048
+  max_episode_length: 1000
+
+  command_ranges:
+    stand:
+      vx: [0.0, 0.0]
+      vy: [0.0, 0.0]
+      wz: [0.0, 0.0]
+    walk:
+      vx: [-0.1, 0.1]
+      vy: [-0.05, 0.05]
+      wz: [-0.1, 0.1]
+    run:
+      vx: [0.0, 0.0]
+      vy: [0.0, 0.0]
+      wz: [0.0, 0.0]
+
+  gait_probs: [1.0, 0.0, 0.0]  # stand=100%, walk=0%, run=0%
+
+intervention:
+  use_disturb: false
+
+curriculum:
+  initial_phase: 0
+  max_phase: 0  # stay in phase 0, no progression
+
+rewards:
+  alive:
+    weight: 0.15
+  torso_orientation:
+    weight: -8.0
+  base_height:
+    weight: -12.0
+  tracking_lin_vel:
+    weight: 1.0
+    sigma: 0.5
+
+algo:
+  max_iterations: 5000
+  save_interval: 100
+  init_noise_std: 0.8

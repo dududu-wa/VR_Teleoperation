@@ -1,12 +1,12 @@
 """
 Reward functions for G1 multi-gait training.
 
-13 reward components per the config:
-  - tracking_lin_vel, tracking_ang_vel, alive  (positive)
+16 reward components per the config:
+  - tracking_lin_vel, tracking_ang_vel, alive, feet_air_time  (positive)
   - torso_orientation, ang_vel_xy, base_height, action_rate,
     action_rate_second_order, torques, dof_acc, foot_slip,
     feet_contact_forces, transition_stability, standing_still,
-    termination  (penalties)
+    penalty_lin_vel_z, feet_stumble, termination  (penalties)
 
 All reward functions accept batched tensors (num_envs,) and return (num_envs,).
 """
@@ -22,11 +22,12 @@ class RewardConfig:
     """Reward weights and parameters loaded from g1_rewards.yaml."""
     weights: Dict[str, float] = field(default_factory=lambda: {
         'tracking_lin_vel': 2.0,
-        'tracking_ang_vel': 3.0,
-        'alive': 1.5,
-        'torso_orientation': -5.0,
+        'tracking_ang_vel': 4.0,
+        'alive': 0.15,
+        'feet_air_time': 2.0,
+        'torso_orientation': -8.0,
         'ang_vel_xy': -0.5,
-        'base_height': -8.0,
+        'base_height': -15.0,
         'action_rate': -0.01,
         'action_rate_second_order': -0.005,
         'torques': -5.0e-6,
@@ -34,17 +35,20 @@ class RewardConfig:
         'foot_slip': -0.2,
         'feet_contact_forces': -0.2,
         'transition_stability': -5.0,
-        'standing_still': -0.5,
+        'standing_still': -2.0,
+        'penalty_lin_vel_z': -0.1,
+        'feet_stumble': -0.2,
         'termination': -200.0,
     })
 
     # Parameters
-    tracking_sigma: float = 0.25
+    tracking_sigma: float = 0.5
     base_height_target_stand: float = 0.793
     base_height_target_walk: float = 0.75
     base_height_target_run: float = 0.72
     max_contact_force: float = 500.0
     transition_window: float = 0.5  # seconds around gait transition
+    target_air_time: float = 0.3  # target air time per foot for walking/running
 
 
 class RewardComputer:
@@ -53,10 +57,12 @@ class RewardComputer:
     All methods operate on batched tensors of shape (num_envs, ...).
     """
 
-    def __init__(self, reward_cfg: RewardConfig, dt: float, device: torch.device):
+    def __init__(self, reward_cfg: RewardConfig, dt: float, device: torch.device,
+                 num_envs: int = 1):
         self.cfg = reward_cfg
         self.dt = dt
         self.device = device
+        self.num_envs = num_envs
 
         # Pre-compute height targets as tensor for indexing by gait_id
         # gait_id: 0=stand, 1=walk, 2=run
@@ -65,6 +71,15 @@ class RewardComputer:
             reward_cfg.base_height_target_walk,
             reward_cfg.base_height_target_run,
         ], device=device, dtype=torch.float32)
+
+        # Feet air time tracking: time each foot has been in the air (N, 2)
+        self.feet_air_time = torch.zeros(num_envs, 2, device=device)
+        self.last_contacts = torch.ones(num_envs, 2, dtype=torch.bool, device=device)
+
+    def reset_air_time(self, env_ids: torch.Tensor):
+        """Reset feet air time state for specified environments."""
+        self.feet_air_time[env_ids] = 0.0
+        self.last_contacts[env_ids] = True
 
     def compute_all(
         self,
@@ -87,6 +102,7 @@ class RewardComputer:
         last_dof_vel: torch.Tensor,       # (N, num_dofs)
         # Foot
         foot_contact_forces: torch.Tensor,  # (N, 2) left, right magnitudes
+        foot_contact_forces_3d: torch.Tensor,  # (N, 2, 3) left, right 3D force vectors
         foot_velocities: torch.Tensor,      # (N, 2, 3) left, right lin velocities
         # Episode state
         is_terminated: torch.Tensor,      # (N,) bool
@@ -126,6 +142,12 @@ class RewardComputer:
             foot_contact_forces)
         rewards['standing_still'] = self._standing_still(
             commands, dof_vel, actions)
+
+        # New reward/penalty terms
+        rewards['feet_air_time'] = self._feet_air_time(
+            foot_contact_forces, gait_id)
+        rewards['penalty_lin_vel_z'] = self._penalty_lin_vel_z(base_lin_vel)
+        rewards['feet_stumble'] = self._feet_stumble(foot_contact_forces_3d)
 
         # Transition stability (only penalize near gait transitions)
         if transition_mask is not None:
@@ -255,3 +277,56 @@ class RewardComputer:
             torch.sum(torch.abs(actions), dim=-1) / num_acts * 0.5
         )
         return motion_penalty * is_standing
+
+    def _feet_air_time(self, foot_contact_forces: torch.Tensor,
+                       gait_id: torch.Tensor) -> torch.Tensor:
+        """Reward feet for achieving target air time during walking/running.
+
+        Tracks time each foot spends in the air. When a foot lands (transition
+        from air to contact), rewards the accumulated air time if it exceeds
+        the target. Only active for walk/run gaits (gait_id > 0).
+
+        Args:
+            foot_contact_forces: (N, 2) force magnitudes
+            gait_id: (N,) int, 0=stand, 1=walk, 2=run
+        """
+        contact = foot_contact_forces > 1.0  # (N, 2) bool
+        # Increment air time for feet not in contact
+        self.feet_air_time += self.dt
+        # Reset air time when foot makes contact
+        self.feet_air_time *= ~contact
+
+        # Reward on first contact (transition from air to ground)
+        first_contact = contact & ~self.last_contacts  # (N, 2)
+        self.last_contacts = contact
+
+        # Reward = sum over feet of clamp(air_time - target, 0, max)
+        target = self.cfg.target_air_time
+        air_time_reward = torch.sum(
+            (self.feet_air_time - target).clamp(min=0.0) * first_contact, dim=-1
+        )
+
+        # Only active for walking/running (gait_id > 0)
+        is_moving = (gait_id > 0).float()
+        return air_time_reward * is_moving
+
+    def _penalty_lin_vel_z(self, base_lin_vel: torch.Tensor) -> torch.Tensor:
+        """Penalize vertical body velocity: v_z^2"""
+        return torch.square(base_lin_vel[:, 2])
+
+    def _feet_stumble(self, foot_contact_forces_3d: torch.Tensor) -> torch.Tensor:
+        """Penalize feet stumbling (large lateral forces relative to normal).
+
+        Fires when horizontal contact force exceeds 4x the vertical force,
+        indicating the foot is hitting a vertical surface or stumbling.
+
+        Args:
+            foot_contact_forces_3d: (N, 2, 3) 3D contact force vectors per foot
+        """
+        # Horizontal force magnitude per foot
+        f_xy = torch.norm(foot_contact_forces_3d[:, :, :2], dim=-1)  # (N, 2)
+        # Vertical force magnitude per foot
+        f_z = torch.abs(foot_contact_forces_3d[:, :, 2])  # (N, 2)
+        # Stumble when |F_xy| > 4 * |F_z| and there is meaningful contact
+        stumble = (f_xy > 4.0 * f_z).float() * (f_xy > 1.0).float()
+        return torch.sum(stumble, dim=-1)

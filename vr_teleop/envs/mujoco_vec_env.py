@@ -107,6 +107,7 @@ class MujocoVecEnv:
 
         # Foot state
         self.foot_contact_forces = torch.zeros(num_envs, 2, device=self.device)
+        self.foot_contact_forces_3d = torch.zeros(num_envs, 2, 3, device=self.device)
         self.foot_velocities = torch.zeros(num_envs, 2, 3, device=self.device)
 
         # Contact termination
@@ -333,6 +334,10 @@ class MujocoVecEnv:
         right_mag = np.linalg.norm(right_contact_np, axis=-1)
         self.foot_contact_forces[env_ids_torch, 0] = torch.from_numpy(left_mag).float().to(self.device)
         self.foot_contact_forces[env_ids_torch, 1] = torch.from_numpy(right_mag).float().to(self.device)
+
+        # Foot contact force 3D vectors
+        self.foot_contact_forces_3d[env_ids_torch, 0] = torch.from_numpy(left_contact_np).float().to(self.device)
+        self.foot_contact_forces_3d[env_ids_torch, 1] = torch.from_numpy(right_contact_np).float().to(self.device)
 
         # Foot velocities
         self.foot_velocities[env_ids_torch, 0] = torch.from_numpy(left_foot_vel_np).float().to(self.device)

@@ -56,6 +56,8 @@ def parse_args():
                         help='Rollout steps per env per iteration')
     parser.add_argument('--resume', type=str, default=None,
                         help='Path to checkpoint to resume from')
+    parser.add_argument('--pretrained-model', type=str, default=None,
+                        help='Path to pretrained model checkpoint (loads weights only, fresh optimizer/curriculum)')
     parser.add_argument('--log-dir', type=str, default='logs',
                         help='TensorBoard log directory')
     parser.add_argument('--save-interval', type=int, default=None,
@@ -212,6 +214,8 @@ def main():
                     reward_cfg.max_contact_force = float(reward_def["max_force"])
                 if reward_name == "transition_stability" and "window" in reward_def:
                     reward_cfg.transition_window = float(reward_def["window"])
+                if reward_name == "feet_air_time" and "target_air_time" in reward_def:
+                    reward_cfg.target_air_time = float(reward_def["target_air_time"])
 
     # Algo config: YAML → ppo_cfg dict
     algo_yaml_path = os.path.join(config_dir, "algo", "ppo.yaml")
@@ -372,6 +376,8 @@ def main():
         if loaded_infos and 'curriculum_state' in loaded_infos:
             curriculum.load_state_dict(loaded_infos['curriculum_state'])
             print(f"  Restored curriculum state (phase={getattr(curriculum, 'phase', 'N/A')})")
+    elif args.pretrained_model:
+        runner.load_pretrained(args.pretrained_model)
 
     # ---- Training ----
     print(f"\nStarting training for {args.max_iterations} iterations...")

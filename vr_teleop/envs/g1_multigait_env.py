@@ -102,6 +102,7 @@ class G1MultigaitEnv:
             reward_cfg=self.reward_cfg,
             dt=self.dt,
             device=self.device,
+            num_envs=num_envs,
         )
 
         # ---- Termination checker ----
@@ -302,6 +303,9 @@ class G1MultigaitEnv:
         # Reset transition state
         self.prev_gait_id[env_ids] = self.gait_id[env_ids]
         self.transition_timer[env_ids] = 0.0
+
+        # Reset feet air time tracking in reward computer
+        self.reward_computer.reset_air_time(env_ids)
 
         # Reset intervention
         self.interrupt_mask[env_ids] = False
@@ -527,6 +531,7 @@ class G1MultigaitEnv:
             dof_vel=self.vec_env.dof_vel[:, :self.robot_cfg.lower_body_dofs],
             last_dof_vel=self.vec_env.last_dof_vel[:, :self.robot_cfg.lower_body_dofs],
             foot_contact_forces=self.vec_env.foot_contact_forces,
+            foot_contact_forces_3d=self.vec_env.foot_contact_forces_3d,
             foot_velocities=self.vec_env.foot_velocities,
             is_terminated=is_terminated,
             is_timed_out=is_timeout,

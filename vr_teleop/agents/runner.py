@@ -250,6 +250,43 @@ class OnPolicyRunner:
             self.current_learning_iteration = loaded['iter']
         return loaded.get('infos')
 
+    def load_pretrained(self, path: str):
+        """Load only model weights from a checkpoint for transfer learning.
+
+        Unlike load(), this:
+        - Loads model weights with strict=False (tolerates architecture differences)
+        - Does NOT load optimizer state (fresh optimizer for new training)
+        - Does NOT restore iteration counter (starts from 0)
+        - Does NOT load curriculum state (starts from phase 0)
+        - Resets noise std to init_noise_std for fresh exploration
+
+        Args:
+            path: Path to pretrained checkpoint file
+        """
+        print(f"Loading pretrained model from {path}")
+        loaded = torch.load(path, map_location=self.device)
+
+        state_dict = loaded.get('model_state_dict', loaded)
+        missing, unexpected = self.alg.actor_critic.load_state_dict(
+            state_dict, strict=False)
+
+        if missing:
+            print(f"  Missing keys (initialized randomly): {missing}")
+        if unexpected:
+            print(f"  Unexpected keys (ignored): {unexpected}")
+
+        # Reset noise std for fresh exploration
+        self.alg.reset_noise_std()
+
+        # Reset optimizer to fresh state (discard any momentum from pretraining)
+        self.alg.optimizer = torch.optim.AdamW(
+            self.alg.actor_critic.parameters(), lr=self.alg.learning_rate)
+
+        # Start iteration counter from 0
+        self.current_learning_iteration = 0
+
+        print(f"  Pretrained model loaded (optimizer reset, noise reset, iter=0)")
+
     def get_inference_policy(self, device: str = None):
         """Get the actor-critic in eval mode for inference.
 

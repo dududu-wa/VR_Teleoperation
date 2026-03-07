@@ -1,11 +1,11 @@
-# Phase 1-3: Progressive training with intervention
-# Uses automatic phase curriculum progression
+# Finetune: Full curriculum training from pretrained balance model
+# Usage: python scripts/train.py --config experiment/finetune_full --pretrained-model logs/pretrain_balance/model_5000.pt
 
 defaults:
   - /base
 
 experiment:
-  name: phase1_3_progressive
+  name: finetune_full
   seed: 42
 
 env:
@@ -23,17 +23,25 @@ curriculum:
     phase_0:
       tracking_reward: 0.80
       fall_rate: 0.05
-      min_iterations: 2000
+      min_iterations: 1500
     phase_1:
       tracking_reward: 0.75
       fall_rate: 0.10
-      min_iterations: 3000
+      min_iterations: 2500
     phase_2:
       tracking_reward: 0.70
       fall_rate: 0.15
       transition_failure: 0.15
-      min_iterations: 3000
+      min_iterations: 2500
+
+rewards:
+  alive:
+    weight: 0.15
+  tracking_lin_vel:
+    sigma: 0.5
 
 algo:
-  max_iterations: 30000
+  learning_rate: 5.0e-5
+  max_iterations: 25000
   save_interval: 100
+  init_noise_std: 0.5

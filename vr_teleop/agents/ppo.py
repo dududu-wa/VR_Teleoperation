@@ -34,8 +34,9 @@ class PPO:
         gamma: float = 0.99,
         lam: float = 0.95,
         value_loss_coef: float = 1.0,
-        entropy_coef: float = 0.03,
+        entropy_coef: float = 0.01,
         learning_rate: float = 1e-4,
+        weight_decay: float = 1e-2,
         max_grad_norm: float = 1.0,
         use_clipped_value_loss: bool = True,
         # Symmetry loss
@@ -71,7 +72,8 @@ class PPO:
         self.actor_critic.to(self.device)
         self.storage = None  # initialized later via init_storage()
         self.optimizer = optim.AdamW(
-            self.actor_critic.parameters(), lr=learning_rate)
+            self.actor_critic.parameters(), lr=learning_rate,
+            weight_decay=weight_decay)
         self.transition = RolloutStorage.Transition()
 
         # PPO parameters
@@ -96,6 +98,16 @@ class PPO:
             self._proprio_dim = 51  # from ObsConfig
             self._proprio_perm_mat = self._obs_perm_mat[:self._proprio_dim,
                                                          :self._proprio_dim].clone()
+
+    def reset_noise_std(self):
+        """Reset action noise std to init_noise_std for fresh exploration.
+
+        Useful when loading a pretrained model to allow the policy to
+        re-explore from the pretrained weights.
+        """
+        init_val = getattr(self.actor_critic, '_init_noise_std', 1.0)
+        self.actor_critic.std.data.fill_(init_val)
+        print(f"  Reset noise std to {init_val}")
 
     def init_storage(self, num_envs: int, num_transitions_per_env: int,
                      actor_obs_shape: list, critic_obs_shape: list,

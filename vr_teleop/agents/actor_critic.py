@@ -37,7 +37,7 @@ class ActorCritic(nn.Module):
         activation: str = 'elu',
         output_activation: str = None,
         # Noise config
-        init_noise_std: float = 0.8,
+        init_noise_std: float = 1.0,
         min_std: float = 0.1,
         max_std: float = 1.2,
         **kwargs,
@@ -72,6 +72,7 @@ class ActorCritic(nn.Module):
             num_critic_obs, 1, critic_hidden_dims, activation)
 
         # ---- Action noise (learnable std) ----
+        self._init_noise_std = init_noise_std
         self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
         self.min_std = min_std
         self.max_std = max_std

@@ -9,7 +9,7 @@ experiment:
   seed: 42
 
 env:
-  num_envs: 1024
+  num_envs: 4096
   max_episode_length: 1000
 
   command_ranges:
@@ -34,6 +34,10 @@ intervention:
 curriculum:
   initial_phase: 0
   max_phase: 0  # stay in phase 0
+
+rewards:
+  alive:
+    weight: 0.15
 
 algo:
   max_iterations: 10000

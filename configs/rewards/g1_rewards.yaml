@@ -2,20 +2,23 @@ rewards:
   # Positive rewards
   tracking_lin_vel:
     weight: 2.0
-    sigma: 0.25    # exp(-||v_cmd - v_actual||^2 / sigma^2)
+    sigma: 0.5    # exp(-||v_cmd - v_actual||^2 / sigma^2)
   tracking_ang_vel:
-    weight: 3.0
-    sigma: 0.25
+    weight: 4.0
+    sigma: 0.5
   alive:
-    weight: 1.5
+    weight: 0.15
+  feet_air_time:
+    weight: 2.0
+    target_air_time: 0.3  # seconds
 
   # Penalties (negative weights)
   torso_orientation:
-    weight: -5.0
+    weight: -8.0
   ang_vel_xy:
     weight: -0.5
   base_height:
-    weight: -8.0
+    weight: -15.0
     target_stand: 0.793
     target_walk: 0.75
     target_run: 0.72
@@ -36,6 +39,10 @@ rewards:
     weight: -5.0
     window: 0.5    # seconds around transition
   standing_still:
-    weight: -0.5
+    weight: -2.0
+  penalty_lin_vel_z:
+    weight: -0.1
+  feet_stumble:
+    weight: -0.2
   termination:
     weight: -200.0

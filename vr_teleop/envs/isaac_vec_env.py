@@ -326,6 +326,7 @@ class IsaacVecEnv:
 
         self.torques = torch.zeros(self.num_envs, self.num_dofs, device=self.device)
         self.foot_contact_forces = torch.zeros(self.num_envs, 2, device=self.device)
+        self.foot_contact_forces_3d = torch.zeros(self.num_envs, 2, 3, device=self.device)
         self.foot_velocities = torch.zeros(self.num_envs, 2, 3, device=self.device)
         self.has_contact_termination = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
@@ -396,12 +397,15 @@ class IsaacVecEnv:
         self.torques[:, : self.num_dofs] = self._actuation_forces[:, : self.num_dofs].to(self.device)
 
         self.foot_contact_forces.zero_()
+        self.foot_contact_forces_3d.zero_()
         if self.left_foot_body_idx is not None:
             left_force = self._net_contact_forces[:, self.left_foot_body_idx, :]
             self.foot_contact_forces[:, 0] = torch.linalg.norm(left_force, dim=-1).to(self.device)
+            self.foot_contact_forces_3d[:, 0] = left_force.to(self.device)
         if self.right_foot_body_idx is not None:
             right_force = self._net_contact_forces[:, self.right_foot_body_idx, :]
             self.foot_contact_forces[:, 1] = torch.linalg.norm(right_force, dim=-1).to(self.device)
+            self.foot_contact_forces_3d[:, 1] = right_force.to(self.device)
 
         self.foot_velocities.zero_()
         if self.left_foot_body_idx is not None:

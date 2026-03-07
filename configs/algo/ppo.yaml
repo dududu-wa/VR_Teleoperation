@@ -8,7 +8,8 @@ algo:
   learning_rate: 1.0e-4
   max_grad_norm: 1.0
   value_loss_coef: 1.0
-  entropy_coef: 0.03
+  entropy_coef: 0.01
+  weight_decay: 1.0e-2
   num_steps_per_env: 24
   num_learning_iterations: 30000
   save_interval: 100
@@ -38,6 +39,6 @@ algo:
       activation: elu
 
   # Action noise
-  init_noise_std: 0.8
+  init_noise_std: 1.0
   min_noise_std: 0.1
   max_noise_std: 1.2
