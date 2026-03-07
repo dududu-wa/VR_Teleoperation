@@ -72,7 +72,8 @@ def parse_args():
     parser.add_argument('--experiment-config', type=str, default=None,
                         help='Path to configs/experiment/*.yaml')
     parser.add_argument('--teacher-model', type=str, default=None,
-                        help='Path to Unitree pretrained JIT model for knowledge distillation')
+                        help='Path to Unitree pretrained JIT model for knowledge distillation '
+                             '(default: assets/pretrained/unitree_g1_12dof.pt)')
     return parser.parse_args()
 
 

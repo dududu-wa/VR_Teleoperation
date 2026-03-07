@@ -1,5 +1,7 @@
 # Finetune: Full curriculum training from pretrained balance model
-# Usage: python scripts/train.py --config experiment/finetune_full --pretrained-model logs/pretrain_balance/model_5000.pt
+# Usage: python scripts/train.py --experiment-config configs/experiment/finetune_full.yaml \
+#        --pretrained-model logs/pretrain_balance/model_5000.pt \
+#        --teacher-model assets/pretrained/unitree_g1_12dof.pt
 
 defaults:
   - /base

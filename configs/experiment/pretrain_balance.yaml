@@ -1,6 +1,6 @@
-# Pretrain: Standing balance foundation
-# Learn basic balance, joint coordination, gravity compensation
-# Use --pretrained-model <path> with finetune_full.yaml after this
+# Pretrain: Standing balance with Unitree teacher distillation
+# Usage: python scripts/train.py --experiment-config configs/experiment/pretrain_balance.yaml \
+#        --teacher-model assets/pretrained/unitree_g1_12dof.pt
 
 defaults:
   - /base
@@ -36,6 +36,9 @@ curriculum:
   initial_phase: 0
   max_phase: 0  # stay in phase 0, no progression
 
+termination:
+  grace_period: 50  # no early termination for first 50 steps
+
 rewards:
   alive:
     weight: 0.15
@@ -46,11 +49,6 @@ rewards:
   tracking_lin_vel:
     weight: 1.0
     sigma: 0.5
-
-termination:
-  grace_period: 50  # no early termination for first 50 steps
-
-rewards:
   termination:
     weight: -50.0  # reduced from -200 for pretraining
 
