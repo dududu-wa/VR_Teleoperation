@@ -230,18 +230,46 @@ class UpperBodyDefaultPolicy:
 class DistillationLoss:
     """Knowledge distillation loss from Unitree teacher to student policy.
 
-    Computes MSE between the student's first 12 action dimensions (leg joints)
-    and the teacher's 12-DOF output. The coefficient decays exponentially
-    so the student gradually relies on its own reward signal.
+    Compares the student's first 12 action dimensions (leg joints) with the
+    teacher's 12-DOF output. The target can be clipped for robustness and the
+    coefficient decays exponentially so the student gradually relies on reward.
     """
 
     teacher_action_dim = 12  # Unitree model produces 12-DOF leg actions
 
-    def __init__(self, teacher: UnitreeTeacher, coef: float = 1.0,
-                 decay_rate: float = 0.9995):
+    def __init__(
+        self,
+        teacher: UnitreeTeacher,
+        coef: float = 1.0,
+        decay_rate: float = 0.9995,
+        target_clip: float = 1.0,
+        use_smooth_l1: bool = True,
+    ):
         self.teacher = teacher
         self.coef = coef
         self.decay_rate = decay_rate
+        self.target_clip = target_clip
+        self.use_smooth_l1 = use_smooth_l1
+
+    def _compute_core_loss(
+        self, student_actions: torch.Tensor, teacher_actions: torch.Tensor
+    ) -> torch.Tensor:
+        student_leg = student_actions[:, :self.teacher_action_dim]
+
+        teacher_actions = torch.nan_to_num(
+            teacher_actions,
+            nan=0.0,
+            posinf=self.target_clip if self.target_clip is not None else 10.0,
+            neginf=-self.target_clip if self.target_clip is not None else -10.0,
+        )
+        if self.target_clip is not None:
+            teacher_actions = torch.clamp(
+                teacher_actions, -self.target_clip, self.target_clip
+            )
+
+        if self.use_smooth_l1:
+            return F.smooth_l1_loss(student_leg, teacher_actions)
+        return F.mse_loss(student_leg, teacher_actions)
 
     def compute(self, student_actions: torch.Tensor,
                 obs: torch.Tensor) -> torch.Tensor:
@@ -251,8 +279,7 @@ class DistillationLoss:
         teacher inference and LSTM hidden state contamination.
         """
         teacher_actions = self.teacher.get_action(obs)
-        loss = F.mse_loss(student_actions[:, :self.teacher_action_dim], teacher_actions)
-        return self.coef * loss
+        return self.coef * self._compute_core_loss(student_actions, teacher_actions)
 
     def compute_precomputed(self, student_actions: torch.Tensor,
                             teacher_actions: torch.Tensor) -> torch.Tensor:
@@ -263,10 +290,9 @@ class DistillationLoss:
             teacher_actions: (N, 12) pre-computed teacher actions from rollout
 
         Returns:
-            Scalar distillation loss (coef * MSE)
+            Scalar distillation loss (coef * core loss)
         """
-        loss = F.mse_loss(student_actions[:, :self.teacher_action_dim], teacher_actions)
-        return self.coef * loss
+        return self.coef * self._compute_core_loss(student_actions, teacher_actions)
 
     def step(self):
         """Decay the distillation coefficient (call once per PPO update)."""

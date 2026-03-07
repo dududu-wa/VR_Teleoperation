@@ -313,11 +313,22 @@ def main():
             num_envs=args.num_envs,
             device=device,
         )
-        distill_coef = float(algo_yaml.get('distillation_coef', 1.0))
+        distill_coef = float(algo_yaml.get('distillation_coef', 0.2))
         distill_decay = float(algo_yaml.get('distillation_decay', 0.9995))
+        distill_target_clip = algo_yaml.get('distillation_target_clip', 1.0)
+        distill_use_smooth_l1 = bool(algo_yaml.get('distillation_use_smooth_l1', True))
         distill_loss = DistillationLoss(
-            teacher=teacher, coef=distill_coef, decay_rate=distill_decay)
-        print(f"  Distillation enabled (coef={distill_coef}, decay={distill_decay})")
+            teacher=teacher,
+            coef=distill_coef,
+            decay_rate=distill_decay,
+            target_clip=distill_target_clip,
+            use_smooth_l1=distill_use_smooth_l1,
+        )
+        print(
+            "  Distillation enabled "
+            f"(coef={distill_coef}, decay={distill_decay}, "
+            f"target_clip={distill_target_clip}, smooth_l1={distill_use_smooth_l1})"
+        )
 
     # ---- Create runner (creates actor-critic + PPO + storage internally) ----
     runner = OnPolicyRunner(

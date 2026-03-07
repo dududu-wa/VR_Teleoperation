@@ -205,6 +205,7 @@ class PPO:
             dict of mean metrics over all mini-batch updates
         """
         metrics = defaultdict(float)
+        applied_updates = 0
 
         generator = self.storage.mini_batch_generator(
             self.num_mini_batches, self.num_learning_epochs)
@@ -248,9 +249,9 @@ class PPO:
                         param_group['lr'] = self.learning_rate
 
             # ---- Surrogate loss ----
-            ratio = torch.exp(
-                actions_log_prob_batch
-                - torch.squeeze(old_actions_log_prob_batch))
+            log_ratio = actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch)
+            log_ratio = torch.clamp(log_ratio, min=-20.0, max=20.0)
+            ratio = torch.exp(log_ratio)
             surrogate = -torch.squeeze(advantages_batch) * ratio
             surrogate_clipped = (
                 -torch.squeeze(advantages_batch)
@@ -300,12 +301,27 @@ class PPO:
                 + distill_loss
             )
 
+            if not torch.isfinite(loss):
+                metrics['skipped_nonfinite_batches'] += 1.0
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
+
             # ---- Gradient step ----
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
             loss.backward()
+            has_nonfinite_grad = False
+            for param in self.actor_critic.parameters():
+                if param.grad is not None and not torch.isfinite(param.grad).all():
+                    has_nonfinite_grad = True
+                    break
+            if has_nonfinite_grad:
+                metrics['skipped_nonfinite_batches'] += 1.0
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
             nn.utils.clip_grad_norm_(
                 self.actor_critic.parameters(), self.max_grad_norm)
             self.optimizer.step()
+            applied_updates += 1
 
             # ---- Track metrics ----
             metrics['surrogate'] += surrogate_loss.item()
@@ -319,8 +335,24 @@ class PPO:
 
         # Average over all updates
         num_updates = self.num_learning_epochs * self.num_mini_batches
-        for k in metrics:
-            metrics[k] /= num_updates
+        if applied_updates == 0:
+            raise RuntimeError(
+                "All PPO mini-batches were skipped due to non-finite loss/gradients. "
+                "Please lower learning_rate/distillation_coef and check observations."
+            )
+
+        for k in (
+            'surrogate',
+            'value_function',
+            'entropy',
+            'sym_loss',
+            'adaptation_loss',
+            'distillation_loss',
+            'learning_rate',
+            'ratio',
+        ):
+            metrics[k] /= applied_updates
+        metrics['valid_update_fraction'] = applied_updates / float(num_updates)
 
         self.storage.clear()
 

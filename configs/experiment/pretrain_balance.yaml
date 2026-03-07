@@ -56,3 +56,8 @@ algo:
   max_iterations: 5000
   save_interval: 100
   init_noise_std: 0.3
+  learning_rate: 5.0e-5
+  distillation_coef: 0.2
+  distillation_decay: 0.9995
+  distillation_target_clip: 1.0
+  distillation_use_smooth_l1: true

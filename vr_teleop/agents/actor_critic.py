@@ -77,9 +77,10 @@ class ActorCritic(nn.Module):
         self.min_std = min_std
         self.max_std = max_std
         self.distribution = None
+        self._warned_nonfinite_dist = False
 
         # Disable validation for speed
-        Normal.set_default_validate_args = False
+        Normal.set_default_validate_args(False)
 
     def reset(self, dones=None):
         """Reset any internal state (unused for MLP, needed for interface)."""
@@ -120,8 +121,21 @@ class ActorCritic(nn.Module):
                             sync_update: bool = False, **kwargs):
         """Compute action distribution from observations."""
         mean = self.actor(observations, privileged_obs=privileged_obs,
-                         sync_update=sync_update, **kwargs)
+                          sync_update=sync_update, **kwargs)
+        if not torch.isfinite(mean).all():
+            if not self._warned_nonfinite_dist:
+                print("Warning: non-finite policy mean detected; sanitizing to keep training alive.")
+                self._warned_nonfinite_dist = True
+            mean = torch.nan_to_num(mean, nan=0.0, posinf=10.0, neginf=-10.0)
+        mean = torch.clamp(mean, -10.0, 10.0)
+
         std = torch.clamp(self.std, min=self.min_std, max=self.max_std)
+        std = torch.nan_to_num(
+            std,
+            nan=self.min_std,
+            posinf=self.max_std,
+            neginf=self.min_std,
+        )
         self.distribution = Normal(mean, mean * 0.0 + std)
 
     def act(self, observations: torch.Tensor,
