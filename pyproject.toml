@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=65.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "humanoid-amp"
+version = "0.1.0"
+description = "Humanoid AMP tasks and utilities for Isaac Lab"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Unitree Robotics Hobbyist" }
+]
+license = "BSD-3-Clause"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Operating System :: POSIX :: Linux"
+]
+
+[tool.setuptools]
+packages = ["humanoid_amp"]
+
+[tool.setuptools.package-dir]
+humanoid_amp = "."
+
+[tool.setuptools.package-data]
+humanoid_amp = [
+  "motions/**/*",
+  "usd/**/*"
+]
