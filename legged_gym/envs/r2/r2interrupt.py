@@ -24,6 +24,7 @@ from copy import deepcopy
 class R2InterruptRobot(R2Robot):
     def __init__(self, cfg: R2InterruptCfg, sim_params, physics_engine, sim_device, headless):
         self.cfg = cfg
+        self.use_disturb = cfg.disturb.use_disturb
         super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
         self.cfg = cfg
         self.initial_disturb(cfg)
