@@ -1,12 +1,12 @@
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 
-from .h1.h1 import H1Robot
-from legged_gym.envs.h1.h1interrupt import H1InterruptRobot
+from .r2.r2 import R2Robot
+from legged_gym.envs.r2.r2interrupt import R2InterruptRobot
 
-from legged_gym.envs.h1.h1_config import H1Cfg, H1CfgPPO
-from legged_gym.envs.h1.h1interrupt_config import H1InterruptCfg, H1InterruptCfgPPO
+from legged_gym.envs.r2.r2_config import R2Cfg, R2CfgPPO
+from legged_gym.envs.r2.r2interrupt_config import R2InterruptCfg, R2InterruptCfgPPO
 
 from legged_gym.utils.task_registry import task_registry
 
-task_registry.register( "h1int", H1InterruptRobot, H1InterruptCfg(), H1InterruptCfgPPO())
+task_registry.register("r2int", R2InterruptRobot, R2InterruptCfg(), R2InterruptCfgPPO())
 

@@ -61,13 +61,13 @@ All commands should be run from the root of the `HugWBC` repository.
 ### Training
 To train a new policy, run:
 ```bash
-python legged_gym/scripts/train.py --task=h1int --headless 
+python legged_gym/scripts/train.py --task=r2int --headless 
 ```
 
 ### Visualization
 To visualize a trained policy, run:
 ```bash
-python legged_gym/scripts/play.py --task=h1int
+python legged_gym/scripts/play.py --task=r2int
 ```
 
 ### Sim2Sim & Sim2Real Evaluation

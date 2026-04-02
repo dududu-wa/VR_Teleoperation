@@ -58,7 +58,7 @@ class PPO:
                  schedule="fixed",
                  desired_kl=0.01,
                  device='cpu',
-                 robot_type = 'h1'
+                 robot_type = 'r2'
                  ):
 
         self.device = device
@@ -183,29 +183,31 @@ class PPO:
                 if self.sync_update:
                     adaptation_loss = self.actor_critic.actor.compute_adaptation_pred_loss(metrics)
 
-                # symmetry loss 
-                actions_permutation = torch.tensor([-5, -6, 7, 8, 9, -0.001, -1, 2, 3, 4, -10, 15, -16, -17, 18, 11, -12, -13, 14])
-                observations_permutation = torch.tensor([-0.0001, 1, -2, 3, -4, 5,
-                                                        -11, -12, 13, 14, 15, -6, -7, 8, 9, 10, -16, 21, -22, -23, 24, 17, -18, -19, 20,
-                                                        -30, -31, 32, 33, 34, -25, 26, 27, 28, 29, -35, 40, -41, -42, 43, 36, -37, -38, 39,
-                                                        -49, -50, 51, 52, 53, -44, -45, 46, 47, 48, -54, 59, -60, -61, 62, 55, -56, -57, 58,
-                                                        63, -64, -65, 66, 67, 68, 69, 70, 71, -72, 73, 75, 74
-                                                        ])
-                    
-                act_perm_mat = torch.zeros(len(actions_permutation), len(actions_permutation), requires_grad=False, device=self.device)
-                obs_perm_mat = torch.zeros(len(observations_permutation), len(observations_permutation), requires_grad=False, device=self.device)
-                for i, perm in enumerate(actions_permutation):
-                    act_perm_mat[i][int(torch.abs(perm))] = torch.sign(perm)
-                for i, perm in enumerate(observations_permutation):
-                    obs_perm_mat[i][int(torch.abs(perm))] = torch.sign(perm)
+                sym_loss = torch.tensor(0.0, device=self.device)
+                if self.use_wbc_sym_loss:
+                    # Legacy whole-body symmetry map. Keep disabled for other robot layouts.
+                    actions_permutation = torch.tensor([-5, -6, 7, 8, 9, -0.001, -1, 2, 3, 4, -10, 15, -16, -17, 18, 11, -12, -13, 14])
+                    observations_permutation = torch.tensor([-0.0001, 1, -2, 3, -4, 5,
+                                                            -11, -12, 13, 14, 15, -6, -7, 8, 9, 10, -16, 21, -22, -23, 24, 17, -18, -19, 20,
+                                                            -30, -31, 32, 33, 34, -25, 26, 27, 28, 29, -35, 40, -41, -42, 43, 36, -37, -38, 39,
+                                                            -49, -50, 51, 52, 53, -44, -45, 46, 47, 48, -54, 59, -60, -61, 62, 55, -56, -57, 58,
+                                                            63, -64, -65, 66, 67, 68, 69, 70, 71, -72, 73, 75, 74
+                                                            ])
 
-                origin_act, _ = self.actor_critic.act_inference(obs_batch, masks=masks_batch, privileged_obs=critic_obs_batch)
-                mirror_partial_obs_batch = torch.matmul(obs_batch[..., :len(observations_permutation)], obs_perm_mat)
-                mirror_obs_batch = torch.cat((mirror_partial_obs_batch, obs_batch[..., len(observations_permutation):]), dim=-1)
-                mirror_act, _ = self.actor_critic.act_inference(mirror_obs_batch, masks=masks_batch, privileged_obs=critic_obs_batch)
-                recovery_act = torch.matmul(mirror_act, act_perm_mat)
+                    act_perm_mat = torch.zeros(len(actions_permutation), len(actions_permutation), requires_grad=False, device=self.device)
+                    obs_perm_mat = torch.zeros(len(observations_permutation), len(observations_permutation), requires_grad=False, device=self.device)
+                    for i, perm in enumerate(actions_permutation):
+                        act_perm_mat[i][int(torch.abs(perm))] = torch.sign(perm)
+                    for i, perm in enumerate(observations_permutation):
+                        obs_perm_mat[i][int(torch.abs(perm))] = torch.sign(perm)
 
-                sym_loss = self.symmetry_loss_coef * (origin_act.detach() - recovery_act).pow(2).mean()
+                    origin_act, _ = self.actor_critic.act_inference(obs_batch, masks=masks_batch, privileged_obs=critic_obs_batch)
+                    mirror_partial_obs_batch = torch.matmul(obs_batch[..., :len(observations_permutation)], obs_perm_mat)
+                    mirror_obs_batch = torch.cat((mirror_partial_obs_batch, obs_batch[..., len(observations_permutation):]), dim=-1)
+                    mirror_act, _ = self.actor_critic.act_inference(mirror_obs_batch, masks=masks_batch, privileged_obs=critic_obs_batch)
+                    recovery_act = torch.matmul(mirror_act, act_perm_mat)
+
+                    sym_loss = self.symmetry_loss_coef * (origin_act.detach() - recovery_act).pow(2).mean()
 
                 if self.sync_update:
                     loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + sym_loss + adaptation_loss
