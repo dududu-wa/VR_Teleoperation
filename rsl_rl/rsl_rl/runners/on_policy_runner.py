@@ -75,6 +75,12 @@ class OnPolicyRunner:
 
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, actor_obs_shape, [self.env.num_obs], [self.env.num_actions])
 
+        self.use_amp = "amp" in train_cfg
+        self.discriminator = None
+        self.amp_replay_buffer = None
+        if self.use_amp:
+            self._init_amp(train_cfg["amp"])
+
         # Log
         self.log_dir = log_dir
         self.writer = None
@@ -83,6 +89,57 @@ class OnPolicyRunner:
         self.current_learning_iteration = 0
 
         _, _ = self.env.reset()
+
+    def _init_amp(self, amp_cfg):
+        from rsl_rl.modules.discriminator import AMPDiscriminator
+        from rsl_rl.storage.amp_storage import AMPReplayBuffer
+        from rsl_rl.algorithms.amp_ppo import AMPPPO
+
+        if not hasattr(self.env, "collect_reference_motions"):
+            raise RuntimeError("AMP requires env.collect_reference_motions(), but current env does not provide it.")
+
+        amp_obs_size = amp_cfg["amp_obs_dim"] * amp_cfg.get("num_amp_obs_steps", 2)
+        self.discriminator = AMPDiscriminator(
+            amp_obs_dim=amp_obs_size,
+            hidden_dims=amp_cfg.get("disc_hidden_dims", [1024, 512]),
+        ).to(self.device)
+
+        self.amp_replay_buffer = AMPReplayBuffer(
+            buffer_size=amp_cfg.get("replay_buffer_size", 1000000),
+            amp_obs_size=amp_obs_size,
+            device=self.device,
+        )
+
+        actor_critic = self.alg.actor_critic
+        self.alg = AMPPPO(
+            actor_critic,
+            self.discriminator,
+            self.amp_replay_buffer,
+            env=self.env,
+            task_reward_weight=amp_cfg.get("task_reward_weight", 0.3),
+            style_reward_weight=amp_cfg.get("style_reward_weight", 0.7),
+            disc_learning_rate=amp_cfg.get("disc_learning_rate", 5e-5),
+            disc_grad_penalty=amp_cfg.get("disc_grad_penalty", 5.0),
+            disc_logit_reg=amp_cfg.get("disc_logit_reg", 0.05),
+            disc_weight_decay=amp_cfg.get("disc_weight_decay", 1e-4),
+            disc_reward_scale=amp_cfg.get("disc_reward_scale", 2.0),
+            disc_batch_size=amp_cfg.get("disc_batch_size", 4096),
+            device=self.device,
+            **self.alg_cfg,
+        )
+
+        if self.env.include_history_steps is not None:
+            actor_obs_shape = [self.env.include_history_steps, self.env.num_partial_obs]
+        else:
+            actor_obs_shape = [self.env.num_partial_obs]
+
+        self.alg.init_storage(
+            self.env.num_envs,
+            self.num_steps_per_env,
+            actor_obs_shape,
+            [self.env.num_obs],
+            [self.env.num_actions],
+        )
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         metrics = defaultdict(float)
@@ -209,12 +266,16 @@ class OnPolicyRunner:
         print(log_string)
 
     def save(self, path, infos=None):
-        torch.save({
+        save_dict = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
             'infos': infos,
-            }, path)
+            }
+        if self.use_amp:
+            save_dict['discriminator_state_dict'] = self.discriminator.state_dict()
+            save_dict['disc_optimizer_state_dict'] = self.alg.disc_optimizer.state_dict()
+        torch.save(save_dict, path)
 
     def load(self, path, load_optimizer=True, load_adaptation=False):
         print("load_path:", path)
@@ -223,6 +284,10 @@ class OnPolicyRunner:
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
+        if self.use_amp and 'discriminator_state_dict' in loaded_dict:
+            self.discriminator.load_state_dict(loaded_dict['discriminator_state_dict'])
+            if load_optimizer and 'disc_optimizer_state_dict' in loaded_dict:
+                self.alg.disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):

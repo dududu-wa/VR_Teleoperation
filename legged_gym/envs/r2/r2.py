@@ -37,6 +37,41 @@ def _polynomial_planer(t0, t1, x0, x1, v0=0, v1=0, a0=0, a1=0):
 
     return coef
 
+
+def compute_amp_obs(
+    dof_pos,
+    dof_vel,
+    root_pos,
+    root_quat_xyzw,
+    root_lin_vel,
+    root_ang_vel,
+    key_body_pos,
+):
+    """Compute one-frame AMP observation from live state tensors.
+
+    root_quat_xyzw must follow IsaacGym xyzw convention.
+    """
+    ref_tangent = torch.zeros_like(root_quat_xyzw[..., :3])
+    ref_normal = torch.zeros_like(root_quat_xyzw[..., :3])
+    ref_tangent[..., 0] = 1
+    ref_normal[..., -1] = 1
+    tangent = quat_apply(root_quat_xyzw, ref_tangent)
+    normal = quat_apply(root_quat_xyzw, ref_normal)
+    root_tn = torch.cat([tangent, normal], dim=-1)
+
+    return torch.cat(
+        [
+            dof_pos,
+            dof_vel,
+            root_pos[:, 2:3],
+            root_tn,
+            root_lin_vel,
+            root_ang_vel,
+            (key_body_pos - root_pos.unsqueeze(-2)).view(key_body_pos.shape[0], -1),
+        ],
+        dim=-1,
+    )
+
 class R2Robot(BaseTask):
     def __init__(self, cfg: R2Cfg, sim_params, physics_engine, sim_device, headless):
         """ Parses the provided config file,
@@ -163,11 +198,23 @@ class R2Robot(BaseTask):
         for i in range(self.feet_indices.shape[0]):
             self.foot_pos_b_h[:,i,:] = quat_rotate_inverse(quat_yaw, foot_base_distance[:,i,:])
 
+        if hasattr(self, "amp_observation_buffer"):
+            pending_env_ids = self.amp_reset_pending.nonzero(as_tuple=False).flatten()
+            if len(pending_env_ids) > 0:
+                self._bootstrap_amp_buffer(pending_env_ids)
+                self.amp_reset_pending[pending_env_ids] = False
+
         self._post_physics_step_callback()
 
         # compute observations, rewards, resets, ...
         self.check_termination()
         self.compute_reward()
+
+        if hasattr(self, "amp_observation_buffer"):
+            self.compute_amp_observations()
+            amp_obs_size = self.num_amp_obs_steps * self.amp_obs_dim
+            self.extras["amp_obs"] = self.amp_observation_buffer.view(-1, amp_obs_size)
+
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
         self.compute_observations(env_ids) # in some cases a simulation step might be required to refresh some obs (for example body positions)
@@ -243,6 +290,73 @@ class R2Robot(BaseTask):
             self.extras["episode"]["curriculum_scales"] = self.curriculum_scale
 
         self.gait_indices[env_ids] = 0
+
+        if hasattr(self, "amp_observation_buffer") and len(env_ids) > 0:
+            self.amp_reset_pending[env_ids] = True
+
+    def compute_amp_observations(self):
+        """Update AMP history with current live state before reset is applied."""
+        key_body_pos = self.rigid_body_states[:, self.amp_key_body_indices, :3]
+        cur_obs = compute_amp_obs(
+            self.dof_pos,
+            self.dof_vel,
+            self.root_states[:, :3],
+            self.root_states[:, 3:7],
+            self.root_states[:, 7:10],
+            self.root_states[:, 10:13],
+            key_body_pos,
+        )
+
+        for i in reversed(range(self.num_amp_obs_steps - 1)):
+            self.amp_observation_buffer[:, i + 1] = self.amp_observation_buffer[:, i]
+        self.amp_observation_buffer[:, 0] = cur_obs
+
+    def _bootstrap_amp_buffer(self, env_ids):
+        """Fill all AMP history slots from refreshed live state for newly reset envs."""
+        key_body_pos = self.rigid_body_states[env_ids][:, self.amp_key_body_indices, :3]
+        cur_obs = compute_amp_obs(
+            self.dof_pos[env_ids],
+            self.dof_vel[env_ids],
+            self.root_states[env_ids, :3],
+            self.root_states[env_ids, 3:7],
+            self.root_states[env_ids, 7:10],
+            self.root_states[env_ids, 10:13],
+            key_body_pos,
+        )
+        for i in range(self.num_amp_obs_steps):
+            self.amp_observation_buffer[env_ids, i] = cur_obs
+
+    def collect_reference_motions(self, num_samples, current_times=None):
+        """Sample reference AMP observation histories for discriminator training."""
+        if not hasattr(self, "_motion_loader"):
+            raise RuntimeError("AMP motion loader is not initialized for this environment.")
+
+        if current_times is None:
+            current_times = self._motion_loader.sample_times(num_samples)
+
+        times = (
+            np.expand_dims(np.asarray(current_times), axis=-1)
+            - self._motion_loader.dt * np.arange(0, self.num_amp_obs_steps)
+        ).flatten()
+
+        dof_pos, dof_vel, body_pos, body_rot_wxyz, body_lin_vel, body_ang_vel = self._motion_loader.sample(
+            num_samples=num_samples * self.num_amp_obs_steps,
+            times=times,
+        )
+
+        # motion files store quaternions as wxyz; convert to IsaacGym xyzw.
+        body_rot_xyzw = body_rot_wxyz[:, :, [1, 2, 3, 0]]
+
+        amp_obs = compute_amp_obs(
+            dof_pos[:, self.motion_dof_indices],
+            dof_vel[:, self.motion_dof_indices],
+            body_pos[:, self.motion_ref_body_index],
+            body_rot_xyzw[:, self.motion_ref_body_index],
+            body_lin_vel[:, self.motion_ref_body_index],
+            body_ang_vel[:, self.motion_ref_body_index],
+            body_pos[:, self.motion_key_body_indices],
+        )
+        return amp_obs.view(num_samples, self.num_amp_obs_steps, -1)
 
     def compute_reward(self):
         """ Compute rewards
@@ -1085,6 +1199,63 @@ class R2Robot(BaseTask):
                                         requires_grad=False)
         self.desired_contact_states = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device,
                                                   requires_grad=False, )
+
+        if hasattr(self.cfg, "amp") and self.cfg.amp.enable:
+            self.amp_obs_dim = self.cfg.amp.amp_obs_dim
+            self.num_amp_obs_steps = self.cfg.amp.num_amp_obs_steps
+
+            amp_key_body_names = self.cfg.amp.key_body_names
+            self.amp_key_body_indices = torch.zeros(
+                len(amp_key_body_names), dtype=torch.long, device=self.device
+            )
+            for i, name in enumerate(amp_key_body_names):
+                if name not in self.body_names:
+                    raise ValueError(f"AMP key body not found in robot body names: {name}")
+                self.amp_key_body_indices[i] = self.body_names.index(name)
+
+            self.amp_observation_buffer = torch.zeros(
+                self.num_envs,
+                self.num_amp_obs_steps,
+                self.amp_obs_dim,
+                device=self.device,
+            )
+            self.amp_reset_pending = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+
+            from legged_gym.utils.motion_loader import MotionLoader
+
+            motion_file = self.cfg.amp.motion_file.format(
+                LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR
+            )
+            self._motion_loader = MotionLoader(motion_file, self.device)
+            try:
+                self.motion_dof_indices = self._motion_loader.get_dof_index(list(self.dof_names))
+                self.motion_ref_body_index = int(
+                    self._motion_loader.get_body_index([self.cfg.amp.reference_body_name])[0].item()
+                )
+                self.motion_key_body_indices = self._motion_loader.get_body_index(
+                    self.cfg.amp.key_body_names
+                )
+            except KeyError as exc:
+                raise ValueError(
+                    "AMP motion file does not match robot dof/body names. "
+                    "Please regenerate motion data with retarget_motion.py"
+                ) from exc
+
+            dummy_amp_obs = compute_amp_obs(
+                self.dof_pos[:1],
+                self.dof_vel[:1],
+                self.root_states[:1, :3],
+                self.root_states[:1, 3:7],
+                self.root_states[:1, 7:10],
+                self.root_states[:1, 10:13],
+                self.rigid_body_states[:1, self.amp_key_body_indices, :3],
+            )
+            if dummy_amp_obs.shape[-1] != self.amp_obs_dim:
+                raise ValueError(
+                    f"AMP obs dim mismatch: computed {dummy_amp_obs.shape[-1]}, cfg {self.amp_obs_dim}"
+                )
     
     def compute_randomized_gains(self, num_envs):
         p_mult = ((

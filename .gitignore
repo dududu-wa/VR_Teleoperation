@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Training outputs
+logs/
+runs/
+wandb/
+events.out.tfevents*
+*.log
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
