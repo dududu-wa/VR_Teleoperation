@@ -5,7 +5,7 @@ class R2AmpCfg(R2InterruptCfg):
     class amp:
         enable = True
         motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/r2_walk.npz"
-        amp_obs_dim = 81
+        amp_obs_dim = 73
         num_amp_obs_steps = 2
         key_body_names = [
             "left_hand_roll_link",
@@ -21,7 +21,7 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         experiment_name = "r2_amp"
 
     class amp:
-        amp_obs_dim = 81
+        amp_obs_dim = 73
         num_amp_obs_steps = 2
         motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/r2_walk.npz"
         task_reward_weight = 0.3

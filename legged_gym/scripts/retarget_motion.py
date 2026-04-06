@@ -26,15 +26,11 @@ R2_DOF_NAMES = [
     "left_shoulder_yaw_joint",
     "left_arm_pitch_joint",
     "left_arm_yaw_joint",
-    "left_hand_pitch_joint",
-    "left_hand_roll_joint",
     "right_shoulder_pitch_joint",
     "right_shoulder_roll_joint",
     "right_shoulder_yaw_joint",
     "right_arm_pitch_joint",
     "right_arm_yaw_joint",
-    "right_hand_pitch_joint",
-    "right_hand_roll_joint",
 ]
 
 G1_TO_R2_DOF_MAP = {
@@ -57,15 +53,11 @@ G1_TO_R2_DOF_MAP = {
     "left_shoulder_yaw_joint": "left_shoulder_yaw_joint",
     "left_elbow_joint": "left_arm_pitch_joint",
     "left_wrist_roll_joint": "left_arm_yaw_joint",
-    "left_wrist_pitch_joint": "left_hand_pitch_joint",
-    "left_wrist_yaw_joint": "left_hand_roll_joint",
     "right_shoulder_pitch_joint": "right_shoulder_pitch_joint",
     "right_shoulder_roll_joint": "right_shoulder_roll_joint",
     "right_shoulder_yaw_joint": "right_shoulder_yaw_joint",
     "right_elbow_joint": "right_arm_pitch_joint",
     "right_wrist_roll_joint": "right_arm_yaw_joint",
-    "right_wrist_pitch_joint": "right_hand_pitch_joint",
-    "right_wrist_yaw_joint": "right_hand_roll_joint",
 }
 
 BODY_MAP = {
