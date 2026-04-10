@@ -1,4 +1,5 @@
 import argparse
+import glob
 import os
 
 import numpy as np
@@ -86,7 +87,7 @@ def _find_key(npz_data, candidates):
     raise KeyError(f"None of keys found: {candidates}")
 
 
-def retarget_motion(input_file, output_file, target_base_height=0.92):
+def _retarget_single_motion(input_file, output_file, target_base_height=0.92):
     src = np.load(input_file, allow_pickle=True)
 
     dof_names_key = _find_key(src, ["dof_names"])
@@ -136,7 +137,9 @@ def retarget_motion(input_file, output_file, target_base_height=0.92):
 
     dt = float(src["dt"]) if "dt" in src else (1.0 / float(src["fps"]) if "fps" in src else 1.0 / 30.0)
 
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    output_dir = os.path.dirname(output_file)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     np.savez(
         output_file,
         dt=np.array(dt, dtype=np.float32),
@@ -171,18 +174,50 @@ def retarget_motion(input_file, output_file, target_base_height=0.92):
     print(f"body_positions shape: {body_positions.shape}")
 
 
+def retarget_motion(input_path, output_path, target_base_height=0.92, pattern="*.npz"):
+    if os.path.isdir(input_path):
+        if os.path.splitext(output_path)[1]:
+            raise ValueError("--output must be a directory path when --input is a directory.")
+        input_files = sorted(glob.glob(os.path.join(input_path, pattern)))
+        if not input_files:
+            raise FileNotFoundError(f"No input npz files matching {pattern} found in directory: {input_path}")
+        os.makedirs(output_path, exist_ok=True)
+        output_files = []
+        for input_file in input_files:
+            output_file = os.path.join(output_path, os.path.basename(input_file))
+            _retarget_single_motion(input_file, output_file, target_base_height=target_base_height)
+            output_files.append(output_file)
+        print(f"Retargeted {len(output_files)} motion files into directory: {output_path}")
+        return output_files
+
+    if os.path.isdir(output_path) or not os.path.splitext(output_path)[1]:
+        os.makedirs(output_path, exist_ok=True)
+        output_file = os.path.join(output_path, os.path.basename(input_path))
+    else:
+        output_file = output_path
+
+    _retarget_single_motion(input_path, output_file, target_base_height=target_base_height)
+    return [output_file]
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Retarget G1 motion npz to R2 format.")
-    parser.add_argument("--input", required=True, help="Input G1 motion npz path")
+    parser = argparse.ArgumentParser(description="Retarget G1 motion npz file(s) to R2 format.")
+    parser.add_argument("--input", required=True, help="Input G1 motion npz file path or directory")
     parser.add_argument(
         "--output",
-        default=os.path.join(LEGGED_GYM_ROOT_DIR, "legged_gym", "motions", "r2_walk.npz"),
-        help="Output R2 motion npz path",
+        default=os.path.join(LEGGED_GYM_ROOT_DIR, "legged_gym", "motions"),
+        help="Output R2 motion npz path or directory",
     )
+    parser.add_argument("--pattern", default="*.npz", help="Glob pattern when --input is a directory")
     parser.add_argument("--target-base-height", type=float, default=0.92)
     args = parser.parse_args()
 
-    retarget_motion(args.input, args.output, target_base_height=args.target_base_height)
+    retarget_motion(
+        args.input,
+        args.output,
+        target_base_height=args.target_base_height,
+        pattern=args.pattern,
+    )
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ from legged_gym.envs.r2.r2interrupt_config import R2InterruptCfg, R2InterruptCfg
 class R2AmpCfg(R2InterruptCfg):
     class amp:
         enable = True
-        motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/r2_walk.npz"
+        motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions"
         amp_obs_dim = 73  # 24+24+1+6+3+3+12 (24 DOF)
         num_amp_obs_steps = 2
         key_body_names = [
@@ -23,7 +23,7 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
     class amp:
         amp_obs_dim = 73  # 24+24+1+6+3+3+12 (24 DOF)
         num_amp_obs_steps = 2
-        motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/r2_walk.npz"
+        motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions"
         task_reward_weight = 0.3
         style_reward_weight = 0.7
         disc_hidden_dims = [1024, 512]

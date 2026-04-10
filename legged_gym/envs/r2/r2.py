@@ -331,8 +331,11 @@ class R2Robot(BaseTask):
         if not hasattr(self, "_motion_loader"):
             raise RuntimeError("AMP motion loader is not initialized for this environment.")
 
+        history_margin = max(self.num_amp_obs_steps - 1, 0) * self._motion_loader.dt
         if current_times is None:
-            current_times = self._motion_loader.sample_times(num_samples)
+            current_times = self._motion_loader.sample_times(num_samples, margin=history_margin)
+        else:
+            current_times = self._motion_loader.ensure_time_margin(current_times, margin=history_margin)
 
         times = (
             np.expand_dims(np.asarray(current_times), axis=-1)
@@ -1239,7 +1242,7 @@ class R2Robot(BaseTask):
                 )
             except KeyError as exc:
                 raise ValueError(
-                    "AMP motion file does not match robot dof/body names. "
+                    "AMP motion data in the configured path does not match robot dof/body names. "
                     "Please regenerate motion data with retarget_motion.py"
                 ) from exc
 

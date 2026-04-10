@@ -64,6 +64,11 @@ To train a new policy, run:
 python legged_gym/scripts/train.py --task=r2int --headless 
 ```
 
+To train with AMP enabled, run:
+```bash
+python legged_gym/scripts/train.py --task=r2amp --headless
+```
+
 ### Visualization
 To visualize a trained policy, run:
 ```bash
@@ -72,6 +77,28 @@ python legged_gym/scripts/play.py --task=r2int
 
 ### Sim2Sim & Sim2Real Evaluation
 We uses the official code base of [unitree_mujoco](https://github.com/unitreerobotics/unitree_mujoco) for Sim2Sim evaluation. And the interface with both mujoco simulation and the real robot is implemented through [unitree_skd2_python](https://github.com/unitreerobotics/unitree_sdk2_python).
+
+## AMP Motion Data
+
+AMP reference motions are stored under `legged_gym/motions`.
+
+- The AMP config points to the directory itself, and the loader reads all `*.npz` clips in that folder.
+- The training path consumes `.npz` directly. An intermediate `.pkl` format is not required.
+- When multiple clips are present, they must share the same `dof_names`, `body_names`, and `dt`.
+
+Use the retarget script to convert source motion files into this directory:
+
+```bash
+python legged_gym/scripts/retarget_motion.py --input <source_npz_or_dir> --output legged_gym/motions
+```
+
+To batch-convert a directory of source motions:
+
+```bash
+python legged_gym/scripts/retarget_motion.py --input <source_dir> --output legged_gym/motions --pattern "*.npz"
+```
+
+For the detailed motion directory contract and retarget notes, see [legged_gym/motions/README.md](legged_gym/motions/README.md).
 
 ## 🔗 Citation
 
