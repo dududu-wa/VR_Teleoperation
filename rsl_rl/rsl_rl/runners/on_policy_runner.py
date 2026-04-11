@@ -196,11 +196,14 @@ class OnPolicyRunner:
             if self.log_dir is not None:
                 self.log(locals())
             if it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)), infos={"it": it})
             ep_infos.clear()
         
         self.current_learning_iteration += num_learning_iterations
-        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        self.save(
+            os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)),
+            infos={"it": self.current_learning_iteration}
+        )
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
@@ -266,10 +269,13 @@ class OnPolicyRunner:
         print(log_string)
 
     def save(self, path, infos=None):
+        save_iter = self.current_learning_iteration
+        if infos is not None and "it" in infos:
+            save_iter = int(infos["it"])
         save_dict = {
             'model_state_dict': self.alg.actor_critic.state_dict(),
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
-            'iter': self.current_learning_iteration,
+            'iter': save_iter,
             'infos': infos,
             }
         if self.use_amp:

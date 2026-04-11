@@ -8,8 +8,8 @@ class R2AmpCfg(R2InterruptCfg):
         amp_obs_dim = 73  # 24+24+1+6+3+3+12 (24 DOF)
         num_amp_obs_steps = 2
         key_body_names = [
-            "left_hand_roll_link",
-            "right_hand_roll_link",
+            "left_arm_yaw_link",    # last surviving arm link after collapse_fixed_joints=True
+            "right_arm_yaw_link",   # last surviving arm link after collapse_fixed_joints=True
             "left_ankle_roll_link",
             "right_ankle_roll_link",
         ]
