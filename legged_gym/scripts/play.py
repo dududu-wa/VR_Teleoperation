@@ -4,7 +4,7 @@ sys.path.append(os.getcwd())
 from legged_gym import LEGGED_GYM_ROOT_DIR
 import isaacgym
 from legged_gym.envs import *
-from legged_gym.utils import get_args, task_registry, update_class_from_dict, export_policy_as_jit
+from legged_gym.utils import get_args, task_registry, update_class_from_dict
 from isaacgym import gymapi
 import numpy as np
 import torch
@@ -23,8 +23,8 @@ def play(args):
     env_cfg.env.episode_length_s = 100000
 
     env_cfg.terrain.curriculum = False
-    env_cfg.noise.add_noise = True
-    env_cfg.domain_rand.randomize_friction = True
+    env_cfg.noise.add_noise = False
+    env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.randomize_load = False
     env_cfg.domain_rand.randomize_gains = False 
     env_cfg.domain_rand.randomize_link_props = False
@@ -32,21 +32,13 @@ def play(args):
 
     env_cfg.commands.resampling_time = 100
     env_cfg.rewards.penalize_curriculum = False
-    env_cfg.terrain.mesh_type = 'trimesh'
+    env_cfg.terrain.mesh_type = 'plane'
     env_cfg.terrain.num_rows = 1
     env_cfg.terrain.num_cols = 1
     env_cfg.terrain.max_init_terrain_level = 1
-    env_cfg.terrain.selected = True
+    env_cfg.terrain.selected = False
     env_cfg.terrain.selected_terrain_type = "random_uniform"
-    env_cfg.terrain.terrain_kwargs = {  # Dict of arguments for selected terrain
-        "random_uniform":
-            {
-                "min_height": -0.00,
-                "max_height": 0.00,
-                "step": 0.005,
-                "downsampled_scale": 0.2
-            },
-    }
+    env_cfg.terrain.terrain_kwargs = {}
 
     # prepare     # planeenvironment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -92,23 +84,14 @@ def play(args):
                          np.sin(camera_rot) * h_scale, 0.5 * v_scale])
             env.set_camera(look_at + camera_relative_position, look_at, track_index)
 
-            env.commands[:, 0] = 2.0
-            env.commands[:, 1] = 0
-            env.commands[:, 2] = 0
-            env.commands[:, 3] = 2.0
-            env.commands[:, 4] = 0.5
-            env.commands[:, 5] = 0.5
-            env.commands[:, 6] = 0.2
-            env.commands[:, 7] = -0.0
-            env.commands[:, 8] = 0.0
-            env.commands[:, 9] = 0.0
-            env.use_disturb = True
-            env.disturb_masks[:] = True
-            env.disturb_isnoise[:]= True
-            env.disturb_rad_curriculum[:] = 1.0
-            env.interrupt_mask[:] = env.disturb_masks[:]
-            env.standing_envs_mask[:] = True
-            env.commands[env.standing_envs_mask, :3] = 0
+            cmd_values = torch.tensor(
+                [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                device=env.device,
+                dtype=env.commands.dtype,
+            )
+            n_cmd = min(env.commands.shape[1], cmd_values.shape[0])
+            env.commands[:, :n_cmd] = cmd_values[:n_cmd]
+            env.use_disturb = False
 
 if __name__ == '__main__':
     args = get_args()

@@ -196,7 +196,7 @@
       <inertia ixx="0.00121074" ixy="1.815e-05" ixz="0.00021296" iyy="0.00603256" iyz="-6e-08" izz="0.00675685" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 3.14159" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes_shell/left_ankle_roll_link.STL" />
       </geometry>
@@ -420,7 +420,7 @@
     </inertial>
 
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 3.14159" />
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
         <mesh filename="meshes_shell/right_ankle_roll_link.STL" />
       </geometry>
