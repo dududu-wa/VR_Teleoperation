@@ -1493,14 +1493,14 @@ class R2Robot(BaseTask):
         for dof in self.dof_names:
             dof_names_lower.append(dof.lower())
         
-        torso_inds = [i for i, n in enumerate(dof_names_lower) if ('torso' in n)]
+        torso_inds = [i for i, n in enumerate(dof_names_lower) if ('torso' in n or 'waist' in n)]
         shoulder_inds = [i for i, n in enumerate(dof_names_lower) if ('shoulder_roll' in n or 'shoulder_yaw' in n)]
         elbow_inds = [i for i, n in enumerate(dof_names_lower) if ('elbow' in n or 'shoulder_pitch' in n)]
         hip_inds = [i for i, n in enumerate(dof_names_lower) if ('hip_roll' in n or 'hip_yaw' in n)]
         knee_inds = [i for i, n in enumerate(dof_names_lower) if ('knee' in n)]
         standing_joint_inds = [
             i for i, n in enumerate(dof_names_lower)
-            if ('torso' in n or 'shoulder' in n or 'elbow' in n or 'arm' in n or 'hand' in n or 'head' in n)
+            if ('torso' in n or 'waist' in n or 'shoulder' in n or 'elbow' in n or 'arm' in n or 'hand' in n or 'head' in n)
         ]
         print('torso_inds', torso_inds)
         print('shoulder_inds', shoulder_inds)
@@ -1729,9 +1729,10 @@ class R2Robot(BaseTask):
     def _reward_waist_control(self):
         if len(self.torso_inds) == 0:
             return torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-        waist_commands = self.commands[:, 9]
-        reward = torch.square(self.dof_pos[:, self.torso_inds].squeeze(-1) - waist_commands)
-        return reward
+        torso_joint_index = torch.tensor(self.torso_inds, dtype=torch.long, device=self.device)
+        target = self.default_dof_pos[:, torso_joint_index]
+        reward = torch.square(self.dof_pos[:, torso_joint_index] - target)
+        return torch.sum(reward, dim=-1)
 
     def _reward_base_height(self):
         body_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.heights_below_base, dim=-1)

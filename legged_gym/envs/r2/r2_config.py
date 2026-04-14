@@ -29,13 +29,13 @@ class R2Cfg( LeggedRobotCfg ):
         pos = [0.0, 0.0, 0.92] # x,y,z [m]
         default_joint_angles = { # = target angles [rad] when action = 0.0
            'left_hip_pitch_joint' : -0.25,
-           'left_hip_roll_joint' : 0.02,
+              'left_hip_roll_joint' : 0.01,
            'left_hip_yaw_joint' : 0.0,
            'left_knee_joint' : 0.5,
            'left_ankle_pitch_joint' : -0.35,
            'left_ankle_roll_joint' : 0.0,
            'right_hip_pitch_joint' : -0.25,
-           'right_hip_roll_joint' : -0.02,
+           'right_hip_roll_joint' : -0.01,
            'right_hip_yaw_joint' : 0.0,
            'right_knee_joint' : 0.5,
            'right_ankle_pitch_joint' : -0.35,
@@ -192,7 +192,7 @@ class R2Cfg( LeggedRobotCfg ):
             dof_pos_limits = -10.0
             lin_vel_z = -0.1
             ang_vel_xy = -0.5
-            hip_deviation = 0
+            hip_deviation = -2.0
             shoulder_deviation = 0
             hip_yaw_deviation = -0
             hip_roll_deviation = -0

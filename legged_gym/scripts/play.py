@@ -50,6 +50,10 @@ def play(args):
         env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
 
+    waist_action_ids = [i for i, n in enumerate(env.dof_names) if "waist" in n.lower()]
+    if len(waist_action_ids) > 0:
+        print(f"[demo] lock waist joints: {[env.dof_names[i] for i in waist_action_ids]}")
+
     cfg_eval = {
         "timesteps": (env_cfg.env.episode_length_s) * 500 + 1,
         'cameraTrack': True, 
@@ -66,13 +70,29 @@ def play(args):
     env.set_camera(look_at + camera_relative_position, look_at, track_index)
     
     _, _ = env.reset()
+
+    # keep demo mode deterministic and command-driven
+    if hasattr(env, "use_disturb"):
+        env.use_disturb = False
+    if hasattr(env, "standing_envs_mask"):
+        env.standing_envs_mask[:] = False
     obs, critic_obs, _, _, _ = env.step(torch.zeros(
             env.num_envs, env.num_actions, dtype=torch.float, device=env.device))
 
     timesteps = env_cfg.env.episode_length_s * 500 + 1
     for timestep in tqdm.tqdm(range(timesteps)):
         with torch.inference_mode():
+            cmd_values = torch.tensor(
+                [0.6, 0.0, 0.0, 2.2, 0.5, 0.5, 0.2, -0.1, 0.05, 0.0],
+                device=env.device,
+                dtype=env.commands.dtype,
+            )
+            n_cmd = min(env.commands.shape[1], cmd_values.shape[0])
+            env.commands[:, :n_cmd] = cmd_values[:n_cmd]
+
             actions, _ = policy.act_inference(obs, privileged_obs=critic_obs)
+            if len(waist_action_ids) > 0:
+                actions[:, waist_action_ids] = 0.0
 
             obs, critic_obs, _, _, _ = env.step(actions)
             look_at = np.array(env.root_states[track_index, :3].cpu(), dtype=np.float64)
@@ -84,14 +104,11 @@ def play(args):
                          np.sin(camera_rot) * h_scale, 0.5 * v_scale])
             env.set_camera(look_at + camera_relative_position, look_at, track_index)
 
-            cmd_values = torch.tensor(
-                [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                device=env.device,
-                dtype=env.commands.dtype,
-            )
-            n_cmd = min(env.commands.shape[1], cmd_values.shape[0])
-            env.commands[:, :n_cmd] = cmd_values[:n_cmd]
-            env.use_disturb = False
+            if timestep % 200 == 0:
+                base_lin = env.base_lin_vel[0].detach().cpu().numpy()
+                cmd = env.commands[0, :3].detach().cpu().numpy()
+                act_norm = torch.norm(actions[0]).item()
+                print(f"[demo] step={timestep} cmd(vx,vy,wz)={cmd} base_lin={base_lin} |a|={act_norm:.3f}")
 
 if __name__ == '__main__':
     args = get_args()
