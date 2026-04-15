@@ -93,13 +93,21 @@ class OnPolicyRunner:
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
+        self._ensure_text_log_exists()
 
         _, _ = self.env.reset()
+
+    def _ensure_text_log_exists(self):
+        if self.text_log_path is None:
+            return
+        os.makedirs(self.log_dir, exist_ok=True)
+        with open(self.text_log_path, "a", encoding="utf-8"):
+            pass
 
     def _write_text_log(self, message):
         if self.text_log_path is None:
             return
-        os.makedirs(self.log_dir, exist_ok=True)
+        self._ensure_text_log_exists()
         with open(self.text_log_path, "a", encoding="utf-8") as log_file:
             log_file.write(message)
             if not message.endswith("\n"):
