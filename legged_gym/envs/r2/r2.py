@@ -1737,7 +1737,28 @@ class R2Robot(BaseTask):
     def _reward_base_height(self):
         body_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.heights_below_base, dim=-1)
         body_height_target = self.commands[:, 7] + self.cfg.rewards.base_height_target
-        reward = torch.square(body_height - body_height_target)
+        height_error = body_height - body_height_target
+        reward = torch.square(height_error)
+
+        hopping_mask = self.commands[:, 4] == 0
+        if torch.any(hopping_mask):
+            # During hopping, keep a soft lower bound on the base height instead of
+            # strongly pulling the body back to the nominal target through flight.
+            hopping_height_error = torch.clamp(body_height_target[hopping_mask] - body_height[hopping_mask], min=0.0)
+            if hasattr(self, "desired_contact_states"):
+                stance_blend = torch.mean(self.desired_contact_states[hopping_mask], dim=1)
+            else:
+                stance_blend = torch.ones_like(hopping_height_error)
+            hopping_scale = (
+                self.cfg.rewards.hopping_base_height_air_scale
+                + (
+                    self.cfg.rewards.hopping_base_height_stance_scale
+                    - self.cfg.rewards.hopping_base_height_air_scale
+                )
+                * stance_blend
+            )
+            reward[hopping_mask] = hopping_scale * torch.square(hopping_height_error)
+
         reward[self.standing_envs_mask] *= 3
         return reward
     

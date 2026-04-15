@@ -152,7 +152,7 @@ class R2Cfg( LeggedRobotCfg ):
             ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
             gait_frequency = [1.5, 3.5]
             foot_swing_height = [0.1, 0.35]
-            body_height = [-0.3, 0.0]
+            body_height = [-0.35, 0.1]
             body_pitch = [0.0, 0.4]
             waist_roll = [-1.0, 1.0]
             heading = [-3.14, 3.14]
@@ -170,6 +170,8 @@ class R2Cfg( LeggedRobotCfg ):
         upper_curriculum = False
         max_contact_force = 500
         base_height_target = 0.82
+        hopping_base_height_stance_scale = 0.35
+        hopping_base_height_air_scale = 0.05
         penalize_curriculum = True
         curriculum_init = 0.2
         kappa_gait_probs = 0.05
