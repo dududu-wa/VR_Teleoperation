@@ -19,6 +19,9 @@ class R2AmpCfg(R2InterruptCfg):
 class R2AmpCfgPPO(R2InterruptCfgPPO):
     class runner(R2InterruptCfgPPO.runner):
         experiment_name = "r2_amp"
+        save_best_task_checkpoint = True
+        save_best_mixed_checkpoint = True
+        save_best_after = 0
 
     class amp:
         amp_obs_dim = 73  # 24+24+1+6+3+3+12 (24 DOF)

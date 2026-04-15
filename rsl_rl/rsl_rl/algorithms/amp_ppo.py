@@ -39,6 +39,7 @@ class AMPPPO(PPO):
         self.disc_reward_scale = disc_reward_scale
         self.disc_batch_size = disc_batch_size
 
+        self.task_reward_collector = []
         self.amp_obs_collector = []
         self.style_reward_collector = []
         self.mixed_reward_collector = []
@@ -62,6 +63,16 @@ class AMPPPO(PPO):
 
         self.amp_obs_collector.append(amp_obs.clone())
 
+        task_reward = rewards
+        if task_reward.dim() > 1:
+            task_reward = task_reward.view(task_reward.shape[0], -1)
+            if task_reward.shape[1] != 1:
+                raise ValueError(
+                    f"Expected one reward per env, got reward shape {rewards.shape}"
+                )
+            task_reward = task_reward.squeeze(-1)
+        self.task_reward_collector.append(task_reward.detach())
+
         with torch.no_grad():
             disc_logit = self.discriminator(amp_obs)
             style_reward = -torch.log(1 - torch.sigmoid(disc_logit) + 1e-7)
@@ -73,7 +84,19 @@ class AMPPPO(PPO):
         else:
             style_reward_for_mix = style_reward
         mixed_rewards = self.task_reward_weight * rewards + self.style_reward_weight * style_reward_for_mix
-        self.mixed_reward_collector.append(mixed_rewards.detach())
+        mixed_reward_log = mixed_rewards
+        if mixed_reward_log.dim() > 1:
+            mixed_reward_log = mixed_reward_log.view(mixed_reward_log.shape[0], -1)
+            if mixed_reward_log.shape[1] != 1:
+                raise ValueError(
+                    f"Expected one mixed reward per env, got reward shape {mixed_rewards.shape}"
+                )
+            mixed_reward_log = mixed_reward_log.squeeze(-1)
+        self.mixed_reward_collector.append(mixed_reward_log.detach())
+
+        infos["amp_task_reward"] = task_reward.detach()
+        infos["amp_style_reward"] = style_reward.detach()
+        infos["amp_mixed_reward"] = mixed_reward_log.detach()
 
         super().process_env_step(mixed_rewards, dones, infos)
 
@@ -84,6 +107,10 @@ class AMPPPO(PPO):
             all_amp_obs = torch.cat(self.amp_obs_collector, dim=0)
             self.amp_replay_buffer.insert(all_amp_obs)
             self.amp_obs_collector.clear()
+
+        if self.task_reward_collector:
+            metrics["task_reward"] = torch.cat(self.task_reward_collector).mean().item()
+            self.task_reward_collector.clear()
 
         if self.style_reward_collector:
             metrics["style_reward"] = torch.cat(self.style_reward_collector).mean().item()

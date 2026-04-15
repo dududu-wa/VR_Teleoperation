@@ -1,5 +1,6 @@
 import os
 import copy
+import re
 import torch
 import numpy as np
 import random
@@ -84,14 +85,25 @@ def get_load_path(root, load_run=-1, checkpoint=-1):
     else:
         load_run = os.path.join(root, load_run)
 
-    if checkpoint==-1:
-        models = [file for file in os.listdir(load_run) if 'model' in file]
-        models.sort(key=lambda m: '{0:0>15}'.format(m))
+    if checkpoint == -2:
+        model = "model_best_task.pt"
+    elif checkpoint == -3:
+        model = "model_best_mixed.pt"
+    elif checkpoint==-1:
+        models = [
+            file for file in os.listdir(load_run)
+            if re.fullmatch(r"model_\d+\.pt", file)
+        ]
+        if not models:
+            raise ValueError("No numeric model checkpoints in this directory: " + load_run)
+        models.sort(key=lambda m: int(re.search(r"(\d+)", m).group(1)))
         model = models[-1]
     else:
         model = "model_{}.pt".format(checkpoint) 
 
     load_path = os.path.join(load_run, model)
+    if not os.path.exists(load_path):
+        raise ValueError("Checkpoint does not exist: " + load_path)
     return load_path
 
 def update_cfg_from_args(env_cfg, cfg_train, args):
@@ -126,7 +138,15 @@ def get_args():
         {"name": "--experiment_name", "type": str,  "help": "Name of the experiment to run or load. Overrides config file if provided."},
         {"name": "--run_name", "type": str,  "help": "Name of the run. Overrides config file if provided."},
         {"name": "--load_run", "type": str,  "help": "Name of the run to load when resume=True. If -1: will load the last run. Overrides config file if provided."},
-        {"name": "--checkpoint", "type": int,  "help": "Saved model checkpoint number. If -1: will load the last checkpoint. Overrides config file if provided."},
+        {
+            "name": "--checkpoint",
+            "type": int,
+            "help": (
+                "Saved model checkpoint number. "
+                "Use -1 for the last numeric checkpoint, -2 for model_best_task.pt, "
+                "and -3 for model_best_mixed.pt. Overrides config file if provided."
+            ),
+        },
         
         {"name": "--headless", "action": "store_true", "default": False, "help": "Force display off at all times"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
