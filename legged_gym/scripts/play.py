@@ -1,17 +1,63 @@
 import os
 import sys
 sys.path.append(os.getcwd())
-from legged_gym import LEGGED_GYM_ROOT_DIR
 import isaacgym
 from legged_gym.envs import *
-from legged_gym.utils import get_args, task_registry, update_class_from_dict
-from isaacgym import gymapi
+from legged_gym.utils import get_args, task_registry
 import numpy as np
 import torch
 import tqdm
-from torch.utils.tensorboard import SummaryWriter
-import yaml
 from isaacgym import gymapi
+
+
+DEMO_SEQUENCE = (
+    {
+        "name": "walk",
+        "duration_s": 6.0,
+        "commands": [0.35, 0.0, 0.0, 1.8, 0.5, 0.5, 0.12, -0.05, 0.08, 0.0],
+    },
+    {
+        "name": "run",
+        "duration_s": 6.0,
+        "commands": [0.70, 0.0, 0.0, 2.8, 0.5, 0.5, 0.16, -0.10, 0.12, 0.0],
+    },
+    {
+        "name": "jump",
+        "duration_s": 6.0,
+        "commands": [0.10, 0.0, 0.0, 2.2, 0.0, 0.5, 0.18, 0.00, 0.10, 0.0],
+    },
+)
+
+CAMERA_OFFSET = np.array([-2.5, -0.4, 1.15], dtype=np.float64)
+LOOK_AT_OFFSET = np.array([0.6, 0.0, 0.85], dtype=np.float64)
+
+
+def _build_command_tensor(env, command_values):
+    command_tensor = torch.zeros(env.commands.shape[1], device=env.device, dtype=env.commands.dtype)
+    values = torch.tensor(command_values, device=env.device, dtype=env.commands.dtype)
+    command_tensor[: min(command_tensor.shape[0], values.shape[0])] = values[: command_tensor.shape[0]]
+    return command_tensor
+
+
+def _get_demo_phase(timestep, dt):
+    elapsed_s = timestep * dt
+    cycle_s = sum(phase["duration_s"] for phase in DEMO_SEQUENCE)
+    cycle_time = elapsed_s % cycle_s
+
+    phase_start = 0.0
+    for phase in DEMO_SEQUENCE:
+        phase_end = phase_start + phase["duration_s"]
+        if cycle_time < phase_end:
+            return phase
+        phase_start = phase_end
+    return DEMO_SEQUENCE[-1]
+
+
+def _update_camera(env, track_index):
+    base_pos = np.array(env.root_states[track_index, :3].cpu(), dtype=np.float64)
+    planar_focus = np.array([base_pos[0], base_pos[1], 0.0], dtype=np.float64)
+    env.set_camera(planar_focus + CAMERA_OFFSET, planar_focus + LOOK_AT_OFFSET, track_index)
+
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
@@ -30,7 +76,8 @@ def play(args):
     env_cfg.domain_rand.randomize_link_props = False
     env_cfg.domain_rand.randomize_base_mass = False
 
-    env_cfg.commands.resampling_time = 100
+    env_cfg.commands.curriculum = False
+    env_cfg.commands.resampling_time = env_cfg.env.episode_length_s
     env_cfg.rewards.penalize_curriculum = False
     env_cfg.terrain.mesh_type = 'plane'
     env_cfg.terrain.num_rows = 1
@@ -50,24 +97,7 @@ def play(args):
         env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
 
-    waist_action_ids = [i for i, n in enumerate(env.dof_names) if "waist" in n.lower()]
-    if len(waist_action_ids) > 0:
-        print(f"[demo] lock waist joints: {[env.dof_names[i] for i in waist_action_ids]}")
-
-    cfg_eval = {
-        "timesteps": (env_cfg.env.episode_length_s) * 500 + 1,
-        'cameraTrack': True, 
-        'trackIndex': 0,
-        "cameraInit": np.pi*8/10,  
-        "cameraVel": 1*np.pi/10,
-    }
-    camera_rot = np.pi * 8 / 10
-    camera_rot_per_sec = 1 * np.pi / 10
-    camera_relative_position = np.array([1, 0, 0.8])
     track_index = 0
-
-    look_at = np.array(env.root_states[0, :3].cpu(), dtype=np.float64)
-    env.set_camera(look_at + camera_relative_position, look_at, track_index)
     
     _, _ = env.reset()
 
@@ -76,39 +106,39 @@ def play(args):
         env.use_disturb = False
     if hasattr(env, "standing_envs_mask"):
         env.standing_envs_mask[:] = False
+
+    initial_phase = _get_demo_phase(0, env.dt)
+    env.commands[:] = _build_command_tensor(env, initial_phase["commands"])
+    current_phase_name = initial_phase["name"]
+    print(f"[demo] switch to {current_phase_name}: {initial_phase['commands']}")
+
     obs, critic_obs, _, _, _ = env.step(torch.zeros(
             env.num_envs, env.num_actions, dtype=torch.float, device=env.device))
+    _update_camera(env, track_index)
 
-    timesteps = env_cfg.env.episode_length_s * 500 + 1
-    for timestep in tqdm.tqdm(range(timesteps)):
+    timesteps = int(env_cfg.env.episode_length_s / env.dt) + 1
+    for timestep in tqdm.tqdm(range(1, timesteps)):
         with torch.inference_mode():
-            cmd_values = torch.tensor(
-                [0.6, 0.0, 0.0, 2.2, 0.5, 0.5, 0.2, -0.1, 0.05, 0.0],
-                device=env.device,
-                dtype=env.commands.dtype,
-            )
-            n_cmd = min(env.commands.shape[1], cmd_values.shape[0])
-            env.commands[:, :n_cmd] = cmd_values[:n_cmd]
+            phase = _get_demo_phase(timestep, env.dt)
+            if phase["name"] != current_phase_name:
+                current_phase_name = phase["name"]
+                print(f"[demo] switch to {current_phase_name}: {phase['commands']}")
+
+            env.commands[:] = _build_command_tensor(env, phase["commands"])
 
             actions, _ = policy.act_inference(obs, privileged_obs=critic_obs)
-            if len(waist_action_ids) > 0:
-                actions[:, waist_action_ids] = 0.0
 
             obs, critic_obs, _, _, _ = env.step(actions)
-            look_at = np.array(env.root_states[track_index, :3].cpu(), dtype=np.float64)
-            camera_rot = (camera_rot + camera_rot_per_sec * env.dt) % (2 * np.pi)
-            h_scale = 1
-            v_scale = 0.8
-            camera_relative_position = 2 * \
-                np.array([np.cos(camera_rot) * h_scale,
-                         np.sin(camera_rot) * h_scale, 0.5 * v_scale])
-            env.set_camera(look_at + camera_relative_position, look_at, track_index)
+            _update_camera(env, track_index)
 
             if timestep % 200 == 0:
                 base_lin = env.base_lin_vel[0].detach().cpu().numpy()
                 cmd = env.commands[0, :3].detach().cpu().numpy()
                 act_norm = torch.norm(actions[0]).item()
-                print(f"[demo] step={timestep} cmd(vx,vy,wz)={cmd} base_lin={base_lin} |a|={act_norm:.3f}")
+                print(
+                    f"[demo] step={timestep} phase={current_phase_name} "
+                    f"cmd(vx,vy,wz)={cmd} base_lin={base_lin} |a|={act_norm:.3f}"
+                )
 
 if __name__ == '__main__':
     args = get_args()

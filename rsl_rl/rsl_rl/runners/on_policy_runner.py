@@ -88,12 +88,26 @@ class OnPolicyRunner:
 
         # Log
         self.log_dir = log_dir
+        self.text_log_path = os.path.join(self.log_dir, "train.log") if self.log_dir is not None else None
         self.writer = None
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
 
         _, _ = self.env.reset()
+
+    def _write_text_log(self, message):
+        if self.text_log_path is None:
+            return
+        os.makedirs(self.log_dir, exist_ok=True)
+        with open(self.text_log_path, "a", encoding="utf-8") as log_file:
+            log_file.write(message)
+            if not message.endswith("\n"):
+                log_file.write("\n")
+
+    def _emit_log(self, message):
+        print(message)
+        self._write_text_log(message)
 
     def _init_amp(self, amp_cfg):
         from rsl_rl.modules.discriminator import AMPDiscriminator
@@ -179,7 +193,9 @@ class OnPolicyRunner:
                         "best_metric_value": mean_task_reward,
                     },
                 )
-                print(f"Saved best task checkpoint to {path} (mean task reward {mean_task_reward:.4f})")
+                self._emit_log(
+                    f"Saved best task checkpoint to {path} (mean task reward {mean_task_reward:.4f})"
+                )
 
         if self.use_amp and self.save_best_mixed_checkpoint and len(mixed_rewbuffer) > 0:
             mean_mixed_reward = statistics.mean(mixed_rewbuffer)
@@ -194,7 +210,9 @@ class OnPolicyRunner:
                         "best_metric_value": mean_mixed_reward,
                     },
                 )
-                print(f"Saved best mixed checkpoint to {path} (mean mixed reward {mean_mixed_reward:.4f})")
+                self._emit_log(
+                    f"Saved best mixed checkpoint to {path} (mean mixed reward {mean_mixed_reward:.4f})"
+                )
     
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         metrics = defaultdict(float)
@@ -366,7 +384,7 @@ class OnPolicyRunner:
                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
                                locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
-        print(log_string)
+        self._emit_log(log_string)
 
     def save(self, path, infos=None):
         save_iter = self.current_learning_iteration
@@ -384,7 +402,7 @@ class OnPolicyRunner:
         torch.save(save_dict, path)
 
     def load(self, path, load_optimizer=True, load_adaptation=False):
-        print("load_path:", path)
+        self._emit_log(f"load_path: {path}")
         loaded_dict = torch.load(path, map_location=self.device)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:

@@ -127,7 +127,12 @@ class TaskRegistry():
                 resume_path = get_load_path(log_root, load_run=train_cfg.runner.load_run, checkpoint=train_cfg.runner.checkpoint)
             else:
                 resume_path = train_cfg.runner.resume_path
-            print(f"Loading model from: {resume_path}")
+            resume_message = f"Loading model from: {resume_path}"
+            print(resume_message)
+            if log_dir is not None:
+                os.makedirs(log_dir, exist_ok=True)
+                with open(os.path.join(log_dir, "train.log"), "a", encoding="utf-8") as log_file:
+                    log_file.write(resume_message + "\n")
             runner.load(resume_path)
         return runner, train_cfg
 
