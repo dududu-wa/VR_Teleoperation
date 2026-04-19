@@ -1,9 +1,14 @@
 import os
 import sys
+import shutil
+import subprocess
+import tempfile
+from datetime import datetime
 sys.path.append(os.getcwd())
 import isaacgym
+from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.envs import *
-from legged_gym.utils import get_args, task_registry
+from legged_gym.utils import get_args, get_load_path, task_registry
 import numpy as np
 import torch
 import tqdm
@@ -25,6 +30,8 @@ DEMO_SEQUENCE = (
 
 CAMERA_OFFSET = np.array([-2.5, -0.4, 1.15], dtype=np.float64)
 LOOK_AT_OFFSET = np.array([0.6, 0.0, 0.85], dtype=np.float64)
+RECORD_DURATION_S = 30.0
+VIDEO_OUTPUT_DIR = os.path.join("logs", "play_videos")
 
 
 def _build_command_tensor(env, command_values):
@@ -54,10 +61,153 @@ def _update_camera(env, track_index):
     env.set_camera(planar_focus + CAMERA_OFFSET, planar_focus + LOOK_AT_OFFSET, track_index)
 
 
+def _sanitize_name(value):
+    return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(value))
+
+
+def _resolve_record_output_root(train_cfg):
+    if train_cfg.runner.resume:
+        log_root = os.path.join(LEGGED_GYM_ROOT_DIR, "logs", train_cfg.runner.experiment_name)
+        if train_cfg.runner.resume_path is None:
+            resume_path = get_load_path(
+                log_root,
+                load_run=train_cfg.runner.load_run,
+                checkpoint=train_cfg.runner.checkpoint,
+            )
+        else:
+            resume_path = train_cfg.runner.resume_path
+        return os.path.dirname(resume_path)
+    return os.path.join(os.getcwd(), VIDEO_OUTPUT_DIR)
+
+
+def _init_recording(args, env, output_root):
+    if env.viewer is None:
+        print("[record] viewer unavailable, skip mp4 recording")
+        return None
+
+    if not hasattr(env.gym, "write_viewer_image_to_file"):
+        print("[record] gym.write_viewer_image_to_file unavailable, skip mp4 recording")
+        return None
+
+    os.makedirs(output_root, exist_ok=True)
+
+    load_run = getattr(args, "load_run", None) or "latest"
+    checkpoint = getattr(args, "checkpoint", None)
+    checkpoint_name = "last" if checkpoint is None else str(checkpoint)
+    clip_name = (
+        f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_"
+        f"{_sanitize_name(args.task)}_"
+        f"{_sanitize_name(load_run)}_"
+        f"ckpt_{_sanitize_name(checkpoint_name)}"
+    )
+    frame_dir = tempfile.mkdtemp(prefix=f"{clip_name}_frames_", dir=output_root)
+    record_state = {
+        "frame_dir": frame_dir,
+        "video_path": os.path.abspath(os.path.join(output_root, f"{clip_name}.mp4")),
+        "fps": max(int(round(1.0 / env.dt)), 1),
+        "record_steps": max(int(np.ceil(RECORD_DURATION_S / env.dt)), 1),
+        "next_frame_idx": 0,
+        "captured_frames": 0,
+        "disabled": False,
+    }
+
+    print(
+        f"[record] capture first {RECORD_DURATION_S:.1f}s "
+        f"({record_state['record_steps']} frames @ {record_state['fps']} fps) "
+        f"to {record_state['video_path']}"
+    )
+    return record_state
+
+
+def _get_ffmpeg_executable():
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is not None:
+        return ffmpeg_path
+
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def _capture_record_frame(env, record_state):
+    if record_state is None or record_state["disabled"]:
+        return
+    if record_state["next_frame_idx"] >= record_state["record_steps"]:
+        return
+
+    frame_path = os.path.join(
+        record_state["frame_dir"], f"frame_{record_state['next_frame_idx']:06d}.png"
+    )
+
+    try:
+        if env.device != "cpu":
+            env.gym.fetch_results(env.sim, True)
+        env.gym.step_graphics(env.sim)
+        env.gym.draw_viewer(env.viewer, env.sim, True)
+        env.gym.write_viewer_image_to_file(env.viewer, frame_path)
+        record_state["next_frame_idx"] += 1
+        record_state["captured_frames"] += 1
+    except Exception as exc:
+        record_state["disabled"] = True
+        print(f"[record] frame capture disabled: {exc}")
+
+
+def _finalize_recording(record_state):
+    if record_state is None:
+        return
+    if record_state["captured_frames"] == 0:
+        shutil.rmtree(record_state["frame_dir"], ignore_errors=True)
+        return
+
+    ffmpeg_path = _get_ffmpeg_executable()
+    if ffmpeg_path is None:
+        print(
+            "[record] no ffmpeg encoder found. "
+            f"Captured frames kept at {record_state['frame_dir']}. "
+            "Install ffmpeg or imageio-ffmpeg to auto-export mp4."
+        )
+        return
+
+    try:
+        subprocess.run(
+            [
+                ffmpeg_path,
+                "-y",
+                "-framerate",
+                str(record_state["fps"]),
+                "-i",
+                os.path.join(record_state["frame_dir"], "frame_%06d.png"),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                record_state["video_path"],
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        print(f"[record] saved mp4 to {record_state['video_path']}")
+        shutil.rmtree(record_state["frame_dir"], ignore_errors=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        print(
+            f"[record] failed to encode mp4 with ffmpeg ({stderr or exc}). "
+            f"Captured frames kept at {record_state['frame_dir']}"
+        )
+    except Exception as exc:
+        print(
+            f"[record] failed to encode mp4 ({exc}). "
+            f"Captured frames kept at {record_state['frame_dir']}"
+        )
+
+
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
-    resume_path = train_cfg.runner.resume_path
-    print(resume_path)
     
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 1)
@@ -91,6 +241,8 @@ def play(args):
     ppo_runner, train_cfg = task_registry.make_alg_runner(
         env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
+    record_output_root = _resolve_record_output_root(train_cfg)
+    record_state = _init_recording(args, env, record_output_root)
 
     track_index = 0
     
@@ -110,6 +262,7 @@ def play(args):
     obs, critic_obs, _, _, _ = env.step(torch.zeros(
             env.num_envs, env.num_actions, dtype=torch.float, device=env.device))
     _update_camera(env, track_index)
+    _capture_record_frame(env, record_state)
 
     timesteps = int(env_cfg.env.episode_length_s / env.dt) + 1
     for timestep in tqdm.tqdm(range(1, timesteps)):
@@ -125,6 +278,11 @@ def play(args):
 
             obs, critic_obs, _, _, _ = env.step(actions)
             _update_camera(env, track_index)
+            _capture_record_frame(env, record_state)
+
+            if record_state is not None and record_state["next_frame_idx"] >= record_state["record_steps"]:
+                _finalize_recording(record_state)
+                record_state = None
 
             if timestep % 200 == 0:
                 base_lin = env.base_lin_vel[0].detach().cpu().numpy()
@@ -134,6 +292,8 @@ def play(args):
                     f"[demo] step={timestep} phase={current_phase_name} "
                     f"cmd(vx,vy,wz)={cmd} base_lin={base_lin} |a|={act_norm:.3f}"
                 )
+
+    _finalize_recording(record_state)
 
 if __name__ == '__main__':
     args = get_args()
