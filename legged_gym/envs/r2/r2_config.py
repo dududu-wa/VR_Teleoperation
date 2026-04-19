@@ -152,7 +152,7 @@ class R2Cfg( LeggedRobotCfg ):
             ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
             gait_frequency = [1.5, 3.5]
             foot_swing_height = [0.1, 0.35]
-            body_height = [-0.35, 0.1]
+            body_height = [-0.05, 0.08]
             body_pitch = [0.0, 0.4]
             waist_roll = [-1.0, 1.0]
             heading = [-3.14, 3.14]
@@ -215,7 +215,7 @@ class R2Cfg( LeggedRobotCfg ):
             torques = -5e-6
             orientation_control = -20.0
             waist_control = -2.0
-            base_height = -40
+            base_height = -20
             collision = -0.0
             stand_still = -5
             tracking_contacts_shaped_force = 2

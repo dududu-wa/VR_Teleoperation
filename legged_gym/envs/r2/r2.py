@@ -130,9 +130,12 @@ class R2Robot(BaseTask):
         return obs, privileged_obs
     
     def calculate_action(self, actions):
+        actions = actions.clone()
+        if hasattr(self, "waist_pitch_inds") and len(self.waist_pitch_inds) > 0:
+            actions[:, self.waist_pitch_inds] = 0.0
         self.actions = actions.clone()
         clip_actions = self.cfg.normalization.clip_actions
-        return torch.clip(actions.clone(), -clip_actions, clip_actions).to(self.device)
+        return torch.clip(actions, -clip_actions, clip_actions).to(self.device)
 
     def step(self, actions):
         """ Apply actions, simulate, call self.post_physics_step()
@@ -778,7 +781,15 @@ class R2Robot(BaseTask):
         hopping_env_ids = env_ids[hopping_mask]
         walking_env_ids = env_ids[walking_mask]
         if self.cfg.env.observe_body_height:
-            self.commands[env_ids, 7] = torch_rand_float(self.command_ranges["body_height"][0], self.command_ranges['body_height'][1], (len(env_ids), 1), device=self.device).squeeze(1)
+            self.commands[env_ids, 7] = 0.0
+            active_hopping_env_ids = hopping_env_ids[~self.standing_envs_mask[hopping_env_ids]]
+            if len(active_hopping_env_ids) > 0:
+                self.commands[active_hopping_env_ids, 7] = torch_rand_float(
+                    self.command_ranges["body_height"][0],
+                    self.command_ranges["body_height"][1],
+                    (len(active_hopping_env_ids), 1),
+                    device=self.device,
+                ).squeeze(1)
 
             # clip swing height for low body height
             low_height_env_mask = self.commands[env_ids, 7] < -0.15
@@ -1494,6 +1505,7 @@ class R2Robot(BaseTask):
             dof_names_lower.append(dof.lower())
         
         torso_inds = [i for i, n in enumerate(dof_names_lower) if ('torso' in n or 'waist' in n)]
+        waist_pitch_inds = [i for i, n in enumerate(dof_names_lower) if ('waist_pitch' in n or 'torso_pitch' in n)]
         shoulder_inds = [i for i, n in enumerate(dof_names_lower) if ('shoulder_roll' in n or 'shoulder_yaw' in n)]
         elbow_inds = [i for i, n in enumerate(dof_names_lower) if ('elbow' in n or 'shoulder_pitch' in n)]
         hip_inds = [i for i, n in enumerate(dof_names_lower) if ('hip_roll' in n or 'hip_yaw' in n)]
@@ -1503,12 +1515,14 @@ class R2Robot(BaseTask):
             if ('torso' in n or 'waist' in n or 'shoulder' in n or 'elbow' in n or 'arm' in n or 'hand' in n or 'head' in n)
         ]
         print('torso_inds', torso_inds)
+        print('waist_pitch_inds', waist_pitch_inds)
         print('shoulder_inds', shoulder_inds)
         print('hip_inds', hip_inds)
         print('elbow_inds', elbow_inds)
         print('knee_inds', knee_inds)
         print('standing_joint_inds', standing_joint_inds)
         self.torso_inds = torso_inds
+        self.waist_pitch_inds = waist_pitch_inds
         self.shoulder_inds = shoulder_inds
         self.elbow_inds = elbow_inds
         self.hip_inds = hip_inds
