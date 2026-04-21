@@ -26,7 +26,7 @@ class R2Cfg( LeggedRobotCfg ):
         observe_waist_roll = False
     
     class init_state( LeggedRobotCfg.init_state ):
-        pos = [0.0, 0.0, 0.92] # x,y,z [m]
+        pos = [0.0, 0.0, 0.80] # x,y,z [m]
         default_joint_angles = { # = target angles [rad] when action = 0.0
            'left_hip_pitch_joint' : -0.25,
            'left_hip_roll_joint' : 0.02,
@@ -152,7 +152,7 @@ class R2Cfg( LeggedRobotCfg ):
             ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
             gait_frequency = [1.5, 3.5]
             foot_swing_height = [0.1, 0.35]
-            body_height = [-0.05, 0.08]
+            body_height = [-0.05, 0.03]
             body_pitch = [0.0, 0.4]
             waist_roll = [-1.0, 1.0]
             heading = [-3.14, 3.14]
@@ -169,7 +169,7 @@ class R2Cfg( LeggedRobotCfg ):
         termination_height = True
         upper_curriculum = False
         max_contact_force = 500
-        base_height_target = 0.82
+        base_height_target = 0.78
         hopping_base_height_stance_scale = 0.35
         hopping_base_height_air_scale = 0.05
         penalize_curriculum = True

@@ -87,7 +87,7 @@ def _find_key(npz_data, candidates):
     raise KeyError(f"None of keys found: {candidates}")
 
 
-def _retarget_single_motion(input_file, output_file, target_base_height=0.92):
+def _retarget_single_motion(input_file, output_file, target_base_height=0.78):
     src = np.load(input_file, allow_pickle=True)
 
     dof_names_key = _find_key(src, ["dof_names"])
@@ -174,7 +174,7 @@ def _retarget_single_motion(input_file, output_file, target_base_height=0.92):
     print(f"body_positions shape: {body_positions.shape}")
 
 
-def retarget_motion(input_path, output_path, target_base_height=0.92, pattern="*.npz"):
+def retarget_motion(input_path, output_path, target_base_height=0.78, pattern="*.npz"):
     if os.path.isdir(input_path):
         if os.path.splitext(output_path)[1]:
             raise ValueError("--output must be a directory path when --input is a directory.")
@@ -209,7 +209,7 @@ def main():
         help="Output R2 motion npz path or directory",
     )
     parser.add_argument("--pattern", default="*.npz", help="Glob pattern when --input is a directory")
-    parser.add_argument("--target-base-height", type=float, default=0.92)
+    parser.add_argument("--target-base-height", type=float, default=0.78)
     args = parser.parse_args()
 
     retarget_motion(

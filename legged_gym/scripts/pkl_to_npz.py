@@ -138,7 +138,7 @@ def quat_apply_np(q_wxyz, v):
     return v + w[:, None] * t + np.cross(np.stack([x, y, z], axis=-1), t)
 
 
-def process_one(data, target_base_height=0.92):
+def process_one(data, target_base_height=0.78):
     fps = int(data["fps"])
     dt = 1.0 / fps
     root_pos      = data["root_pos"].astype(np.float32).copy()
@@ -185,7 +185,7 @@ def main():
     parser.add_argument("--pattern",    default="walk*.pkl")
     parser.add_argument("--merge",      action="store_true")
     parser.add_argument("--output_name", default="r2_walk.npz")
-    parser.add_argument("--target_base_height", type=float, default=0.92)
+    parser.add_argument("--target_base_height", type=float, default=0.78)
     args = parser.parse_args()
 
     pkl_files = sorted(glob.glob(os.path.join(args.input_dir, args.pattern)))

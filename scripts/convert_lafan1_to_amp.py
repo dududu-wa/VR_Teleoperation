@@ -30,7 +30,7 @@ AMP_BODY_NAMES = [
 ]
 
 
-def convert_file(src_path, dst_path, target_base_height=0.92):
+def convert_file(src_path, dst_path, target_base_height=0.78):
     data = np.load(src_path, allow_pickle=True)
 
     # ---- DOF selection: drop head joints ----
@@ -94,7 +94,7 @@ def main():
     parser.add_argument('--input', required=True, help='Source directory (lafan1_npz_r2v2)')
     parser.add_argument('--output', required=True, help='Destination directory (legged_gym/motions)')
     parser.add_argument('--pattern', default='*.npz')
-    parser.add_argument('--target-base-height', type=float, default=0.92)
+    parser.add_argument('--target-base-height', type=float, default=0.78)
     args = parser.parse_args()
 
     src_files = sorted(glob.glob(os.path.join(args.input, args.pattern)))
