@@ -215,7 +215,7 @@ class R2Cfg( LeggedRobotCfg ):
             torques = -5e-6
             orientation_control = -20.0
             waist_control = -2.0
-            base_height = -20
+            base_height = -40
             collision = -0.0
             stand_still = -5
             tracking_contacts_shaped_force = 2

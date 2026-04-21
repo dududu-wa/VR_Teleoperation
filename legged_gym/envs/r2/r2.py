@@ -130,12 +130,9 @@ class R2Robot(BaseTask):
         return obs, privileged_obs
     
     def calculate_action(self, actions):
-        actions = actions.clone()
-        if hasattr(self, "waist_pitch_inds") and len(self.waist_pitch_inds) > 0:
-            actions[:, self.waist_pitch_inds] = 0.0
         self.actions = actions.clone()
         clip_actions = self.cfg.normalization.clip_actions
-        return torch.clip(actions, -clip_actions, clip_actions).to(self.device)
+        return torch.clip(actions.clone(), -clip_actions, clip_actions).to(self.device)
 
     def step(self, actions):
         """ Apply actions, simulate, call self.post_physics_step()
