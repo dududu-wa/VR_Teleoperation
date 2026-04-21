@@ -12,7 +12,7 @@ from legged_gym.utils import get_args, get_load_path, task_registry
 import numpy as np
 import torch
 import tqdm
-from isaacgym import gymapi
+from isaacgym import gymapi, gymtorch
 
 
 DEMO_PRESETS = {
@@ -81,6 +81,46 @@ def _update_camera(env, track_index):
     base_pos = np.array(env.root_states[track_index, :3].cpu(), dtype=np.float64)
     planar_focus = np.array([base_pos[0], base_pos[1], 0.0], dtype=np.float64)
     env.set_camera(planar_focus + CAMERA_OFFSET, planar_focus + LOOK_AT_OFFSET, track_index)
+
+
+def _apply_deterministic_reset_pose(env):
+    """Override randomized env.reset() state for stable single-robot demo playback."""
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
+
+    # 1) DOF state: use nominal standing pose and zero joint velocity
+    env.dof_pos[env_ids] = env.default_dof_pos
+    env.dof_vel[env_ids] = 0.0
+    env_ids_int32 = env_ids.to(dtype=torch.int32)
+    env.gym.set_dof_state_tensor_indexed(
+        env.sim,
+        gymtorch.unwrap_tensor(env.dof_state),
+        gymtorch.unwrap_tensor(env_ids_int32),
+        len(env_ids_int32),
+    )
+
+    # 2) Root state: keep nominal spawn height/orientation and zero base velocity
+    env.root_states[env_ids] = env.base_init_state
+    env.root_states[env_ids, :3] += env.env_origins[env_ids]
+    env.root_states[env_ids, 3:7] = 0.0
+    env.root_states[env_ids, 6] = 1.0  # identity quaternion (x,y,z,w)
+    env.root_states[env_ids, 7:13] = 0.0
+    env.gym.set_actor_root_state_tensor_indexed(
+        env.sim,
+        gymtorch.unwrap_tensor(env.root_states),
+        gymtorch.unwrap_tensor(env_ids_int32),
+        len(env_ids_int32),
+    )
+
+    # 3) Diagnostics: check base and foot heights after deterministic reset
+    env.gym.refresh_actor_root_state_tensor(env.sim)
+    env.gym.refresh_rigid_body_state_tensor(env.sim)
+    base_height = env.root_states[0, 2].item()
+    left_foot_h = env.rigid_body_states[0, env.feet_indices[0], 2].item()
+    right_foot_h = env.rigid_body_states[0, env.feet_indices[1], 2].item()
+    print(
+        "[demo][reset-check] deterministic init "
+        f"base_z={base_height:.4f}m left_foot_z={left_foot_h:.4f}m right_foot_z={right_foot_h:.4f}m"
+    )
 
 
 def _sanitize_name(value):
@@ -270,6 +310,7 @@ def play(args):
     track_index = 0
     
     _, _ = env.reset()
+    _apply_deterministic_reset_pose(env)
 
     # keep demo mode deterministic and command-driven
     if hasattr(env, "use_disturb"):
