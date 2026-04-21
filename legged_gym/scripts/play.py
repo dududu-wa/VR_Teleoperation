@@ -15,18 +15,40 @@ import tqdm
 from isaacgym import gymapi
 
 
-DEMO_SEQUENCE = (
-    {
+DEMO_PRESETS = {
+    "stand": {
+        "name": "stand",
+        "duration_s": 3.0,
+        "commands": [0.0, 0.0, 0.0, 1.60, 0.5, 0.5, 0.08, 0.00, 0.00, 0.0],
+    },
+    "jump": {
+        "name": "jump",
+        "duration_s": 3.0,
+        "commands": [0.0, 0.0, 0.0, 2.35, 0.0, 0.5, 0.20, 0.04, 0.00, 0.0],
+    },
+    "walk": {
         "name": "walk",
         "duration_s": 6.0,
         "commands": [0.70, 0.0, 0.0, 2.20, 0.5, 0.5, 0.12, 0.00, 0.00, 0.0],
     },
-    {
+    "fast_walk": {
         "name": "fast_walk",
         "duration_s": 6.0,
         "commands": [1.05, 0.0, 0.0, 2.80, 0.5, 0.5, 0.17, 0.00, 0.03, 0.0],
     },
-)
+}
+INITIAL_GAIT_NAME = os.environ.get("R2_PLAY_INITIAL_GAIT", "stand").strip().lower()
+if INITIAL_GAIT_NAME not in DEMO_PRESETS:
+    raise ValueError(
+        f"Unsupported R2_PLAY_INITIAL_GAIT='{INITIAL_GAIT_NAME}'. "
+        f"Expected one of: {', '.join(sorted(DEMO_PRESETS))}"
+    )
+
+DEMO_SEQUENCE_NAMES = []
+for phase_name in (INITIAL_GAIT_NAME, "walk", "fast_walk"):
+    if phase_name not in DEMO_SEQUENCE_NAMES:
+        DEMO_SEQUENCE_NAMES.append(phase_name)
+DEMO_SEQUENCE = tuple(DEMO_PRESETS[phase_name] for phase_name in DEMO_SEQUENCE_NAMES)
 
 CAMERA_OFFSET = np.array([-2.5, -0.4, 1.15], dtype=np.float64)
 LOOK_AT_OFFSET = np.array([0.6, 0.0, 0.85], dtype=np.float64)
@@ -243,6 +265,7 @@ def play(args):
     policy = ppo_runner.get_inference_policy(device=env.device)
     record_output_root = _resolve_record_output_root(train_cfg)
     record_state = _init_recording(args, env, record_output_root)
+    print(f"[demo] initial gait preset: {INITIAL_GAIT_NAME}")
 
     track_index = 0
     
