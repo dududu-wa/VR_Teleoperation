@@ -27,8 +27,8 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         amp_obs_dim = 73  # 24+24+1+6+3+3+12 (24 DOF)
         num_amp_obs_steps = 2
         motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions"
-        task_reward_weight = 0.3
-        style_reward_weight = 0.7
+        task_reward_weight = 0.6
+        style_reward_weight = 0.4
         disc_hidden_dims = [1024, 512]
         disc_learning_rate = 5e-5
         disc_grad_penalty = 5.0
