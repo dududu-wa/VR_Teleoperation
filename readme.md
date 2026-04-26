@@ -126,7 +126,7 @@ Convert source motion files into the AMP directory:
 python legged_gym/scripts/retarget_motion.py --input <source_npz_or_dir> --output legged_gym/motions
 ```
 
-Skeptic note: check the generated `body_names` before using this output for `r2amp`. The current `retarget_motion.py` body map emits `left_hand_roll_link` and `right_hand_roll_link`, while `r2amp` expects `left_arm_yaw_link` and `right_arm_yaw_link` as AMP key bodies.
+Compatibility note: check the generated `body_names` before using this output for `r2amp`. The current `retarget_motion.py` body map emits `left_hand_roll_link` and `right_hand_roll_link`, while `r2amp` expects `left_arm_yaw_link` and `right_arm_yaw_link` as AMP key bodies.
 
 Convert LaFAN1-style R2V2 motion files:
 

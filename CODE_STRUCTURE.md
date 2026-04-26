@@ -1,496 +1,1126 @@
-# Code Structure Walkthrough
+# AMP 相关文件速览
 
-这份文档不是只列目录，而是按代码真实调用链从上往下读：先看入口和任务注册，再看 runner，再进入 R2 环境生命周期，最后单独拆 AMP。为了避免“顺着代码讲故事讲得太顺”，这里保留一个质疑者视角，专门指出哪些说法需要代码证据、哪些地方容易误导。
+AMP 是本项目在普通 PPO 任务外加入“参考动作风格奖励”的训练路径。它不是一个完全独立的环境，而是通过 `r2amp` 任务配置打开：环境继续使用 `R2InterruptRobot`，但会额外加载 motion 数据、生成 `amp_obs`，并在 `rsl_rl` 侧把普通 `PPO` 替换成 `AMPPPO`。
 
-## Review Method
+最该先看的 AMP 文件：
 
-本次走读按四个 subagent 视角交叉检查：
+- `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、AMP observation 维度、关键 body、task/style reward 权重、discriminator 超参和 best checkpoint 保存策略。
+- `legged_gym/envs/r2/r2.py`：环境侧 AMP 实现。`compute_amp_obs()` 拼单帧 AMP 观测；`R2Robot._init_buffers()` 在 `cfg.amp.enable=True` 时创建 `MotionLoader`、AMP history buffer 和 body/dof 索引；`compute_amp_observations()` 把当前策略状态写入 `infos["amp_obs"]`；`collect_reference_motions()` 从参考 motion 中采样 discriminator 的真样本。
+- `legged_gym/utils/motion_loader.py`：AMP motion 加载器。扫描 `legged_gym/motions/*.npz`，校验多 clip 的 `dof_names/body_names/dt` 一致，并按时间插值采样 DOF、body pose 和速度。
+- `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
+- `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
+- `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中也记录 mixed/style reward。
+- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward，将 task reward 和 style reward 混合后走 PPO，并在 update 后训练 discriminator。
+- `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
+- `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
+- `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
+- `scripts/convert_lafan1_to_amp.py`：把 LaFAN1 风格 R2V2 `.npz` 转成当前项目 AMP motion 格式，保留 `base_link`、左右 `arm_yaw_link`、左右 `ankle_roll_link` 等 AMP key body。
+- `legged_gym/scripts/train.py`：启动 AMP 训练的入口，典型命令是 `python legged_gym/scripts/train.py --task=r2amp --headless`。
+- `legged_gym/scripts/play.py`：回放 AMP checkpoint 的入口，支持 `--checkpoint -3` 加载 `model_best_mixed.pt`。
 
-- 入口层 subagent：检查 `train.py`、`play.py`、`task_registry.py`、任务注册和 CLI 覆盖。
-- 环境层 subagent：检查 `R2Robot`、`R2InterruptRobot`、reset、step、obs、reward、torque。
-- AMP/RL subagent：检查 `OnPolicyRunner`、`PPO`、`AMPPPO`、discriminator、AMP replay buffer、motion loader。
-- 质疑者 subagent：专门找文档中没有证据、路径不准、命令复制后可能失败的地方。
-
-## 0. Top-Level Layout
-
-- `README.md`: 快速启动、训练、播放、AMP motion 数据说明。
-- `legged_gym`: Isaac Gym 环境、R2 机器人逻辑、任务注册、训练和播放脚本、motion loader。
-- `rsl_rl`: 本仓库使用的 RL 包，包含 PPO、AMP PPO、runner、actor-critic、storage、discriminator。
-- `legged_gym/motions`: `r2amp` 默认读取的 AMP `.npz` 参考动作目录。
-- `scripts`: 项目级数据转换脚本，不属于 upstream `legged_gym/scripts` 的标准入口。
-- `r2_v2_with_shell_no_hand`: R2 URDF、MJCF、mesh 等资产。
-- `logs`: 本地训练输出，实际 run 目录形如 `logs/<experiment_name>/<MonDD_HH-MM-SS>_<run_name>`。
-
-质疑者：`logs/<experiment_name>/<run_name>` 这种写法不够准。代码在 `task_registry.make_alg_runner()` 里会给 run name 前面拼时间戳。
-
-## 1. Entry Layer
-
-训练入口是 `legged_gym/scripts/train.py`。
-
-真实调用链：
+AMP 数据和训练的最短路径是：
 
 ```text
-python legged_gym/scripts/train.py --task=r2int/r2amp
--> train.py imports legged_gym.envs *
--> legged_gym/envs/__init__.py 执行 task_registry.register(...)
--> get_args()
--> train(args)
--> task_registry.make_env(name=args.task, args=args)
--> task_registry.make_alg_runner(env=env, name=args.task, args=args)
--> ppo_runner.learn(...)
+参考 motion .npz
+  -> legged_gym/motions/
+  -> MotionLoader
+  -> R2Robot.collect_reference_motions()
+  -> AMPDiscriminator 真样本
+
+策略 rollout
+  -> R2Robot.compute_amp_observations()
+  -> infos["amp_obs"]
+  -> AMPPPO.process_env_step()
+  -> style reward + task reward
+  -> PPO update + discriminator update
 ```
 
-关键代码点：
+# VR_Teleoperation 代码结构说明
 
-- `train.py` 的 `from legged_gym.envs import *` 会触发任务注册副作用。
-- `train(args)` 只做三件事：创建 env，创建 runner，调用 `learn()`。
-- `helpers.get_args()` 解析 `--task`、`--num_envs`、`--resume`、`--load_run`、`--checkpoint` 等 CLI 参数。
-- `helpers.update_cfg_from_args()` 只覆盖一部分字段，例如 env 的 `num_envs` 和 train config 的 resume/checkpoint 参数。
+本文按“文件夹做什么 -> 文件做什么 -> 关键类/函数 -> 在训练链路中的位置”展开。
 
-质疑者：CLI 脚本本身并不知道有哪些 task。task 能不能找到，取决于导入 `legged_gym.envs` 后注册表里有没有对应名字。
+## 1. 项目总览
 
-播放入口是 `legged_gym/scripts/play.py`。
+这个仓库是一个基于 Isaac Gym 的 R2 人形机器人训练、回放和 AMP 模仿学习项目。整体可以分成四层：
 
-真实调用链：
+- `legged_gym/`：具体机器人环境层。负责 Isaac Gym 仿真、R2 任务配置、地形、观测、奖励、motion loader、训练/回放脚本。
+- `rsl_rl/`：强化学习框架层。负责 PPO、AMP-PPO、Actor-Critic、runner、rollout storage、AMP replay buffer。
+- `r2_v2_with_shell_no_hand/` 和 `resources/`：机器人资产层。提供 R2 和 H1 的 URDF/MJCF/XML/STL 模型。
+- `scripts/`、`logs/`、`imgs/`：项目辅助层。包括 motion 转换脚本、训练日志/checkpoint、说明图片。
+
+当前 README 里主推的任务名是：
+
+- `r2int`：标准 PPO 任务，环境类是 `R2InterruptRobot`，配置是 `R2InterruptCfg/R2InterruptCfgPPO`。
+- `r2amp`：AMP 版本任务，环境类仍是 `R2InterruptRobot`，但配置换成 `R2AmpCfg/R2AmpCfgPPO`，会打开 AMP motion loader 和 discriminator 训练。
+
+## 2. 核心运行链路
+
+### 2.1 普通训练链路
 
 ```text
-python legged_gym/scripts/play.py --task=r2amp --load_run ... --checkpoint ...
--> play.py imports legged_gym.envs *
--> task_registry.get_cfgs(args.task)
--> 原地修改 env_cfg 为单环境、plane、无噪声、无随机化、长 episode
--> task_registry.make_env(..., env_cfg=env_cfg)
--> train_cfg.runner.resume = True
--> task_registry.make_alg_runner(env=env, train_cfg=train_cfg)
--> runner.load(checkpoint)
--> ppo_runner.get_inference_policy()
--> env.reset()
--> _apply_deterministic_reset_pose(env)
--> 循环写 env.commands，policy.act_inference()，env.step()
+python legged_gym/scripts/train.py --task=r2int --headless
+    -> import legged_gym.envs
+    -> legged_gym/envs/__init__.py 注册 r2int/r2amp
+    -> task_registry.make_env(...)
+    -> R2InterruptRobot(cfg=R2InterruptCfg)
+    -> BaseTask/R2Robot 创建 Isaac Gym sim、terrain、env actor、buffer
+    -> task_registry.make_alg_runner(...)
+    -> rsl_rl.runners.OnPolicyRunner
+    -> rsl_rl.algorithms.PPO
+    -> OnPolicyRunner.learn()
 ```
 
-质疑者：`play.py` 会强制 `resume=True`，所以刚克隆仓库直接运行 play 可能失败。必须先训练出 checkpoint，或者显式传入已有 `--load_run/--checkpoint`。
-
-## 2. Task Registration Layer
-
-任务注册在 `legged_gym/envs/__init__.py`。
-
-当前直接注册的任务只有：
-
-- `r2int`: `R2InterruptRobot` + `R2InterruptCfg` + `R2InterruptCfgPPO`
-- `r2amp`: `R2InterruptRobot` + `R2AmpCfg` + `R2AmpCfgPPO`
-
-也就是说，当前训练入口不是直接实例化纯 `R2Robot/R2Cfg`。真实结构是：
+训练时每个 iteration 的主循环是：
 
 ```text
-R2InterruptRobot
--> inherits R2Robot
--> inherits BaseTask
+env.get_observations()
+env.get_privileged_observations()
+PPO.act()
+env.step(actions)
+PPO.process_env_step()
+PPO.compute_returns()
+PPO.update()
+env.training_curriculum()
+runner.log/save()
 ```
 
-质疑者：不要把 `R2Robot` 写成当前直接训练 task。它是主体父类，当前注册 task 实例化的是 `R2InterruptRobot`。
+### 2.2 AMP 训练链路
 
-`TaskRegistry` 在 `legged_gym/utils/task_registry.py` 里维护三张表：
+```text
+python legged_gym/scripts/train.py --task=r2amp --headless
+    -> R2AmpCfg.amp.enable=True
+    -> R2Robot 初始化 MotionLoader 和 amp_observation_buffer
+    -> env.step() 在 extras/infos 中放入 infos["amp_obs"]
+    -> OnPolicyRunner 检测 train_cfg["amp"]
+    -> 创建 AMPDiscriminator + AMPReplayBuffer
+    -> 用 AMPPPO 替换 PPO
+```
 
-- `task_classes[name]`: task 名到环境类。
-- `env_cfgs[name]`: task 名到环境配置对象。
-- `train_cfgs[name]`: task 名到训练配置对象。
+AMP 每步会把环境 task reward 和 discriminator style reward 混合：
+
+```text
+mixed_reward = task_reward_weight * task_reward
+             + style_reward_weight * style_reward
+```
+
+`AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
+
+### 2.3 回放链路
+
+```text
+python legged_gym/scripts/play.py --task=r2amp --checkpoint -3
+    -> 单环境、plane 地形、关闭随机化/噪声
+    -> 加载 checkpoint
+    -> 使用 DEMO_PRESETS 写入 env.commands
+    -> policy.act_inference()
+    -> env.step(actions)
+    -> Isaac Gym viewer 显示，可选录制 mp4
+```
+
+## 3. 顶层目录与文件
+
+### `README.md`
+
+项目主说明文档。内容包括：
+
+- 项目定位：R2/HugWBC 的 Isaac Gym 训练和回放栈。
+- 安装步骤：Conda、PyTorch、外部 Isaac Gym Preview 4、`pip install -e rsl_rl`。
+- 训练命令：`r2int` 和 `r2amp`。
+- 回放命令：`play.py` 加载最新 checkpoint、best task checkpoint、best mixed checkpoint。
+- AMP motion 数据契约和转换脚本入口。
+- 顶层 repository map。
+
+### `CODE_STRUCTURE.md`
+
+本文件。用于写完整项目结构说明。
+
+### `.gitignore`
+
+忽略本地生成物和缓存：
+
+- Python 缓存：`__pycache__/`、`*.py[cod]`、`.pytest_cache/`、`.mypy_cache/`
+- 训练输出：`logs/`、`runs/`、`wandb/`、`events.out.tfevents*`、`*.log`
+- 编辑器/系统文件：`.idea/`、`.vscode/`、`.claude/`、`.DS_Store`、`Thumbs.db`
+- 本地 AMP 数据：`legged_gym/motions/`
+
+### `.git/`
+
+Git 元数据目录，不属于运行逻辑。
+
+### `.claude/settings.local.json`
+
+本地 Claude/Codex 工具配置。当前只看到允许 `WebSearch` 的本地权限配置。和训练代码无直接关系，且被 `.gitignore` 忽略。
+
+## 4. `legged_gym/`
+
+`legged_gym` 是项目的机器人环境与脚本层。它把 Isaac Gym 仿真、R2 任务配置、reward、terrain、motion 数据、训练入口和回放入口组织在一起。
+
+### `legged_gym/__init__.py`
+
+定义两个路径常量：
+
+- `LEGGED_GYM_ROOT_DIR`：仓库根目录。
+- `LEGGED_GYM_ENVS_DIR`：`legged_gym/envs` 目录。
+
+这些常量被 R2 asset 路径、motion 路径、日志路径反复使用，例如 `{LEGGED_GYM_ROOT_DIR}/r2_v2_with_shell_no_hand/r2v2_with_shell.urdf`。
+
+### `legged_gym/LICENSE`
+
+`legged_gym` 相关代码许可证文件。
+
+### `legged_gym/envs/`
+
+具体环境与配置目录。
+
+#### `legged_gym/envs/__init__.py`
+
+任务注册入口。导入 R2 环境和配置，并注册：
+
+- `r2int` -> `R2InterruptRobot`, `R2InterruptCfg`, `R2InterruptCfgPPO`
+- `r2amp` -> `R2InterruptRobot`, `R2AmpCfg`, `R2AmpCfgPPO`
+
+注意：`R2Robot/R2Cfg` 被导入，但没有直接注册为可运行 task。
+
+#### `legged_gym/envs/base/`
+
+环境基类和通用配置。
+
+##### `base_config.py`
+
+提供 `BaseConfig`。它会递归实例化配置类内部的嵌套 class，让这种写法：
+
+```python
+class R2Cfg(LeggedRobotCfg):
+    class env:
+        num_envs = 4096
+```
+
+在 `R2Cfg()` 实例化后变成 `cfg.env.num_envs` 可直接访问的对象属性。
+
+##### `legged_robot_config.py`
+
+基础默认配置文件。
+
+- `LeggedRobotCfg`：环境数量、观测维度、地形、命令、初始姿态、控制参数、asset、domain randomization、reward、normalization、noise、viewer、sim 默认值。
+- `LeggedRobotCfgPPO`：PPO 默认训练配置，包括 runner class、policy 网络、algorithm 超参、保存/恢复参数。
+
+R2 的配置都继承并覆盖这里。
+
+##### `base_task.py`
+
+Isaac Gym 环境基类 `BaseTask`。
+
+主要职责：
+
+- 获取 `gymapi.acquire_gym()`。
+- 解析 sim device 和 graphics device。
+- 初始化 `obs_buf`、`rew_buf`、`reset_buf`、`episode_length_buf`、`time_out_buf` 等通用 buffer。
+- 创建 sim 和 viewer。
+- 注册 viewer 键盘事件，用键盘模拟手柄按键/摇杆。
+- 提供 `render()`。
+- 定义子类必须实现的 `reset_idx()` 和 `step()`。
+
+`R2Robot` 继承它，补上具体机器人仿真逻辑。
+
+##### `curriculum.py`
+
+命令课程学习工具。
+
+- `Curriculum`：建立多维命令网格、维护每个 bin 的采样权重、按权重采样。
+- `SumCurriculum`：记录成功次数和尝试次数，用于成功率统计。
+- `RewardThresholdCurriculum`：根据 reward 是否超过阈值提升当前 bin 和邻域权重。
+
+`R2Robot` 使用它扩展线速度和 yaw 命令采样范围。
+
+#### `legged_gym/envs/r2/`
+
+R2 机器人环境和配置。
+
+##### `r2_config.py`
+
+R2 基础配置。
+
+关键常量：
+
+- `NUM_ACTIONS = 24`
+- `PROPRIOCEPTION_DIM = 6 + 3 * NUM_ACTIONS`
+- `CMD_DIM = 3 + 4 + 1 + 1`
+- `TERRAIN_DIM = 221`
+- `PRIVILEGED_DIM = 13`
+- `CLOCK_INPUT = 2`
+
+关键类：
+
+- `R2Cfg`：定义 24 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。
+- `R2CfgPPO`：定义 policy 为 `MlpAdaptModel`，配置 proprioception/cmd/privileged/terrain 的维度分块，critic 网络和 PPO 训练参数。默认实验名 `r2_teacher`。
+
+##### `r2interrupt_config.py`
+
+在 `R2Cfg` 上叠加 interrupt/disturb 配置。
+
+当前顶部常量：
+
+- `INTERRUPT_IN_CMD = False`
+- `NOISE_IN_PRIVILEGE = False`
+- `EXECUTE_IN_PRIVILEGE = False`
+- `DISTURB_DIM = 0`
+
+所以默认配置下干扰机制结构存在，但实际干扰维度为 0，且 `use_disturb=False`。
+
+关键类：
+
+- `R2InterruptCfg`：调整 observation/command/privileged 维度，新增 `disturb` 子配置，修改部分 reward scale。
+- `R2InterruptCfgPPO`：实验名 `r2_interrupt`，`max_iterations=40000`，继续使用 `MlpAdaptModel`。
+
+##### `r2_amp_config.py`
+
+AMP 配置层。
+
+- `R2AmpCfg` 继承 `R2InterruptCfg`，新增 `amp.enable=True`、motion 目录、AMP obs 维度、history 步数、key body 名。
+- `R2AmpCfgPPO` 继承 `R2InterruptCfgPPO`，新增 AMP 判别器和混合奖励超参。
+
+重要字段：
+
+- `motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions"`
+- `amp_obs_dim = 73`
+- `num_amp_obs_steps = 2`
+- `key_body_names = ["left_arm_yaw_link", "right_arm_yaw_link", "left_ankle_roll_link", "right_ankle_roll_link"]`
+- `reference_body_name = "base_link"`
+- `task_reward_weight = 0.6`
+- `style_reward_weight = 0.4`
+- `disc_hidden_dims = [1024, 512]`
+
+##### `r2.py`
+
+核心环境实现文件，定义 `R2Robot(BaseTask)`。
+
+模块级函数：
+
+- `_polynomial_planer(...)`：生成五次多项式轨迹系数，用在脚部 clearance reward。
+- `compute_amp_obs(...)`：把单帧状态拼成 AMP observation，内容包括 DOF pos/vel、root height、root tangent/normal、root lin/ang vel、关键 body 相对位置。
+
+`R2Robot` 的主要职责：
+
+- 创建 Isaac Gym sim、terrain、env、actor。
+- 加载 R2 URDF asset。
+- 管理 DOF/root/contact/rigid body tensor。
+- 执行 PD 控制和 decimation simulation。
+- 采样命令和 gait clock。
+- 计算观测、privileged 信息、terrain height scan。
+- 计算 reward 和 reset。
+- 管理地形课程和命令课程。
+- 支持 control latency、domain randomization、随机推力。
+- 在 AMP 打开时初始化 motion loader、AMP buffer，并提供 `collect_reference_motions()`。
+
+关键方法按生命周期看：
+
+- `__init__`：解析 cfg，调用 `BaseTask` 创建 sim/env，初始化 buffer、reward、command curriculum、history observation。
+- `create_sim`：创建 sim，按 cfg 创建 plane/trimesh terrain，再创建 env actors。
+- `_create_envs`：加载 URDF，设置 asset options，创建多环境 actor，收集 body/dof 名字、feet/contact/base 索引。
+- `_init_buffers`：wrap Isaac Gym GPU tensor，初始化动作、命令、PD gains、randomization buffer、gait clock、reward sums、AMP 数据结构。
+- `step`：处理 action，按控制 decimation 循环计算 torque、simulate，最后调用 `post_physics_step()`。
+- `post_physics_step`：刷新状态，计算 base/foot/contact 状态，更新命令和地形高度，检查终止，计算奖励，reset 结束环境，重新计算观测。
+- `reset_idx`：更新课程、重置 DOF/root、重采样命令、应用随机化、清 episode 统计。
+- `compute_observations/_preprocess_obs`：拼接 proprioception、command、clock、privileged info、terrain height；可加 latency/noise/history stack。
+- `_compute_torques`：PD 控制，支持 randomized gains、motor strength、motor offset，并按 torque limit 裁剪。
+- `_resample_commands`：采样线速度、yaw、gait frequency、phase、duration、foot swing height、body height、body pitch 等命令。
+- `_init_command_distribution/update_command_curriculum_grid`：使用 `RewardThresholdCurriculum` 扩展命令空间。
+- `_update_terrain_curriculum`：根据移动距离、tracking reward、姿态失败情况升降 terrain level。
+- `compute_amp_observations/_bootstrap_amp_buffer/collect_reference_motions`：AMP 观测和参考 motion 采样。
+
+reward 约定：
+
+- `_prepare_reward_function()` 会扫描 cfg 中非零 reward scale，并调用对应的 `_reward_<name>()`。
+- 文件末尾包含大量 reward：速度跟踪、角速度跟踪、站立、base height、orientation、torque、dof vel/acc、action rate、contact force、collision、termination、dof/torque limit、feet stumble、feet slip、feet clearance、gait contact、no fly、alive 等。
+
+##### `r2interrupt.py`
+
+`R2InterruptRobot(R2Robot)`，在基础 R2 环境上增加 interrupt/disturb 动作机制。
+
+关键方法：
+
+- `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等。
+- `_create_envs`：在父类创建 env 后，补充 disturb termination body 索引和 disturb mode mask。
+- `_resample_commands`：继承命令采样，并在需要时更新 disturb curriculum。
+- `calculate_action`：核心逻辑。先 clip policy action，再根据 disturb mask 替换或叠加末尾 `disturb_dim` 维动作，保存真实执行动作。
+- `_preprocess_obs/add_other_privilege`：可把 interrupt flag、目标扰动、实际执行动作拼入观测或 privileged obs。
+- `check_termination`：干扰模式下对部分 termination 做豁免。
+- reward override：中断时对肩部偏差、upper/lower action rate、碰撞、DOF limits/acc/vel 等做特殊处理。
+
+当前默认 `DISTURB_DIM=0`、`use_disturb=False`，因此 `r2int/r2amp` 默认主要使用它的基础训练能力，干扰逻辑是预留框架。
+
+### `legged_gym/utils/`
+
+环境和脚本共享工具。
+
+#### `helpers.py`
+
+通用配置、命令行和 checkpoint 工具。
+
+- `class_to_dict`：把嵌套配置对象转换成 dict，供 runner 使用。
+- `update_class_from_dict`：用 dict 覆盖配置对象。
+- `set_seed`：设置 Python、NumPy、Torch、CUDA 随机种子。
+- `parse_sim_params`：把配置和 CLI 参数合成 Isaac Gym `SimParams`。
+- `get_load_path`：解析 checkpoint 路径，支持：
+  - `-1` 最新数字 checkpoint，如 `model_2000.pt`
+  - `-2` `model_best_task.pt`
+  - `-3` `model_best_mixed.pt`
+- `update_cfg_from_args`：用 CLI 参数覆盖 env/train cfg。
+- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick` 等参数。
+
+#### `task_registry.py`
+
+任务注册和创建中心。
+
+关键类 `TaskRegistry`：
+
+- `register(name, task_class, env_cfg, train_cfg)`：注册任务。
+- `get_task_class(name)`：取环境类。
+- `get_cfgs(name)`：取 env/train cfg，并同步 seed。
+- `make_env(...)`：解析参数、覆盖 cfg、设置 seed、解析 sim params、实例化环境。
+- `make_alg_runner(...)`：创建 `OnPolicyRunner`，建立日志目录，处理 resume checkpoint 加载。
+
+全局对象：
+
+- `task_registry = TaskRegistry()`
+
+#### `motion_loader.py`
+
+AMP motion 数据加载器。
+
+职责：
+
+- 支持单个 `.npz` 文件或目录下多个 `.npz` clip。
+- 读取 DOF/body 状态、名称、`dt/fps`。
+- 校验多 clip 的 `dof_names`、`body_names`、`dt` 一致。
+- 建立 name -> index 映射。
+- 按时间插值采样 DOF、body pos、body rot、body velocity。
+- `sample_times/ensure_time_margin` 保证 AMP history 不跨 clip。
+
+被 `R2Robot` 的 AMP 初始化和 `collect_reference_motions()` 使用。
+
+#### `terrain.py`
+
+heightfield/trimesh 地形生成器。
+
+关键类 `Terrain`：
+
+- 根据 cfg 创建多行多列 terrain map。
+- 维护 `env_origins`、`height_field_raw`、`heightsamples`。
+- trimesh 模式下生成 `vertices/triangles` 给 Isaac Gym。
+
+关键方法：
+
+- `randomized_terrain`：随机地形。
+- `curiculum`：按 row 难度递增的课程地形。
+- `selected_terrain`：固定指定地形。
+- `make_terrain`：根据 proportions 生成 random uniform、slope、stairs、step 等地形。
+- `add_terrain_to_map`：把单块地形写入大地图，并记录 env origin。
+
+辅助函数：
+
+- `gap_terrain`
+- `pit_terrain`
+
+#### `math.py`
+
+Torch 数学辅助：
+
+- `quat_apply_yaw`：只保留 yaw 后应用 quaternion。
+- `wrap_to_pi`：角度归一到 `[-pi, pi]`。
+- `torch_rand_sqrt_float`：平方根分布随机采样。
+
+#### `isaacgym_utils.py`
+
+Isaac Gym quaternion 辅助：
+
+- `copysign`
+- `get_euler_xyz`：从 Isaac Gym `xyzw` quaternion 计算 roll/pitch/yaw。
+
+#### `logger.py`
+
+轻量状态/reward logger。
+
+- `log_state/log_states`
+- `log_rewards`
+- `print_rewards`
+- `reset`
+
+当前主训练链路主要用 runner 的 TensorBoard/text log，这个 logger 更偏调试/播放辅助。
+
+#### `__init__.py`
+
+集中导出：
+
+- helpers 中的配置和参数工具。
+- `task_registry`
+- `Logger`
+- math 工具。
+- `Terrain`
+
+### `legged_gym/legged_utils/`
+
+更偏 legged locomotion 的辅助模块。
+
+#### `observation_buffer.py`
+
+历史观测 buffer。
+
+关键类 `ObservationBuffer`：
+
+- `reset(reset_idxs, new_obs)`：重置指定环境的历史观测。
+- `insert(new_obs)`：左移历史并追加最新观测。
+- `get_obs_tensor_3D(history_ids=None)`：返回 `[num_envs, history, obs_dim]` 和 attention mask。
+
+被 `R2Robot` 用于：
+
+- stacked partial observation。
+- control latency sensor buffer。
+
+#### `curriculum.py`
+
+和 `envs/base/curriculum.py` 基本重复的课程学习工具。当前 R2 主环境实际导入的是 `legged_gym/envs/base/curriculum.py`，不是这个文件。
+
+### `legged_gym/scripts/`
+
+训练、回放、motion 转换和 asset 检查脚本。
+
+#### `train.py`
+
+最小训练入口。
+
+流程：
+
+1. `from legged_gym.envs import *` 触发任务注册。
+2. `task_registry.make_env(name=args.task, args=args)` 创建环境。
+3. `task_registry.make_alg_runner(...)` 创建 runner。
+4. `ppo_runner.learn(...)` 开始训练。
+
+常用命令：
+
+```powershell
+python legged_gym/scripts/train.py --task=r2int --headless
+python legged_gym/scripts/train.py --task=r2amp --headless
+```
+
+#### `play.py`
+
+模型回放和视频录制脚本。
+
+主要行为：
+
+- 强制单环境。
+- 使用 plane 地形。
+- 关闭噪声、随机化、课程学习。
+- 加载 checkpoint。
+- 使用 `DEMO_PRESETS` 生成 `stand`、`jump`、`walk`、`fast_walk` 命令。
+- 通过 `R2_PLAY_INITIAL_GAIT` 选择初始 gait。
+- 用 `policy.act_inference()` 输出动作均值。
+- 可通过 Isaac Gym viewer 截帧，并用 ffmpeg/imageio-ffmpeg 导出 mp4。
 
 关键函数：
 
-- `register(name, task_class, env_cfg, train_cfg)`: 把三元组注册进去。
-- `get_cfgs(name)`: 返回注册好的 env config 和 train config，并把 train seed 同步到 env。
-- `make_env(name, args, env_cfg)`: 应用 CLI 覆盖，解析 sim 参数，实例化环境类。
-- `make_alg_runner(env, name, args, train_cfg)`: 应用 CLI 覆盖，创建 runner，必要时加载 checkpoint。
+- `_build_command_tensor`
+- `_get_demo_phase`
+- `_update_camera`
+- `_apply_deterministic_reset_pose`
+- `_init_recording/_capture_record_frame/_finalize_recording`
+- `play(args)`
 
-质疑者：`get_cfgs()` 返回的是注册对象本身，不是深拷贝。`play.py` 对 env config 的改动是原地改配置对象，这在单进程脚本里通常没问题，但文档不要暗示它是不可变快照。
+#### `retarget_motion.py`
 
-## 3. Config Layer
+把外部 G1 `.npz` motion 转成 R2 AMP motion 格式。
 
-R2 配置按继承关系叠加：
+主要逻辑：
 
-- `legged_gym/envs/r2/r2_config.py`: `R2Cfg` 和 `R2CfgPPO`，定义 24 action、观测维度、初始姿态、PD 参数、命令范围、reward scale、地形、domain randomization、PPO 默认项。
-- `legged_gym/envs/r2/r2interrupt_config.py`: `R2InterruptCfg` 和 `R2InterruptCfgPPO`，继承 R2 配置，增加 interrupt/disturb 相关字段。当前默认 `use_disturb=False` 且 `DISTURB_DIM=0`。
-- `legged_gym/envs/r2/r2_amp_config.py`: `R2AmpCfg` 和 `R2AmpCfgPPO`，继承 interrupt 配置，增加环境侧 AMP motion 设置和训练侧 AMP PPO/discriminator 设置。
+- 定义 `R2_DOF_NAMES`。
+- 定义 `G1_TO_R2_DOF_MAP`。
+- 定义 `BODY_MAP`。
+- 读取 source npz 的 DOF/body 状态。
+- 重排 DOF 到 R2 24 DOF 顺序。
+- 选择 AMP 需要的 body。
+- 按目标 base height 缩放 body z 和 z 方向速度。
+- 输出 `legged_gym/motions` 能直接读取的 `.npz`。
 
-常见 CLI 覆盖：
+注意：README 中提到当前 `BODY_MAP` 输出的手臂 body 名和 `r2amp` 期望的 `left_arm_yaw_link/right_arm_yaw_link` 有差异，使用前需要检查生成的 `body_names`。
 
-- `--num_envs`: 覆盖 `env_cfg.env.num_envs`。
-- `--seed`: 覆盖 train seed。
-- `--max_iterations`: 覆盖 runner 最大训练迭代。
-- `--resume --load_run --checkpoint`: 控制 checkpoint 加载。
+#### `pkl_to_npz.py`
 
-质疑者：`runner_class_name` 是配置里的字符串，`TaskRegistry.make_alg_runner()` 用 `eval(train_cfg.runner_class_name)` 创建 runner。当前配置指向 `OnPolicyRunner`，但文档最好写“当前配置创建 OnPolicyRunner”，不要写成永远只能创建它。
+把旧的 LaFAN1 风格 R2V2 `.pkl` motion 转成 AMP `.npz`。
 
-## 4. Runner And PPO Layer
+特点：
 
-runner 在 `rsl_rl/rsl_rl/runners/on_policy_runner.py`。
+- 输入 26 DOF，去掉两个 head DOF，输出训练环境的 24 DOF。
+- 根据 root pose 和近似 body offsets 构造 `base_link`、手、脚踝 body 状态。
+- 支持多个 pkl merge 成一个 `.npz`。
 
-初始化流程：
+这个脚本更像历史/辅助转换工具。
 
-```text
-OnPolicyRunner.__init__
--> read train_cfg["runner"], ["algorithm"], ["policy"]
--> env.num_partial_obs 给 actor
--> env.num_obs 给 critic
--> ActorCritic(...)
--> PPO(actor_critic, ...)
--> alg.init_storage(...)
--> if "amp" in train_cfg: _init_amp(train_cfg["amp"])
--> env.reset()
-```
+#### `view_static_asset.py`
 
-训练循环在 `OnPolicyRunner.learn()`。
+Isaac Gym 静态 asset 查看器。
 
-每个 iteration 的大结构：
+用途：
 
-```text
-obs = env.get_observations()
-critic_obs = env.get_privileged_observations()
+- 加载指定 URDF/MJCF/XML asset。
+- 固定 base。
+- 关闭重力。
+- GUI 预览，或 `--headless` 快速检查 asset 是否可加载。
 
-for it:
-  for rollout step:
-    actions = alg.act(obs, critic_obs)
-    obs, critic_obs, rewards, dones, infos = env.step(actions)
-    alg.process_env_step(rewards, dones, infos)
+默认 asset 是 `r2_v2_with_shell_no_hand/r2v2_with_shell.xml`。
 
-  alg.compute_returns(critic_obs)
-  metrics = alg.update()
-  env.training_curriculum()
-  log / save checkpoint
-```
+### `legged_gym/motions/`
 
-PPO 本体在 `rsl_rl/rsl_rl/algorithms/ppo.py`。
+AMP motion 数据目录。该目录被 `.gitignore` 忽略，但本地存在。
+
+#### `README.md`
+
+AMP motion 数据契约说明。
+
+要求每个 `.npz` 包含：
+
+- `dof_names`
+- `body_names`
+- `dof_positions`
+- `dof_velocities`
+- `body_positions`
+- `body_rotations`
+- `body_linear_velocities`
+- `body_angular_velocities`
+- `dt` 或 `fps`
+
+多 clip 必须共享相同 `dof_names`、`body_names`、`dt`。
+
+#### `r2_walk.npz`
+
+本地默认 AMP motion 数据之一。`R2AmpCfg.amp.motion_file` 指向整个 `legged_gym/motions` 目录，`MotionLoader` 会扫描这里的 `.npz`。
+
+### `legged_gym/__pycache__/` 及子目录中的 `__pycache__/`
+
+Python 运行生成的 bytecode 缓存。属于生成物，不参与源码结构。
+
+## 5. `rsl_rl/`
+
+`rsl_rl` 是强化学习框架层，提供 PPO、AMP-PPO、Actor-Critic、runner、storage 和 VecEnv 接口。
+
+### `rsl_rl/setup.py`
+
+Python 包安装配置。
+
+- 包名：`rsl_rl`
+- 版本：`1.0.2`
+- 依赖：`torch`、`torchvision`、`numpy`、`tensorboard`、`tqdm`、`matplotlib`
+
+README 中通过 `pip install -e rsl_rl` 安装这个包。
+
+### `rsl_rl/LICENSE`
+
+`rsl_rl` 许可证文件。
+
+### `rsl_rl/licenses/dependencies/`
+
+依赖库许可证目录。
+
+- `torch_license.txt`：PyTorch license。
+- `numpy_license.txt`：NumPy license。
+
+### `rsl_rl/rsl_rl/__init__.py`
+
+包初始化文件，当前只有版权头，没有导出对象。
+
+### `rsl_rl/rsl_rl/algorithms/`
+
+算法层。
+
+#### `__init__.py`
+
+导出：
+
+- `PPO`
+- `AMPPPO`
+
+#### `ppo.py`
+
+核心 PPO 实现。
+
+关键类 `PPO`：
+
+- `__init__`：保存 PPO 超参，创建 `AdamW` 优化器，持有 `ActorCritic`。
+- `init_storage`：创建 `RolloutStorage`。
+- `act`：采样动作并记录 value、log prob、action mean/std、obs。
+- `process_env_step`：处理 reward/done/timeouts，把 transition 写入 storage。
+- `compute_returns`：用 critic 估计 last value，调用 storage 计算 GAE。
+- `update`：计算 clipped surrogate loss、value loss、entropy bonus、可选 adaptation loss、可选 symmetry loss，并优化网络。
+
+特别点：
+
+- `sync_update=True` 时会训练 actor 内部的 privileged reconstruction。
+- `use_wbc_sym_loss=True` 时有一套 legacy 镜像 symmetry loss。
+- recurrent 分支接口存在，但当前 storage 没有对应 generator，默认 `ActorCritic.is_recurrent=False`。
+
+#### `amp_ppo.py`
+
+AMP 版本 PPO，继承 `PPO`。
+
+关键类 `AMPPPO`：
+
+- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 style reward，并和 task reward 混合后写入 PPO storage。
+- `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP reward，训练 discriminator。
+- `_update_discriminator`：从 replay buffer 采 agent 样本，从 `env.collect_reference_motions()` 采 reference 样本，训练 LSGAN 风格 discriminator，并加 gradient penalty/logit regularization。
+
+### `rsl_rl/rsl_rl/modules/`
+
+神经网络模块。
+
+#### `__init__.py`
+
+导出：
+
+- `ActorCritic`
+- `AMPDiscriminator`
+
+#### `actor_critic.py`
+
+Actor-Critic 封装。
+
+关键类 `ActorCritic`：
+
+- actor 通过 `model_name` 动态创建，例如 `MlpAdaptModel`。
+- critic 是普通 MLP，输入 critic obs，输出 value。
+- 动作分布是 `Normal(mean, std)`，其中 `std` 是可学习参数。
+- `act`：训练时采样动作。
+- `act_inference`：推理时返回动作均值和 actor latent。
+- `evaluate`：计算 value。
+- `get_actions_log_prob`：计算动作 log prob。
+
+#### `net_model.py`
+
+策略网络构件。
+
+函数：
+
+- `get_activation`
+- `MLP`
+
+关键类：
+
+- `BaseAdaptModel`：适应型 actor 基类。用历史 proprioception 编码 latent，再预测一小段 privileged 信息，最后输出动作。
+- `MlpAdaptModel`：用 MLP 编码历史 proprioception。R2 配置默认使用它。
+
+`sync_update=True` 时，`BaseAdaptModel` 会计算 `privileged_recon_loss`，帮助 actor 从历史观测估计隐含状态。
+
+#### `discriminator.py`
+
+AMP 判别器。
+
+关键类 `AMPDiscriminator`：
+
+- `forward`：输出 AMP observation 的 logit。
+- `compute_grad_penalty`：对输入求梯度范数平方，用于 discriminator 正则。
+
+### `rsl_rl/rsl_rl/runners/`
+
+训练总控层。
+
+#### `__init__.py`
+
+导出 `OnPolicyRunner`。
+
+#### `on_policy_runner.py`
+
+训练 runner。它把 env、policy、algorithm、storage、log、checkpoint 串起来。
+
+关键类 `OnPolicyRunner`：
+
+- 初始化时创建 `ActorCritic`。
+- 默认创建 `PPO`。
+- 如果 `train_cfg` 里有 `amp`，调用 `_init_amp()` 创建 discriminator、AMP replay buffer，并把算法替换成 `AMPPPO`。
+- `learn`：执行 rollout、PPO/AMP update、课程学习、日志和 checkpoint 保存。
+- `log`：写 TensorBoard 和 `train.log`。
+- `_maybe_save_best_checkpoints`：保存 `model_best_task.pt` 和 `model_best_mixed.pt`。
+- `save/load`：保存/加载模型、optimizer、AMP discriminator。
+- `get_inference_policy`：返回 eval 模式 policy。
+
+### `rsl_rl/rsl_rl/storage/`
+
+数据缓存层。
+
+#### `__init__.py`
+
+导出：
+
+- `RolloutStorage`
+- `AMPReplayBuffer`
+
+#### `rollout_storage.py`
+
+PPO rollout buffer。
+
+关键类 `RolloutStorage`：
+
+- 存 `observations`、`privileged_observations`、`actions`、`rewards`、`dones`、`values`、`returns`、`advantages`、`mu`、`sigma`、`actions_log_prob`。
+- `Transition` 是单步临时容器。
+- `add_transitions` 写入一步 rollout。
+- `compute_returns` 计算 GAE 和 advantage normalization。
+- `mini_batch_generator` 生成 PPO update mini-batch。
+
+#### `amp_storage.py`
+
+AMP agent observation replay buffer。
+
+关键类 `AMPReplayBuffer`：
+
+- 环形 buffer。
+- `insert`：插入 flattened AMP obs。
+- `sample`：随机采样 agent AMP obs 给 discriminator。
+
+### `rsl_rl/rsl_rl/env/`
+
+环境抽象接口。
+
+#### `__init__.py`
+
+导出 `VecEnv`。
+
+#### `vec_env.py`
+
+最小向量化环境接口 `VecEnv`。
+
+声明环境需要提供：
+
+- `num_envs`
+- `num_obs`
+- `num_privileged_obs`
+- `num_actions`
+- `max_episode_length`
+- `obs_buf`
+- `privileged_obs_buf`
+- `rew_buf`
+- `reset_buf`
+- `episode_length_buf`
+- `extras`
+- `device`
+
+抽象方法：
+
+- `step`
+- `reset`
+- `get_observations`
+- `get_privileged_observations`
+
+`legged_gym` 的环境实际比这个接口提供更多属性，例如 `num_partial_obs`、`include_history_steps`、`training_curriculum`、`collect_reference_motions`。
+
+### `rsl_rl/rsl_rl/utils/`
+
+RSL-RL 通用工具。
+
+#### `__init__.py`
+
+导出：
+
+- `split_and_pad_trajectories`
+- `unpad_trajectories`
+
+#### `utils.py`
+
+轨迹 padding/unpadding 工具，主要为 recurrent policy 准备。
+
+- `split_and_pad_trajectories(tensor, dones)`：根据 done 切分 `[time, env, ...]` 轨迹并 pad。
+- `unpad_trajectories(trajectories, masks)`：把 padded trajectories 还原。
+
+当前默认 policy 非 recurrent，但 `ActorCritic` 中保留了 mask/unpad 支持。
+
+## 6. `r2_v2_with_shell_no_hand/`
+
+R2V2 机器人资产目录，是当前 R2 训练配置实际引用的 asset 来源。
+
+### `r2v2_with_shell.urdf`
+
+R2V2 URDF asset。`R2Cfg.asset.file` 默认指向它。
+
+内容包括：
+
+- `base_link`
+- 左右腿：hip pitch/roll/yaw、knee、ankle pitch/roll
+- 腰：waist yaw/pitch
+- 双臂：shoulder pitch/roll/yaw、arm pitch/yaw
+- 手部壳体 fixed link
+- 头部 fixed link
+- IMU fixed link
+
+训练环境会通过 Isaac Gym 读取这个 URDF，获取 DOF、body、collision、visual、joint limit 等。
+
+### `r2v2_with_shell.xml`
+
+R2V2 MuJoCo XML asset。
+
+用途更偏：
+
+- MuJoCo 资产描述。
+- 静态 asset 检查。
+- 跨仿真或可视化参考。
+
+`view_static_asset.py` 默认加载的就是这个 XML。
+
+### `HEAD_LOCK_REVIEW.md`
+
+记录头部关节锁定说明：
+
+- `head_yaw_joint`：从 revolute 改 fixed。
+- `head_pitch_joint`：从 revolute 改 fixed。
+
+目标是无灵巧手情况下锁头部 2 DOF，保持身体 active DOF 设定。
+
+### `meshes_shell/`
+
+R2V2 shell STL 网格目录。每个 `.STL` 基本对应 URDF/XML 中同名 link 的可视化或碰撞几何。
+
+根、腰、头：
+
+- `base_link.STL`
+- `waist_yaw_link.STL`
+- `waist_pitch_link.STL`
+- `head_yaw_link.STL`
+- `head_pitch_link.STL`
+
+左腿：
+
+- `left_hip_pitch_link.STL`
+- `left_hip_roll_link.STL`
+- `left_hip_yaw_link.STL`
+- `left_knee_link.STL`
+- `left_ankle_pitch_link.STL`
+- `left_ankle_roll_link.STL`
+
+右腿：
+
+- `right_hip_pitch_link.STL`
+- `right_hip_roll_link.STL`
+- `right_hip_yaw_link.STL`
+- `right_knee_link.STL`
+- `right_ankle_pitch_link.STL`
+- `right_ankle_roll_link.STL`
+
+左臂和左手：
+
+- `left_shoulder_pitch_link.STL`
+- `left_shoulder_roll_link.STL`
+- `left_shoulder_yaw_link.STL`
+- `left_arm_pitch_link.STL`
+- `left_arm_yaw_link.STL`
+- `left_hand_pitch_link.STL`
+- `left_hand_roll_link.STL`
+- `left_hand_link.STL`
+
+右臂和右手：
+
+- `right_shoulder_pitch_link.STL`
+- `right_shoulder_roll_link.STL`
+- `right_shoulder_yaw_link.STL`
+- `right_arm_pitch_link.STL`
+- `right_arm_yaw_link.STL`
+- `right_hand_pitch_link.STL`
+- `right_hand_roll_link.STL`
+- `right_hand_link.STL`
+- `right_hand_link copy.STL`
+
+## 7. `resources/`
+
+外部/参考机器人资产目录。目前主要是 H1。
+
+### `resources/robots/h1/urdf/h1.urdf`
+
+H1 机器人 URDF。
+
+包含 pelvis、腿部、torso、双臂、IMU、足端固定点等定义。当前 README 的 R2 任务不直接使用它，但它可以作为仿真资产或 motion retargeting/参考机器人资产。
+
+### `resources/robots/h1/meshes/`
+
+H1 STL 网格目录。
+
+腿部：
+
+- `left_hip_pitch_link.STL`
+- `left_hip_roll_link.STL`
+- `left_hip_yaw_link.STL`
+- `left_knee_link.STL`
+- `left_ankle_link.STL`
+- `left_ankle_link_modified.STL`
+- `right_hip_pitch_link.STL`
+- `right_hip_roll_link.STL`
+- `right_hip_yaw_link.STL`
+- `right_knee_link.STL`
+- `right_ankle_link.STL`
+- `right_ankle_link_modified.STL`
+
+躯干：
+
+- `pelvis.STL`
+- `torso_link.STL`
+- `logo_link.STL`
+
+手臂：
+
+- `left_shoulder_pitch_link.STL`
+- `left_shoulder_roll_link.STL`
+- `left_shoulder_yaw_link.STL`
+- `left_elbow_link.STL`
+- `right_shoulder_pitch_link.STL`
+- `right_shoulder_roll_link.STL`
+- `right_shoulder_yaw_link.STL`
+- `right_elbow_link.STL`
+
+## 8. `scripts/`
+
+顶层项目辅助脚本目录，区别于 `legged_gym/scripts`。
+
+### `convert_lafan1_to_amp.py`
+
+把 LaFAN1 风格 R2V2 `.npz` motion 转成当前项目 AMP motion 格式。
+
+输入特点：
+
+- `dof_positions` 是 26 DOF，包含 head yaw/pitch。
+- `body_positions` 是完整 R2V2 body。
+- `dt` 是源数据 timestep。
+
+输出特点：
+
+- 去掉 head 两个 DOF，得到 24 DOF。
+- 只保留 AMP body：
+  - `base_link`
+  - `left_arm_yaw_link`
+  - `right_arm_yaw_link`
+  - `left_ankle_roll_link`
+  - `right_ankle_roll_link`
+- 按目标 base height 缩放 z 和 z 速度。
+- 写入 `legged_gym/motions` 可直接被 `MotionLoader` 读取。
 
 关键函数：
 
-- `PPO.act(obs, critic_obs)`: actor 采样 action，critic 估值，记录 transition。
-- `PPO.process_env_step(rewards, dones, infos)`: 写 rollout storage，并处理 timeout bootstrap。
-- `PPO.compute_returns(last_critic_obs)`: 用 critic value 计算 GAE/returns。
-- `PPO.update()`: 按 mini-batch 做 policy loss、value loss、entropy、可选 symmetry loss，然后 optimizer step。
+- `convert_file(src_path, dst_path, target_base_height=0.78)`
+- `main()`
 
-质疑者：actor 用的是 `env.num_partial_obs`，critic 用的是 `env.num_obs`。不要把观测说成一个单一向量。
+### `scripts/__pycache__/`
 
-## 5. R2 Environment Layer
+Python 运行缓存。属于生成物，不是源码。
 
-主体环境在 `legged_gym/envs/r2/r2.py` 的 `R2Robot`。当前注册 task 用的是 `legged_gym/envs/r2/r2interrupt.py` 的 `R2InterruptRobot`，它继承并覆盖部分行为。
+## 9. `imgs/`
 
-初始化链路：
+文档/展示图片资源，不参与训练运行。
 
-```text
-R2InterruptRobot.__init__
--> R2Robot.__init__
--> _parse_cfg(cfg)
--> BaseTask.__init__
--> create_sim()
--> _create_envs()
--> _init_buffers()
--> _prepare_reward_function()
--> _init_command_distribution(...)
--> interrupt-specific initial_disturb(...)
-```
+- `framework.png`：项目/论文框架图。
+- `share-logo.png`：分享或展示 logo。
+- `sjtu.png`：上海交大相关图片。
 
-### Simulation Creation
+## 10. `logs/`
 
-`R2Robot.create_sim()` 负责创建 Isaac Gym sim 和地形。随后 `_create_envs()` 负责：
+训练日志、TensorBoard event、checkpoint 和分析产物。按 `.gitignore` 设计它应当是本地生成物，但当前工作区里存在这些文件。
 
-- 读取 `cfg.asset.file` 指向的 R2 URDF。
-- 创建 `gymapi.AssetOptions`。
-- `gym.load_asset()` 加载 robot asset。
-- 读取 DOF/body 名称。
-- 创建 `num_envs` 个 Isaac Gym env。
-- 为每个 env 创建 actor、设置 DOF 属性、刚体属性、摩擦等。
-- 缓存 feet、penalized contact、termination contact、base body 索引。
+### `logs/train_r2v2_amp_version4_console.log`
 
-质疑者：`--num_envs` 只改变并行 env 数，不会改变单个机器人结构。速度提升受 GPU 显存、sim step、policy update batch 大小一起限制。
+R2 AMP version4 的控制台训练日志。记录 iteration、FPS、reward、episode length、curriculum 等。
 
-### Step Flow
+### `logs/analysis/`
 
-每个环境 step 从 `R2Robot.step(actions)` 开始：
+训练结果分析目录。
 
-```text
-step(actions)
--> calculate_action(actions)
--> render()
--> repeat cfg.control.decimation times:
-     _compute_torques(actions_after_push)
-     gym.set_dof_actuation_force_tensor(...)
-     gym.simulate(...)
-     gym.refresh_dof_state_tensor(...)
--> post_physics_step()
--> return partial_obs_buf, obs_buf, rew_buf, reset_buf, extras
-```
+- `r2_amp_training_report.md`：R2 AMP 训练分析报告，包括训练时长、迭代数、环境步数、reward/loss 变化、最终奖励分解。
+- `r2_amp_scalar_summary.csv`：TensorBoard 标量汇总表，便于继续筛选指标或画图。
 
-`R2InterruptRobot.calculate_action()` 会先走基础 action clip，然后在 disturb 开启时替换或融合末尾若干 action 维度。当前默认 `use_disturb=False` 和 `disturb_dim=0`，所以默认训练里 interrupt 代码壳存在，但扰动机制基本不生效。
+### `logs/r2_amp/`
 
-### Post Physics Flow
+AMP 任务实验输出。
 
-`post_physics_step()` 是环境每步的中枢：
+#### `Apr12_05-06-14_r2v2_amp_hopeful/`
 
-```text
-refresh root/contact/dof/body tensors
--> 更新 base_pos、base_quat、rpy、base_lin_vel、base_ang_vel、projected_gravity
--> 更新 foot contact、collision state、foot pose
--> AMP buffer bootstrap if needed
--> _post_physics_step_callback()
--> check_termination()
--> compute_reward()
--> compute_amp_observations() if AMP enabled
--> reset_idx(done_envs)
--> compute_observations(done_envs)
--> 滚动 last_actions、last_dof_vel、last_root_vel
-```
+- `events.out.tfevents...`：TensorBoard event 文件，记录一次 AMP 训练过程。
 
-`_post_physics_step_callback()` 处理每步辅助逻辑：
+#### `Apr17_15-18-11_r2v2_amp_version4/`
 
-- 周期性重采样 commands。
-- heading 模式下把 heading error 转成 yaw command。
-- 更新 gait phase、clock inputs、desired contact states。
-- 测地形高度和 foot scan。
-- domain randomization push 或 teleport。
+- `events.out.tfevents...`：TensorBoard event 文件。
+- `model_best_mixed.pt`：mixed reward 最佳 checkpoint，可用 `--checkpoint -3` 加载。
+- `train.log`：runner 写出的训练文本日志。
 
-### Reset Flow
+### `logs/r2_interrupt/`
 
-`reset()` 会重置所有 env，然后额外执行一次零动作 `step()` 来生成初始 observation。
+标准 interrupt/PPO 任务实验输出。
 
-`reset_idx(env_ids)` 做的事比“重置状态”多：
+#### `Apr02_08-46-31_/`
 
-- 可选更新 terrain curriculum。
-- `_reset_dofs(env_ids)`: 关节位置随机到默认姿态的 `0.5~1.5` 倍，速度随机到 `[-1, 1]`。
-- `_reset_root_states(env_ids)`: 根据 env origin 放置 base，随机 yaw，随机 base 线速度和角速度。
-- `_resample_commands(env_ids)`: 重采样速度、yaw、gait、body height、body pitch 等命令。
-- `apply_randomizations(env_ids)`: 应用摩擦、增益、link 属性、mass 等随机化。
-- 清空 last action、foot air time、episode length、episode sums。
-- 写 `extras["episode"]` 给 runner logging。
+- `events.out.tfevents...`：TensorBoard event 文件。当前文件很小，可能是一次未完整运行的实验。
 
-质疑者：不要说 reset 只是恢复初始姿态。它还采样命令、随机化环境、更新课程学习，并且 `reset()` 会再走一次零动作 step。
+## 11. 缺失或外部依赖目录
 
-### Observation Flow
+### `IsaacGymEnvs/`
 
-`_preprocess_obs()` 先拼接完整 `obs_buf`：
+当前仓库顶层没有 `IsaacGymEnvs/` 目录。Isaac Gym 按 README 要求从外部 Isaac Gym Preview 4 安装，不随仓库提供。
 
-- base angular velocity。
-- projected gravity。
-- joint position error 和 joint velocity。
-- 当前 action。
-- commands。
-- gait clock。
-- privileged 信息，例如 base linear velocity、base height error、foot clearance、friction、contact forces。
-- terrain height samples。
+### `tests/`
 
-`compute_observations(reset_env_ids)` 继续处理：
+当前仓库未发现显式 `tests/` 目录，也未发现独立测试文件。验证主要依赖：
 
-- 可选 control latency。
-- 可选 observation noise。
-- clip observation。
-- `partial_obs_buf = obs_buf[..., :num_partial_obs]` 给 actor。
-- 如果 `stack_history_obs=True`，actor obs 会变成历史堆叠后的 3D tensor。
+- 能否创建环境。
+- 能否启动训练。
+- 回放是否正常。
+- TensorBoard/log 指标。
+- asset viewer 是否能加载资产。
 
-质疑者：actor 和 critic 看到的信息不同。actor 主要用 `partial_obs_buf`，critic 用完整 `obs_buf`。
+## 12. 主要继承与配置关系
 
-### Reward Flow
-
-`_prepare_reward_function()` 会读取 `cfg.rewards.scales`，只保留非零 reward scale，并动态绑定同名 `_reward_<name>()` 函数。
-
-`compute_reward()` 每步执行：
+配置继承：
 
 ```text
-rew_buf = 0
-for each active reward function:
-  rew = reward_fn() * reward_scale
-  if reward is curriculum-controlled: rew *= curriculum_scale
-  rew_buf += rew
-  episode_sums[name] += rew
-  command_sums[name] += rew when needed
-if only_positive_rewards: clip rew_buf >= 0
-if termination scale exists: add _reward_termination()
+BaseConfig
+  -> LeggedRobotCfg
+      -> R2Cfg
+          -> R2InterruptCfg
+              -> R2AmpCfg
+
+BaseConfig
+  -> LeggedRobotCfgPPO
+      -> R2CfgPPO
+          -> R2InterruptCfgPPO
+              -> R2AmpCfgPPO
 ```
 
-典型 `_reward_*` 覆盖速度跟踪、角速度、姿态、base height、torque、dof velocity/acceleration、action rate、碰撞、接触力、足端高度、足端滑移、站立等。
-
-质疑者：不要在文档里手写一个固定 reward 列表说“训练一定用这些”。真正启用哪些 reward 取决于 `cfg.rewards.scales` 的非零项。
-
-### Torque Flow
-
-`_compute_torques(actions)` 当前只支持 P 控制：
+环境继承：
 
 ```text
-actions_scaled = actions * cfg.control.action_scale
-target_pos = actions_scaled + default_dof_pos + motor_offsets
-torque = p_gain * (target_pos - dof_pos) - d_gain * dof_vel
-torque *= motor_strength
-torque = clip(torque, -custom_torque_limits, custom_torque_limits)
+BaseTask
+  -> R2Robot
+      -> R2InterruptRobot
 ```
 
-质疑者：最终控制输出 clip 用的是 `custom_torque_limits`，来自 `R2Cfg.control.torque_limits` 按关节名匹配；不能简单说“只由 URDF effort 决定”。
-
-## 6. AMP Layer
-
-AMP 有两套相关开关，必须分清。
-
-环境侧开关：
-
-- `R2AmpCfg.amp.enable = True`。
-- `R2Robot._init_buffers()` 看到 `hasattr(cfg, "amp") and cfg.amp.enable` 后，创建 AMP observation buffer、motion loader、DOF/body 映射。
-
-训练侧开关：
-
-- `R2AmpCfgPPO` 有顶层 `class amp`。
-- `class_to_dict(train_cfg)` 后 runner 会看到 `train_cfg["amp"]`。
-- `OnPolicyRunner.__init__()` 检查 `"amp" in train_cfg`，然后调用 `_init_amp()`。
-
-质疑者：只写 `enable=True` 会误导。环境侧 AMP buffer 和训练侧 AMPPPO 是两个来源，一个在 env config，一个在 train config。
-
-### AMP Config
-
-`legged_gym/envs/r2/r2_amp_config.py` 当前关键值：
-
-- `motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions"`。
-- `amp_obs_dim = 73`。
-- `num_amp_obs_steps = 2`。
-- `key_body_names = left_arm_yaw_link, right_arm_yaw_link, left_ankle_roll_link, right_ankle_roll_link`。
-- `reference_body_name = "base_link"`。
-- `task_reward_weight = 0.6`。
-- `style_reward_weight = 0.4`。
-
-### AMP Observation
-
-单帧 AMP observation 由 `compute_amp_obs()` 拼接：
+RL 框架关系：
 
 ```text
-dof_pos                  24
-dof_vel                  24
-root height               1
-root tangent + normal     6
-root linear velocity      3
-root angular velocity     3
-4 key bodies relative xyz 12
-total                    73
+OnPolicyRunner
+  -> ActorCritic
+      -> MlpAdaptModel actor
+      -> critic MLP
+  -> PPO
+      -> RolloutStorage
+
+OnPolicyRunner with amp config
+  -> AMPPPO
+      -> PPO behavior
+      -> AMPDiscriminator
+      -> AMPReplayBuffer
+      -> env.collect_reference_motions()
 ```
 
-live observation 流程：
+## 13. 最重要的改动入口
 
-```text
-R2Robot.post_physics_step()
--> compute_amp_observations()
--> compute_amp_obs(live robot state)
--> shift amp_observation_buffer history
--> extras["amp_obs"] = flattened history
-```
+如果要改 R2 任务行为，通常看这些文件：
 
-reference observation 流程：
-
-```text
-MotionLoader loads .npz clips
--> validates same dof_names/body_names/dt across clips
--> collect_reference_motions(num_samples)
--> sample current and historical times
--> convert motion quaternion wxyz to IsaacGym xyzw
--> compute_amp_obs(reference state)
--> return [num_samples, num_amp_obs_steps, amp_obs_dim]
-```
-
-Motion files are expected to include DOF names, body names, DOF state, body state, and preferably `dt` or `fps`. If both `dt` and `fps` are missing, `MotionLoader` assumes 30 FPS.
-
-质疑者：`base_link` 这里是 simulator/root link frame 和 AMP reference body，不等于 URDF inertial COM offset。
-
-### AMPPPO Runtime
-
-`OnPolicyRunner._init_amp()` 做三件事：
-
-- 创建 `AMPDiscriminator`。
-- 创建 `AMPReplayBuffer`。
-- 用 `AMPPPO` 替换默认 `PPO`，但保留同一个 actor-critic。
-
-rollout 每步：
-
-```text
-OnPolicyRunner.learn()
--> actions = self.alg.act(obs, critic_obs)
--> env.step(actions)
--> infos["amp_obs"] comes from env.extras
--> AMPPPO.process_env_step(rewards, dones, infos)
-```
-
-`AMPPPO.process_env_step()` 做的关键事：
-
-```text
-disc_logit = discriminator(amp_obs)
-style_reward = -log(1 - sigmoid(disc_logit) + 1e-7) * disc_reward_scale
-mixed_reward = task_reward_weight * task_reward + style_reward_weight * style_reward
-PPO.process_env_step(mixed_reward, dones, infos)
-```
-
-质疑者：mixed reward 不是只用于 logging。它会进入 PPO rollout storage，后面的 returns、value loss、policy loss 都基于 mixed reward。
-
-每轮 update：
-
-```text
-AMPPPO.update()
--> super().update() 先更新 PPO actor-critic
--> insert collected agent amp_obs into AMPReplayBuffer
--> _update_discriminator()
-```
-
-`_update_discriminator()`：
-
-- 从 replay buffer 采 agent AMP obs。
-- 调 `env.collect_reference_motions()` 采 reference AMP obs。
-- agent logit 目标是 0，reference logit 目标是 1。
-- 加 gradient penalty 和 logit regularization。
-- 用独立 AdamW 更新 discriminator。
-
-质疑者：discriminator 不是和 actor-critic 在同一个 loss 里一起反传。代码顺序是先 PPO update，再单独 discriminator update。
-
-### AMP Motion Conversion Caveat
-
-`scripts/convert_lafan1_to_amp.py` 是当前更贴近 `r2amp` body set 的转换路径，因为它会选择 `base_link`、`left_arm_yaw_link`、`right_arm_yaw_link`、左右 ankle。
-
-`legged_gym/scripts/retarget_motion.py` 需要额外检查。当前 `BODY_MAP` 会输出 `left_hand_roll_link` 和 `right_hand_roll_link`，但 `r2amp` 配置需要 `left_arm_yaw_link` 和 `right_arm_yaw_link`。如果直接拿这个脚本输出去训练 `r2amp`，`MotionLoader.get_body_index()` 可能找不到 key body，或者动作语义不一致。
-
-质疑者：这不是文档洁癖，是会直接影响 AMP 是否读到正确参考 body 的问题。
-
-## 7. Play And Checkpoint Details
-
-`play.py` 会修改环境为演示模式：
-
-- `num_envs = 1`。
-- 地形改为 plane。
-- 关闭 terrain curriculum。
-- 关闭 observation noise。
-- 关闭 friction/load/gain/link/base mass randomization。
-- 设置超长 episode。
-- `env.use_disturb = False`，演示时基本关闭 interrupt。
-- 通过 `_build_command_tensor()` 手动写 `env.commands`。
-
-checkpoint 加载由 `helpers.get_load_path()` 决定：
-
-- `--checkpoint -1`: 找最新 numeric `model_<iteration>.pt`。
-- `--checkpoint -2`: 加载 `model_best_task.pt`。
-- `--checkpoint -3`: 加载 `model_best_mixed.pt`。
-
-质疑者：`-2/-3` 只有对应文件存在才有效。`r2amp` 默认保存 best task/mixed，其他 task 不一定有这些文件。
-
-## 8. Debugging Pointers
-
-- 入口断点：先看 `train.py` 的 `train(args)`，确认 task 名有没有进 `task_registry`。
-- 注册断点：看 `legged_gym/envs/__init__.py`，确认 `r2amp` 绑定的是 `R2InterruptRobot + R2AmpCfg + R2AmpCfgPPO`。
-- runner 断点：看 `OnPolicyRunner.__init__()`，确认 `self.use_amp = "amp" in train_cfg` 是否为 true。
-- env 断点：看 `R2Robot._init_buffers()`，确认是否创建 `_motion_loader` 和 `amp_observation_buffer`。
-- reward 断点：看 `AMPPPO.process_env_step()`，确认 `infos["amp_obs"]` 是否存在，以及 mixed reward 权重是否符合预期。
-- motion 断点：看 `MotionLoader.get_body_index()`，确认 `.npz` 的 `body_names` 覆盖 `R2AmpCfg.amp.key_body_names`。
-- 日志断点：`train.log` 明确记录 task/mixed/style reward、episode length、best checkpoint 信息；当前代码没有直接记录 termination rate 字段。
-
-质疑者：如果机器人学成下跪，不要只看最终 play 画面。需要同时检查 task reward、style reward、mixed reward、AMP motion 的 base/key body 统计、以及 `r2_config.py` 里的 base height 和初始姿态。
-
-## 9. Common Modification Points
-
-- 改并行环境数：CLI 用 `--num_envs`，代码会覆盖 `env_cfg.env.num_envs`。
-- 改训练长度：CLI 用 `--max_iterations`，代码会覆盖 `train_cfg.runner.max_iterations`。
-- 改命令范围：`R2Cfg.commands.ranges`。
-- 改默认站姿：`R2Cfg.init_state.default_joint_angles`。
-- 改初始 base 高度：`R2Cfg.init_state.pos`。
-- 改 base height reward target：`R2Cfg.rewards.base_height_target`。
-- 改 PD 和 torque：`R2Cfg.control`。
-- 改 reward 权重：`R2Cfg.rewards.scales` 或子类 config 覆盖。
-- 改 AMP task/style 比例：`R2AmpCfgPPO.amp.task_reward_weight` 和 `style_reward_weight`。
-- 改 AMP key bodies：`R2AmpCfg.amp.key_body_names`，同时必须保证 motion `.npz` 的 `body_names` 匹配。
+- 观测/reward/仿真逻辑：`legged_gym/envs/r2/r2.py`
+- 干扰/中断动作逻辑：`legged_gym/envs/r2/r2interrupt.py`
+- 基础 R2 参数：`legged_gym/envs/r2/r2_config.py`
+- `r2int` 参数：`legged_gym/envs/r2/r2interrupt_config.py`
+- `r2amp` 参数：`legged_gym/envs/r2/r2_amp_config.py`
+- AMP motion 读取：`legged_gym/utils/motion_loader.py`
+- PPO/AMP-PPO 算法：`rsl_rl/rsl_rl/algorithms/ppo.py`、`rsl_rl/rsl_rl/algorithms/amp_ppo.py`
+- 训练循环和 checkpoint：`rsl_rl/rsl_rl/runners/on_policy_runner.py`
+- 策略网络：`rsl_rl/rsl_rl/modules/actor_critic.py`、`rsl_rl/rsl_rl/modules/net_model.py`
+- R2 asset：`r2_v2_with_shell_no_hand/r2v2_with_shell.urdf`
