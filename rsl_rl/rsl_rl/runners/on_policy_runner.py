@@ -149,6 +149,7 @@ class OnPolicyRunner:
             activation=self.policy_cfg.get("activation", "elu"),
             residual_scale=self.stage2_cfg.get("residual_scale", 0.2),
             residual_min_scale=self.stage2_cfg.get("residual_min_scale", 0.0),
+            residual_action_clip=self.stage2_cfg.get("residual_action_clip", 1.0),
         ).to(self.device)
         self._emit_log(f"Initialized Stage 2 residual actor from base checkpoint: {base_policy_path}")
 

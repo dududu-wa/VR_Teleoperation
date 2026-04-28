@@ -41,9 +41,11 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         residual_hidden_dims = [256, 128]
         residual_scale = 0.2
         residual_min_scale = 0.02
+        residual_action_clip = 1.0
         residual_warmup_iters = 2000
         style_reward_weight = 0.05
         gait_reward_weight = 0.1
+        residual_action_penalty_weight = 0.001
         gait_reward_terms = {"no_fly": 1.0}
         safety_min_base_height = 0.55
         safety_max_roll = 0.7

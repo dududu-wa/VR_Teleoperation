@@ -10,8 +10,9 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
 - `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward。
-- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward 作为日志信号，PPO 仍使用环境 task reward，并在 update 后训练 discriminator。
+- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 bounded style reward；默认 PPO 仍使用环境 task reward，Stage 2 打开时才加入安全门控后的 style/gait bonus。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
+- `rsl_rl/rsl_rl/modules/residual_actor.py`：Stage 2 residual actor。冻结 Stage 1 base actor，只训练小 residual head，最终 action 为 base action 加限幅 residual action。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
 - `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
 - `scripts/convert_lafan1_to_amp.py`：把 LaFAN1 风格 R2V2 `.npz` 转成当前项目 AMP motion 格式，保留 `base_link`、左右 `arm_yaw_link`、左右 `ankle_roll_link` 等 AMP key body。
@@ -96,12 +97,26 @@ python legged_gym/scripts/train.py --task=r2amp --headless
     -> 用 AMPPPO 替换 PPO
 ```
 
-AMP 每步会根据 discriminator 计算 style reward，但当前 PPO storage 写入的仍是环境 task reward：
+AMP 每步会根据 discriminator 计算 style reward。默认 Stage 2 关闭时，PPO storage 写入环境 task reward：
 
 ```text
 ppo_reward = task_reward
 style_reward = f(discriminator(amp_obs))
 ```
+
+Stage 2 打开时，runner 会先加载并冻结 `stage2.base_policy_path` 的 Stage 1 actor，再训练 residual actor：
+
+```text
+final_action = frozen_base_actor(obs)
+             + residual_scale * residual_actor(obs)
+
+ppo_reward = task_reward
+           + style_weight * safe_mask * bounded_style_reward
+           + gait_weight * safe_mask * gait_reward
+           - residual_penalty_weight * residual_action_l2
+```
+
+`safe_mask` 会在 base height 太低、roll/pitch 过大、非脚部接触或 DOF 贴近限位时关闭 style/gait bonus，避免重新奖励跪姿。
 
 `AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
 
@@ -662,8 +677,8 @@ AMP 版本 PPO，继承 `PPO`。
 
 关键类 `AMPPPO`：
 
-- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 style reward；PPO storage 写入原始 task reward。
-- `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP reward，训练 discriminator。
+- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 bounded style reward；Stage 2 关闭时 PPO storage 写入原始 task reward，Stage 2 打开时加入安全门控后的 style/gait bonus 和 residual penalty。
+- `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP/Stage 2 reward，训练 discriminator，并推进 residual scale warmup。
 - `_update_discriminator`：从 replay buffer 采 agent 样本，从 `env.collect_reference_motions()` 采 reference 样本，训练 LSGAN 风格 discriminator，并加 gradient penalty/logit regularization。
 
 ### `rsl_rl/rsl_rl/modules/`
@@ -676,6 +691,7 @@ AMP 版本 PPO，继承 `PPO`。
 
 - `ActorCritic`
 - `AMPDiscriminator`
+- `ResidualActor`
 
 #### `actor_critic.py`
 
@@ -707,6 +723,17 @@ Actor-Critic 封装。
 
 `sync_update=True` 时，`BaseAdaptModel` 会计算 `privileged_recon_loss`，帮助 actor 从历史观测估计隐含状态。
 
+#### `residual_actor.py`
+
+Stage 2 residual actor。
+
+关键类 `ResidualActor`：
+
+- `base_actor`：从 Stage 1 checkpoint 加载并冻结。
+- `residual_net`：小 MLP，只输出 residual action。
+- `set_residual_scale`：支持 warmup，训练初期降低 residual 对 base policy 的扰动。
+- `forward`：输出 `base_action + residual_scale * tanh_clipped_residual_action`。
+
 #### `discriminator.py`
 
 AMP 判别器。
@@ -731,6 +758,7 @@ AMP 判别器。
 关键类 `OnPolicyRunner`：
 
 - 初始化时创建 `ActorCritic`。
+- 如果 `stage2.enable=True`，调用 `_init_stage2_residual()` 加载 Stage 1 checkpoint，冻结 base actor，并包上 `ResidualActor`。
 - 默认创建 `PPO`。
 - 如果 `train_cfg` 里有 `amp`，调用 `_init_amp()` 创建 discriminator、AMP replay buffer，并把算法替换成 `AMPPPO`。
 - `learn`：执行 rollout、PPO/AMP update、课程学习、日志和 checkpoint 保存。

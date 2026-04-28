@@ -40,6 +40,7 @@ class AMPPPO(PPO):
         self.stage2_style_reward_weight = float(self.stage2_cfg.get("style_reward_weight", 0.0))
         self.stage2_gait_reward_weight = float(self.stage2_cfg.get("gait_reward_weight", 0.0))
         self.stage2_gait_reward_terms = self.stage2_cfg.get("gait_reward_terms", {})
+        self.residual_action_penalty_weight = float(self.stage2_cfg.get("residual_action_penalty_weight", 0.0))
         self.stage2_update_count = 0
         self.residual_warmup_iters = int(self.stage2_cfg.get("residual_warmup_iters", 0))
 
@@ -49,6 +50,7 @@ class AMPPPO(PPO):
         self.gait_reward_collector = []
         self.stage2_reward_collector = []
         self.stage2_safe_collector = []
+        self.residual_penalty_collector = []
         self._update_residual_scale()
 
     def process_env_step(self, rewards, dones, infos):
@@ -97,6 +99,8 @@ class AMPPPO(PPO):
                 self.stage2_style_reward_weight * gated_style_reward
                 + self.stage2_gait_reward_weight * gated_gait_reward
             )
+            residual_penalty = self._compute_residual_action_penalty(style_reward)
+            stage2_bonus = stage2_bonus - self.residual_action_penalty_weight * residual_penalty
             if rewards.dim() > 1:
                 ppo_rewards = rewards + stage2_bonus.unsqueeze(-1)
             else:
@@ -105,9 +109,11 @@ class AMPPPO(PPO):
             self.gait_reward_collector.append(gait_reward.detach())
             self.stage2_reward_collector.append(stage2_bonus.detach())
             self.stage2_safe_collector.append(safe_mask.float().detach())
+            self.residual_penalty_collector.append(residual_penalty.detach())
             infos["amp_gait_reward"] = gait_reward.detach()
             infos["amp_stage2_reward"] = stage2_bonus.detach()
             infos["amp_stage2_safe"] = safe_mask.detach()
+            infos["amp_residual_penalty"] = residual_penalty.detach()
 
         infos["amp_task_reward"] = task_reward.detach()
         infos["amp_style_reward"] = gated_style_reward.detach() if self.stage2_enabled else style_reward.detach()
@@ -143,6 +149,10 @@ class AMPPPO(PPO):
         if self.stage2_safe_collector:
             metrics["stage2_safe_fraction"] = torch.cat(self.stage2_safe_collector).mean().item()
             self.stage2_safe_collector.clear()
+
+        if self.residual_penalty_collector:
+            metrics["residual_action_penalty"] = torch.cat(self.residual_penalty_collector).mean().item()
+            self.residual_penalty_collector.clear()
 
         if self.amp_replay_buffer.count > 0:
             metrics.update(self._update_discriminator())
@@ -181,6 +191,14 @@ class AMPPPO(PPO):
             term = self._as_vector_like(reward_fn(), like)
             reward = reward + float(weight) * term
         return reward
+
+    def _compute_residual_action_penalty(self, like):
+        actor = getattr(self.actor_critic, "actor", None)
+        residual_action = getattr(actor, "last_residual_action", None)
+        if residual_action is None:
+            return torch.zeros_like(like)
+        residual_action = residual_action.to(device=like.device, dtype=like.dtype)
+        return torch.mean(residual_action.pow(2), dim=-1)
 
     def _compute_stage2_safe_mask(self, like):
         safe = torch.ones_like(like, dtype=torch.bool)

@@ -55,6 +55,8 @@ Train the AMP variant:
 python legged_gym/scripts/train.py --task=r2amp --headless
 ```
 
+Stage 2 residual AMP is behind `R2AmpCfgPPO.stage2.enable`. It requires a stable Stage 1 checkpoint in `stage2.base_policy_path`; when enabled, the runner freezes that base actor, trains a small residual actor, and adds bounded style/gait rewards with safety gating.
+
 Increase the number of parallel environments when GPU memory allows:
 
 ```bash
