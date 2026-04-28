@@ -34,3 +34,19 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         disc_reward_scale = 2.0
         disc_batch_size = 4096
         replay_buffer_size = 1000000
+
+    class stage2:
+        enable = False
+        base_policy_path = ""
+        residual_hidden_dims = [256, 128]
+        residual_scale = 0.2
+        residual_min_scale = 0.02
+        residual_warmup_iters = 2000
+        style_reward_weight = 0.05
+        gait_reward_weight = 0.1
+        gait_reward_terms = {"no_fly": 1.0}
+        safety_min_base_height = 0.55
+        safety_max_roll = 0.7
+        safety_max_pitch = 0.8
+        safety_contact_force = 1.0
+        safety_dof_limit_margin = 0.02

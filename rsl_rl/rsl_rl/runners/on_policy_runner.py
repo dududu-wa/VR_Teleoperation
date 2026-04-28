@@ -58,20 +58,23 @@ class OnPolicyRunner:
         num_actor_obs = self.env.num_partial_obs
         num_critic_obs = self.env.num_obs
 
-        actor_critic = ActorCritic(num_actor_obs,
-                                   num_critic_obs,
-                                   self.env.num_actions,
-                                   **self.policy_cfg).to(self.device)
-        
-        self.alg = PPO(actor_critic, device=self.device, **self.alg_cfg)
-        self.num_steps_per_env = self.cfg["num_steps_per_env"]
-        self.save_interval = self.cfg["save_interval"]
-
-        # init storage and model
         if self.env.include_history_steps is not None:
             actor_obs_shape = [self.env.include_history_steps, self.env.num_partial_obs]
         else:
             actor_obs_shape = [self.env.num_partial_obs]
+
+        actor_critic = ActorCritic(num_actor_obs,
+                                   num_critic_obs,
+                                   self.env.num_actions,
+                                   **self.policy_cfg).to(self.device)
+        self.stage2_cfg = train_cfg.get("stage2", {})
+        self.use_stage2_residual = bool(self.stage2_cfg.get("enable", False))
+        if self.use_stage2_residual:
+            self._init_stage2_residual(actor_critic, actor_obs_shape)
+
+        self.alg = PPO(actor_critic, device=self.device, **self.alg_cfg)
+        self.num_steps_per_env = self.cfg["num_steps_per_env"]
+        self.save_interval = self.cfg["save_interval"]
 
         self.alg.init_storage(self.env.num_envs, self.num_steps_per_env, actor_obs_shape, [self.env.num_obs], [self.env.num_actions])
 
@@ -96,14 +99,14 @@ class OnPolicyRunner:
         _, _ = self.env.reset()
 
     def _ensure_text_log_exists(self):
-        if self.text_log_path is None:
+        if getattr(self, "text_log_path", None) is None:
             return
         os.makedirs(self.log_dir, exist_ok=True)
         with open(self.text_log_path, "a", encoding="utf-8"):
             pass
 
     def _write_text_log(self, message):
-        if self.text_log_path is None:
+        if getattr(self, "text_log_path", None) is None:
             return
         self._ensure_text_log_exists()
         with open(self.text_log_path, "a", encoding="utf-8") as log_file:
@@ -114,6 +117,40 @@ class OnPolicyRunner:
     def _emit_log(self, message):
         print(message)
         self._write_text_log(message)
+
+    def _resolve_config_path(self, path):
+        if path is None:
+            return None
+        path = os.path.expandvars(str(path))
+        if "{LEGGED_GYM_ROOT_DIR}" in path:
+            from legged_gym import LEGGED_GYM_ROOT_DIR
+            path = path.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
+        if path and not os.path.isabs(path):
+            path = os.path.abspath(path)
+        return path
+
+    def _init_stage2_residual(self, actor_critic, actor_obs_shape):
+        from rsl_rl.modules import ResidualActor
+
+        base_policy_path = self._resolve_config_path(self.stage2_cfg.get("base_policy_path", ""))
+        if not base_policy_path:
+            raise RuntimeError("stage2.enable=True requires stage2.base_policy_path to point to a Stage 1 checkpoint.")
+        if not os.path.exists(base_policy_path):
+            raise FileNotFoundError(f"Stage 2 base policy checkpoint does not exist: {base_policy_path}")
+
+        loaded_dict = torch.load(base_policy_path, map_location=self.device)
+        model_state = loaded_dict.get("model_state_dict", loaded_dict)
+        actor_critic.load_state_dict(model_state)
+        actor_critic.actor = ResidualActor(
+            actor_critic.actor,
+            obs_shape=actor_obs_shape,
+            act_dim=self.env.num_actions,
+            hidden_dims=self.stage2_cfg.get("residual_hidden_dims", [256, 128]),
+            activation=self.policy_cfg.get("activation", "elu"),
+            residual_scale=self.stage2_cfg.get("residual_scale", 0.2),
+            residual_min_scale=self.stage2_cfg.get("residual_min_scale", 0.0),
+        ).to(self.device)
+        self._emit_log(f"Initialized Stage 2 residual actor from base checkpoint: {base_policy_path}")
 
     def _init_amp(self, amp_cfg):
         from rsl_rl.modules.discriminator import AMPDiscriminator
@@ -147,6 +184,7 @@ class OnPolicyRunner:
             disc_weight_decay=amp_cfg.get("disc_weight_decay", 1e-4),
             disc_reward_scale=amp_cfg.get("disc_reward_scale", 2.0),
             disc_batch_size=amp_cfg.get("disc_batch_size", 4096),
+            stage2_cfg=self.stage2_cfg,
             device=self.device,
             **self.alg_cfg,
         )

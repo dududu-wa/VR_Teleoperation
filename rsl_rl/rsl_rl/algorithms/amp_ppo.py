@@ -18,6 +18,7 @@ class AMPPPO(PPO):
         disc_weight_decay=1e-4,
         disc_reward_scale=2.0,
         disc_batch_size=4096,
+        stage2_cfg=None,
         **ppo_kwargs,
     ):
         super().__init__(actor_critic, **ppo_kwargs)
@@ -34,10 +35,21 @@ class AMPPPO(PPO):
         self.disc_logit_reg = disc_logit_reg
         self.disc_reward_scale = disc_reward_scale
         self.disc_batch_size = disc_batch_size
+        self.stage2_cfg = stage2_cfg or {}
+        self.stage2_enabled = bool(self.stage2_cfg.get("enable", False))
+        self.stage2_style_reward_weight = float(self.stage2_cfg.get("style_reward_weight", 0.0))
+        self.stage2_gait_reward_weight = float(self.stage2_cfg.get("gait_reward_weight", 0.0))
+        self.stage2_gait_reward_terms = self.stage2_cfg.get("gait_reward_terms", {})
+        self.stage2_update_count = 0
+        self.residual_warmup_iters = int(self.stage2_cfg.get("residual_warmup_iters", 0))
 
         self.task_reward_collector = []
         self.amp_obs_collector = []
         self.style_reward_collector = []
+        self.gait_reward_collector = []
+        self.stage2_reward_collector = []
+        self.stage2_safe_collector = []
+        self._update_residual_scale()
 
     def process_env_step(self, rewards, dones, infos):
         if not isinstance(infos, dict):
@@ -70,18 +82,42 @@ class AMPPPO(PPO):
 
         with torch.no_grad():
             disc_logit = self.discriminator(amp_obs)
-            style_reward = -torch.log(1 - torch.sigmoid(disc_logit) + 1e-7)
+            style_reward = torch.clamp(1.0 - 0.25 * (disc_logit - 1.0).pow(2), min=0.0)
             style_reward = (style_reward * self.disc_reward_scale).squeeze(-1)
 
+        safe_mask = self._compute_stage2_safe_mask(style_reward)
+        gated_style_reward = style_reward * safe_mask.float()
         self.style_reward_collector.append(style_reward.detach())
 
-        infos["amp_task_reward"] = task_reward.detach()
-        infos["amp_style_reward"] = style_reward.detach()
+        ppo_rewards = rewards
+        if self.stage2_enabled:
+            gait_reward = self._compute_gait_reward(style_reward)
+            gated_gait_reward = gait_reward * safe_mask.float()
+            stage2_bonus = (
+                self.stage2_style_reward_weight * gated_style_reward
+                + self.stage2_gait_reward_weight * gated_gait_reward
+            )
+            if rewards.dim() > 1:
+                ppo_rewards = rewards + stage2_bonus.unsqueeze(-1)
+            else:
+                ppo_rewards = rewards + stage2_bonus
 
-        super().process_env_step(rewards, dones, infos)
+            self.gait_reward_collector.append(gait_reward.detach())
+            self.stage2_reward_collector.append(stage2_bonus.detach())
+            self.stage2_safe_collector.append(safe_mask.float().detach())
+            infos["amp_gait_reward"] = gait_reward.detach()
+            infos["amp_stage2_reward"] = stage2_bonus.detach()
+            infos["amp_stage2_safe"] = safe_mask.detach()
+
+        infos["amp_task_reward"] = task_reward.detach()
+        infos["amp_style_reward"] = gated_style_reward.detach() if self.stage2_enabled else style_reward.detach()
+
+        super().process_env_step(ppo_rewards, dones, infos)
 
     def update(self):
         metrics = super().update()
+        self.stage2_update_count += 1
+        self._update_residual_scale()
 
         if self.amp_obs_collector:
             all_amp_obs = torch.cat(self.amp_obs_collector, dim=0)
@@ -96,10 +132,89 @@ class AMPPPO(PPO):
             metrics["style_reward"] = torch.cat(self.style_reward_collector).mean().item()
             self.style_reward_collector.clear()
 
+        if self.gait_reward_collector:
+            metrics["gait_reward"] = torch.cat(self.gait_reward_collector).mean().item()
+            self.gait_reward_collector.clear()
+
+        if self.stage2_reward_collector:
+            metrics["stage2_reward"] = torch.cat(self.stage2_reward_collector).mean().item()
+            self.stage2_reward_collector.clear()
+
+        if self.stage2_safe_collector:
+            metrics["stage2_safe_fraction"] = torch.cat(self.stage2_safe_collector).mean().item()
+            self.stage2_safe_collector.clear()
+
         if self.amp_replay_buffer.count > 0:
             metrics.update(self._update_discriminator())
 
         return metrics
+
+    def _update_residual_scale(self):
+        actor = getattr(self.actor_critic, "actor", None)
+        if not self.stage2_enabled or not hasattr(actor, "set_residual_scale"):
+            return
+        target_scale = float(getattr(actor, "target_residual_scale", self.stage2_cfg.get("residual_scale", 0.2)))
+        if self.residual_warmup_iters <= 0:
+            actor.set_residual_scale(target_scale)
+            return
+        progress = min(1.0, max(1, self.stage2_update_count) / self.residual_warmup_iters)
+        actor.set_residual_scale(target_scale * progress)
+
+    def _as_vector_like(self, values, like):
+        if not torch.is_tensor(values):
+            values = torch.tensor(values, dtype=like.dtype, device=like.device)
+        else:
+            values = values.to(device=like.device, dtype=like.dtype)
+        if values.dim() > 1:
+            values = values.view(values.shape[0], -1)
+            if values.shape[1] != 1:
+                raise ValueError(f"Expected one reward value per env, got shape {tuple(values.shape)}")
+            values = values.squeeze(-1)
+        return values
+
+    def _compute_gait_reward(self, like):
+        reward = torch.zeros_like(like)
+        for name, weight in self.stage2_gait_reward_terms.items():
+            reward_fn = getattr(self.env, f"_reward_{name}", None)
+            if reward_fn is None:
+                continue
+            term = self._as_vector_like(reward_fn(), like)
+            reward = reward + float(weight) * term
+        return reward
+
+    def _compute_stage2_safe_mask(self, like):
+        safe = torch.ones_like(like, dtype=torch.bool)
+        env = self.env
+
+        min_base_height = self.stage2_cfg.get("safety_min_base_height", None)
+        if min_base_height is not None and hasattr(env, "root_states"):
+            if hasattr(env, "heights_below_base"):
+                base_height = torch.mean(env.root_states[:, 2].unsqueeze(1) - env.heights_below_base, dim=-1)
+            else:
+                base_height = env.root_states[:, 2]
+            safe &= base_height >= float(min_base_height)
+
+        max_roll = self.stage2_cfg.get("safety_max_roll", None)
+        max_pitch = self.stage2_cfg.get("safety_max_pitch", None)
+        if hasattr(env, "rpy"):
+            if max_roll is not None:
+                safe &= torch.abs(env.rpy[:, 0]) <= float(max_roll)
+            if max_pitch is not None:
+                safe &= torch.abs(env.rpy[:, 1]) <= float(max_pitch)
+
+        contact_force = self.stage2_cfg.get("safety_contact_force", None)
+        if contact_force is not None and hasattr(env, "contact_forces") and hasattr(env, "penalised_contact_indices"):
+            contact_norm = torch.norm(env.contact_forces[:, env.penalised_contact_indices, :], dim=-1)
+            safe &= ~torch.any(contact_norm > float(contact_force), dim=1)
+
+        dof_margin = float(self.stage2_cfg.get("safety_dof_limit_margin", 0.0))
+        if dof_margin > 0 and hasattr(env, "dof_pos_limits") and hasattr(env, "dof_pos"):
+            lower = env.dof_pos_limits[:, 0] + dof_margin
+            upper = env.dof_pos_limits[:, 1] - dof_margin
+            near_limit = torch.any((env.dof_pos < lower) | (env.dof_pos > upper), dim=1)
+            safe &= ~near_limit
+
+        return safe
 
     def _update_discriminator(self):
         metrics = defaultdict(float)
