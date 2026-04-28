@@ -1,16 +1,16 @@
 # AMP 相关文件速览
 
-AMP 是本项目在普通 PPO 任务外加入“参考动作风格奖励”的训练路径。它不是一个完全独立的环境，而是通过 `r2amp` 任务配置打开：环境继续使用 `R2InterruptRobot`，但会额外加载 motion 数据、生成 `amp_obs`，并在 `rsl_rl` 侧把普通 `PPO` 替换成 `AMPPPO`。
+AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路径。它不是一个完全独立的环境，而是通过 `r2amp` 任务配置打开：环境继续使用 `R2InterruptRobot`，但会额外加载 motion 数据、生成 `amp_obs`，并在 `rsl_rl` 侧把普通 `PPO` 替换成 `AMPPPO`。
 
 最该先看的 AMP 文件：
 
-- `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、AMP observation 维度、关键 body、task/style reward 权重、discriminator 超参和 best checkpoint 保存策略。
+- `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、AMP observation 维度、关键 body、discriminator 超参和 best checkpoint 保存策略。
 - `legged_gym/envs/r2/r2.py`：环境侧 AMP 实现。`compute_amp_obs()` 拼单帧 AMP 观测；`R2Robot._init_buffers()` 在 `cfg.amp.enable=True` 时创建 `MotionLoader`、AMP history buffer 和 body/dof 索引；`compute_amp_observations()` 把当前策略状态写入 `infos["amp_obs"]`；`collect_reference_motions()` 从参考 motion 中采样 discriminator 的真样本。
 - `legged_gym/utils/motion_loader.py`：AMP motion 加载器。扫描 `legged_gym/motions/*.npz`，校验多 clip 的 `dof_names/body_names/dt` 一致，并按时间插值采样 DOF、body pose 和速度。
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
-- `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中也记录 mixed/style reward。
-- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward，将 task reward 和 style reward 混合后走 PPO，并在 update 后训练 discriminator。
+- `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward。
+- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward 作为日志信号，PPO 仍使用环境 task reward，并在 update 后训练 discriminator。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
 - `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
@@ -31,7 +31,7 @@ AMP 数据和训练的最短路径是：
   -> R2Robot.compute_amp_observations()
   -> infos["amp_obs"]
   -> AMPPPO.process_env_step()
-  -> style reward + task reward
+  -> task reward 写入 PPO storage，style reward 只记录日志
   -> PPO update + discriminator update
 ```
 
@@ -96,11 +96,11 @@ python legged_gym/scripts/train.py --task=r2amp --headless
     -> 用 AMPPPO 替换 PPO
 ```
 
-AMP 每步会把环境 task reward 和 discriminator style reward 混合：
+AMP 每步会根据 discriminator 计算 style reward，但当前 PPO storage 写入的仍是环境 task reward：
 
 ```text
-mixed_reward = task_reward_weight * task_reward
-             + style_reward_weight * style_reward
+ppo_reward = task_reward
+style_reward = f(discriminator(amp_obs))
 ```
 
 `AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
@@ -126,7 +126,7 @@ python legged_gym/scripts/play.py --task=r2amp --checkpoint -3
 - 项目定位：R2/HugWBC 的 Isaac Gym 训练和回放栈。
 - 安装步骤：Conda、PyTorch、外部 Isaac Gym Preview 4、`pip install -e rsl_rl`。
 - 训练命令：`r2int` 和 `r2amp`。
-- 回放命令：`play.py` 加载最新 checkpoint、best task checkpoint、best mixed checkpoint。
+- 回放命令：`play.py` 加载最新 checkpoint、best task checkpoint，兼容旧 run 的 best mixed checkpoint。
 - AMP motion 数据契约和转换脚本入口。
 - 顶层 repository map。
 
@@ -277,7 +277,7 @@ R2 基础配置。
 AMP 配置层。
 
 - `R2AmpCfg` 继承 `R2InterruptCfg`，新增 `amp.enable=True`、motion 目录、AMP obs 维度、history 步数、key body 名。
-- `R2AmpCfgPPO` 继承 `R2InterruptCfgPPO`，新增 AMP 判别器和混合奖励超参。
+- `R2AmpCfgPPO` 继承 `R2InterruptCfgPPO`，新增 AMP 判别器和 style reward 统计相关超参。
 
 重要字段：
 
@@ -286,8 +286,6 @@ AMP 配置层。
 - `num_amp_obs_steps = 2`
 - `key_body_names = ["left_arm_yaw_link", "right_arm_yaw_link", "left_ankle_roll_link", "right_ankle_roll_link"]`
 - `reference_body_name = "base_link"`
-- `task_reward_weight = 0.6`
-- `style_reward_weight = 0.4`
 - `disc_hidden_dims = [1024, 512]`
 
 ##### `r2.py`
@@ -664,7 +662,7 @@ AMP 版本 PPO，继承 `PPO`。
 
 关键类 `AMPPPO`：
 
-- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 style reward，并和 task reward 混合后写入 PPO storage。
+- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 style reward；PPO storage 写入原始 task reward。
 - `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP reward，训练 discriminator。
 - `_update_discriminator`：从 replay buffer 采 agent 样本，从 `env.collect_reference_motions()` 采 reference 样本，训练 LSGAN 风格 discriminator，并加 gradient penalty/logit regularization。
 
@@ -737,7 +735,7 @@ AMP 判别器。
 - 如果 `train_cfg` 里有 `amp`，调用 `_init_amp()` 创建 discriminator、AMP replay buffer，并把算法替换成 `AMPPPO`。
 - `learn`：执行 rollout、PPO/AMP update、课程学习、日志和 checkpoint 保存。
 - `log`：写 TensorBoard 和 `train.log`。
-- `_maybe_save_best_checkpoints`：保存 `model_best_task.pt` 和 `model_best_mixed.pt`。
+- `_maybe_save_best_checkpoints`：保存 `model_best_task.pt`。
 - `save/load`：保存/加载模型、optimizer、AMP discriminator。
 - `get_inference_policy`：返回 eval 模式 policy。
 
@@ -1039,7 +1037,7 @@ AMP 任务实验输出。
 #### `Apr17_15-18-11_r2v2_amp_version4/`
 
 - `events.out.tfevents...`：TensorBoard event 文件。
-- `model_best_mixed.pt`：mixed reward 最佳 checkpoint，可用 `--checkpoint -3` 加载。
+- `model_best_mixed.pt`：旧训练 run 可能留下的 mixed reward 最佳 checkpoint，可用 `--checkpoint -3` 加载。
 - `train.log`：runner 写出的训练文本日志。
 
 ### `logs/r2_interrupt/`

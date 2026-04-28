@@ -1,6 +1,6 @@
 # VR Teleoperation / HugWBC R2 Training
 
-This repository contains an Isaac Gym based training and playback stack for the R2 humanoid controller. It keeps the original HugWBC structure, adds R2-specific tasks, and includes an AMP training path for style rewards from reference motion clips.
+This repository contains an Isaac Gym based training and playback stack for the R2 humanoid controller. It keeps the original HugWBC structure, adds R2-specific tasks, and includes an AMP path that trains a discriminator from reference motion clips.
 
 ## Project Links
 
@@ -86,9 +86,9 @@ Checkpoint shortcuts:
 
 - `--checkpoint -1`: latest numeric checkpoint, such as `model_2000.pt`.
 - `--checkpoint -2`: `model_best_task.pt`, if that file exists.
-- `--checkpoint -3`: `model_best_mixed.pt`, if that file exists.
+- `--checkpoint -3`: `model_best_mixed.pt`, if an older run produced that file.
 
-The `r2amp` config saves best task and best mixed checkpoints by default. Other tasks may only have numeric `model_<iteration>.pt` checkpoints unless their config enables best-checkpoint saving.
+The `r2amp` config saves the best task checkpoint by default. Other tasks may only have numeric `model_<iteration>.pt` checkpoints unless their config enables best-checkpoint saving.
 
 Playback starts with the gait preset selected by `R2_PLAY_INITIAL_GAIT`. Supported values are `stand`, `jump`, `walk`, and `fast_walk`.
 

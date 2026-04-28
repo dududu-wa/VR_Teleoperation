@@ -12,8 +12,6 @@ class AMPPPO(PPO):
         discriminator,
         amp_replay_buffer,
         env,
-        task_reward_weight=0.3,
-        style_reward_weight=0.7,
         disc_learning_rate=5e-5,
         disc_grad_penalty=5.0,
         disc_logit_reg=0.05,
@@ -32,8 +30,6 @@ class AMPPPO(PPO):
         self.amp_replay_buffer = amp_replay_buffer
         self.env = env
 
-        self.task_reward_weight = task_reward_weight
-        self.style_reward_weight = style_reward_weight
         self.disc_grad_penalty = disc_grad_penalty
         self.disc_logit_reg = disc_logit_reg
         self.disc_reward_scale = disc_reward_scale
@@ -42,7 +38,6 @@ class AMPPPO(PPO):
         self.task_reward_collector = []
         self.amp_obs_collector = []
         self.style_reward_collector = []
-        self.mixed_reward_collector = []
 
     def process_env_step(self, rewards, dones, infos):
         if not isinstance(infos, dict):
@@ -79,26 +74,11 @@ class AMPPPO(PPO):
             style_reward = (style_reward * self.disc_reward_scale).squeeze(-1)
 
         self.style_reward_collector.append(style_reward.detach())
-        if rewards.dim() > 1:
-            style_reward_for_mix = style_reward.unsqueeze(-1)
-        else:
-            style_reward_for_mix = style_reward
-        mixed_rewards = self.task_reward_weight * rewards + self.style_reward_weight * style_reward_for_mix
-        mixed_reward_log = mixed_rewards
-        if mixed_reward_log.dim() > 1:
-            mixed_reward_log = mixed_reward_log.view(mixed_reward_log.shape[0], -1)
-            if mixed_reward_log.shape[1] != 1:
-                raise ValueError(
-                    f"Expected one mixed reward per env, got reward shape {mixed_rewards.shape}"
-                )
-            mixed_reward_log = mixed_reward_log.squeeze(-1)
-        self.mixed_reward_collector.append(mixed_reward_log.detach())
 
         infos["amp_task_reward"] = task_reward.detach()
         infos["amp_style_reward"] = style_reward.detach()
-        infos["amp_mixed_reward"] = mixed_reward_log.detach()
 
-        super().process_env_step(mixed_rewards, dones, infos)
+        super().process_env_step(rewards, dones, infos)
 
     def update(self):
         metrics = super().update()
@@ -115,10 +95,6 @@ class AMPPPO(PPO):
         if self.style_reward_collector:
             metrics["style_reward"] = torch.cat(self.style_reward_collector).mean().item()
             self.style_reward_collector.clear()
-
-        if self.mixed_reward_collector:
-            metrics["mixed_reward"] = torch.cat(self.mixed_reward_collector).mean().item()
-            self.mixed_reward_collector.clear()
 
         if self.amp_replay_buffer.count > 0:
             metrics.update(self._update_discriminator())
