@@ -128,6 +128,9 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             cfg_train.runner.load_run = args.load_run
         if args.checkpoint is not None:
             cfg_train.runner.checkpoint = args.checkpoint
+        if getattr(args, "stage2_base_policy", None) is not None:
+            cfg_train.stage2.enable = True
+            cfg_train.stage2.base_policy_path = args.stage2_base_policy
 
     return env_cfg, cfg_train
 
@@ -155,6 +158,7 @@ def get_args():
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
         {"name": "--sim_joystick", "action": "store_true", "default":False, "help": "Sample commands from sim joystick"},
+        {"name": "--stage2_base_policy", "type": str, "default": None, "help": "Path to Stage 1 checkpoint to use as frozen base policy for Stage 2 residual training. Enables stage2 automatically."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(
