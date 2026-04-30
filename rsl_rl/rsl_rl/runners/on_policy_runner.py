@@ -343,6 +343,10 @@ class OnPolicyRunner:
         if locs['metrics']:
             for k,v in locs['metrics'].items():
                 self.writer.add_scalar('Loss/' + k, v, locs['it'])
+            if self.use_stage2_residual:
+                self.writer.add_scalar('Stage2/stage2_reward', locs['metrics'].get('stage2_reward', 0), locs['it'])
+                self.writer.add_scalar('Stage2/stage2_safe_fraction', locs['metrics'].get('stage2_safe_fraction', 0), locs['it'])
+                self.writer.add_scalar('Stage2/residual_penalty', locs['metrics'].get('residual_penalty', 0), locs['it'])
 
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
@@ -374,6 +378,22 @@ class OnPolicyRunner:
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
             if len(locs['style_rewbuffer']) > 0:
                 log_string += f"""{'Mean style reward:':>{pad}} {statistics.mean(locs['style_rewbuffer']):.2f}\n"""
+            if self.use_stage2_residual and locs['metrics']:
+                metrics = locs['metrics']
+                if 'stage2_reward' in metrics:
+                    log_string += f"""{'Mean stage2 bonus:':>{pad}} {metrics['stage2_reward']:.4f}\n"""
+                if 'stage2_safe_fraction' in metrics:
+                    log_string += f"""{'Stage2 safe fraction:':>{pad}} {metrics['stage2_safe_fraction']:.4f}\n"""
+                for safe_key in ['safe_height', 'safe_roll', 'safe_pitch', 'safe_contact', 'safe_dof']:
+                    if safe_key in metrics:
+                        log_string += f"""{'  ' + safe_key + ':':>{pad}} {metrics[safe_key]:.4f}\n"""
+                if 'max_penalised_contact_force' in metrics:
+                    log_string += f"""{'  max_contact_force:':>{pad}} {metrics['max_penalised_contact_force']:.2f}\n"""
+                if 'residual_action_penalty' in metrics:
+                    log_string += f"""{'Mean residual penalty:':>{pad}} {metrics['residual_action_penalty']:.4f}\n"""
+                actor = getattr(self.alg.actor_critic, 'actor', None)
+                if actor is not None and hasattr(actor, 'residual_scale'):
+                    log_string += f"""{'Residual scale:':>{pad}} {float(actor.residual_scale):.4f}\n"""
         else:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""

@@ -52,3 +52,6 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         safety_max_pitch = 0.8
         safety_contact_force = 1.0
         safety_dof_limit_margin = 0.02
+        # 只对 hip/knee DOF 做限位检查，防止跪地
+        # 排除 ankle(4,5,10,11)、waist(12,13)、手臂(14-23)
+        safety_dof_check_indices = [0, 1, 2, 3, 6, 7, 8, 9]

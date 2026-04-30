@@ -154,6 +154,10 @@ class AMPPPO(PPO):
             metrics["residual_action_penalty"] = torch.cat(self.residual_penalty_collector).mean().item()
             self.residual_penalty_collector.clear()
 
+        if hasattr(self, "_last_safe_breakdown") and self._last_safe_breakdown:
+            for k, v in self._last_safe_breakdown.items():
+                metrics[k] = v
+
         if self.amp_replay_buffer.count > 0:
             metrics.update(self._update_discriminator())
 
@@ -203,6 +207,7 @@ class AMPPPO(PPO):
     def _compute_stage2_safe_mask(self, like):
         safe = torch.ones_like(like, dtype=torch.bool)
         env = self.env
+        breakdown = {}
 
         min_base_height = self.stage2_cfg.get("safety_min_base_height", None)
         if min_base_height is not None and hasattr(env, "root_states"):
@@ -210,28 +215,47 @@ class AMPPPO(PPO):
                 base_height = torch.mean(env.root_states[:, 2].unsqueeze(1) - env.heights_below_base, dim=-1)
             else:
                 base_height = env.root_states[:, 2]
-            safe &= base_height >= float(min_base_height)
+            height_ok = base_height >= float(min_base_height)
+            safe &= height_ok
+            breakdown["safe_height"] = height_ok.float().mean().item()
 
         max_roll = self.stage2_cfg.get("safety_max_roll", None)
         max_pitch = self.stage2_cfg.get("safety_max_pitch", None)
         if hasattr(env, "rpy"):
             if max_roll is not None:
-                safe &= torch.abs(env.rpy[:, 0]) <= float(max_roll)
+                roll_ok = torch.abs(env.rpy[:, 0]) <= float(max_roll)
+                safe &= roll_ok
+                breakdown["safe_roll"] = roll_ok.float().mean().item()
             if max_pitch is not None:
-                safe &= torch.abs(env.rpy[:, 1]) <= float(max_pitch)
+                pitch_ok = torch.abs(env.rpy[:, 1]) <= float(max_pitch)
+                safe &= pitch_ok
+                breakdown["safe_pitch"] = pitch_ok.float().mean().item()
 
         contact_force = self.stage2_cfg.get("safety_contact_force", None)
         if contact_force is not None and hasattr(env, "contact_forces") and hasattr(env, "penalised_contact_indices"):
             contact_norm = torch.norm(env.contact_forces[:, env.penalised_contact_indices, :], dim=-1)
-            safe &= ~torch.any(contact_norm > float(contact_force), dim=1)
+            contact_ok = ~torch.any(contact_norm > float(contact_force), dim=1)
+            safe &= contact_ok
+            breakdown["safe_contact"] = contact_ok.float().mean().item()
+            breakdown["max_penalised_contact_force"] = contact_norm.max().item()
 
         dof_margin = float(self.stage2_cfg.get("safety_dof_limit_margin", 0.0))
         if dof_margin > 0 and hasattr(env, "dof_pos_limits") and hasattr(env, "dof_pos"):
-            lower = env.dof_pos_limits[:, 0] + dof_margin
-            upper = env.dof_pos_limits[:, 1] - dof_margin
-            near_limit = torch.any((env.dof_pos < lower) | (env.dof_pos > upper), dim=1)
-            safe &= ~near_limit
+            dof_check_indices = self.stage2_cfg.get("safety_dof_check_indices", None)
+            if dof_check_indices is not None:
+                idx = dof_check_indices
+                lower = env.dof_pos_limits[idx, 0] + dof_margin
+                upper = env.dof_pos_limits[idx, 1] - dof_margin
+                near_limit = torch.any((env.dof_pos[:, idx] < lower) | (env.dof_pos[:, idx] > upper), dim=1)
+            else:
+                lower = env.dof_pos_limits[:, 0] + dof_margin
+                upper = env.dof_pos_limits[:, 1] - dof_margin
+                near_limit = torch.any((env.dof_pos < lower) | (env.dof_pos > upper), dim=1)
+            dof_ok = ~near_limit
+            safe &= dof_ok
+            breakdown["safe_dof"] = dof_ok.float().mean().item()
 
+        self._last_safe_breakdown = breakdown
         return safe
 
     def _update_discriminator(self):
