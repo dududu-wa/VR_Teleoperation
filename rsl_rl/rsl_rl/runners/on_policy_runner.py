@@ -146,6 +146,8 @@ class OnPolicyRunner:
             disc_logit_reg=amp_cfg.get("disc_logit_reg", 0.05),
             disc_weight_decay=amp_cfg.get("disc_weight_decay", 1e-4),
             disc_reward_scale=amp_cfg.get("disc_reward_scale", 2.0),
+            style_reward_min=amp_cfg.get("style_reward_min", -1.0),
+            style_reward_max=amp_cfg.get("style_reward_max", 5.0),
             disc_batch_size=amp_cfg.get("disc_batch_size", 4096),
             device=self.device,
             **self.alg_cfg,

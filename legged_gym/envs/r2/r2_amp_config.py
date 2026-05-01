@@ -32,5 +32,7 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         disc_logit_reg = 0.05
         disc_weight_decay = 1e-4
         disc_reward_scale = 2.0
+        style_reward_min = -1.0
+        style_reward_max = 5.0
         disc_batch_size = 4096
         replay_buffer_size = 1000000

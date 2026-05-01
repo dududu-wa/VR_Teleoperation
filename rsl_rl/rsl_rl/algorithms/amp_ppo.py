@@ -17,6 +17,8 @@ class AMPPPO(PPO):
         disc_logit_reg=0.05,
         disc_weight_decay=1e-4,
         disc_reward_scale=2.0,
+        style_reward_min=-1.0,
+        style_reward_max=5.0,
         disc_batch_size=4096,
         **ppo_kwargs,
     ):
@@ -33,11 +35,14 @@ class AMPPPO(PPO):
         self.disc_grad_penalty = disc_grad_penalty
         self.disc_logit_reg = disc_logit_reg
         self.disc_reward_scale = disc_reward_scale
+        self.style_reward_min = style_reward_min
+        self.style_reward_max = style_reward_max
         self.disc_batch_size = disc_batch_size
 
         self.task_reward_collector = []
         self.amp_obs_collector = []
         self.style_reward_collector = []
+        self.mixed_reward_collector = []
 
     def process_env_step(self, rewards, dones, infos):
         if not isinstance(infos, dict):
@@ -69,16 +74,25 @@ class AMPPPO(PPO):
         self.task_reward_collector.append(task_reward.detach())
 
         with torch.no_grad():
-            disc_logit = self.discriminator(amp_obs)
-            style_reward = -torch.log(1 - torch.sigmoid(disc_logit) + 1e-7)
+            disc_score = self.discriminator(amp_obs)
+            style_reward = 1.0 - 0.25 * torch.square(disc_score - 1.0)
             style_reward = (style_reward * self.disc_reward_scale).squeeze(-1)
+            style_reward = torch.clamp(
+                style_reward,
+                min=self.style_reward_min,
+                max=self.style_reward_max,
+            )
+
+        mixed_reward = task_reward + style_reward
 
         self.style_reward_collector.append(style_reward.detach())
+        self.mixed_reward_collector.append(mixed_reward.detach())
 
         infos["amp_task_reward"] = task_reward.detach()
         infos["amp_style_reward"] = style_reward.detach()
+        infos["amp_mixed_reward"] = mixed_reward.detach()
 
-        super().process_env_step(rewards, dones, infos)
+        super().process_env_step(mixed_reward, dones, infos)
 
     def update(self):
         metrics = super().update()
@@ -95,6 +109,10 @@ class AMPPPO(PPO):
         if self.style_reward_collector:
             metrics["style_reward"] = torch.cat(self.style_reward_collector).mean().item()
             self.style_reward_collector.clear()
+
+        if self.mixed_reward_collector:
+            metrics["mixed_reward"] = torch.cat(self.mixed_reward_collector).mean().item()
+            self.mixed_reward_collector.clear()
 
         if self.amp_replay_buffer.count > 0:
             metrics.update(self._update_discriminator())
