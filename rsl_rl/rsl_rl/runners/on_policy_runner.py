@@ -289,7 +289,8 @@ class OnPolicyRunner:
                             rewbuffer.extend(cur_reward_sum[new_ids].cpu().numpy().tolist())
                             lenbuffer.extend(cur_episode_length[new_ids].cpu().numpy().tolist())
                             if style_rewards is not None:
-                                style_rewbuffer.extend(cur_style_reward_sum[new_ids].cpu().numpy().tolist())
+                                ep_len = cur_episode_length[new_ids].clamp(min=1)
+                                style_rewbuffer.extend((cur_style_reward_sum[new_ids] / ep_len).cpu().numpy().tolist())
                             cur_reward_sum[new_ids] = 0
                             cur_episode_length[new_ids] = 0
                             cur_style_reward_sum[new_ids] = 0
@@ -391,6 +392,9 @@ class OnPolicyRunner:
                     log_string += f"""{'  max_contact_force:':>{pad}} {metrics['max_penalised_contact_force']:.2f}\n"""
                 if 'residual_action_penalty' in metrics:
                     log_string += f"""{'Mean residual penalty:':>{pad}} {metrics['residual_action_penalty']:.4f}\n"""
+                if 'arm_style_penalty' in metrics:
+                    log_string += f"""{'Arm style penalty:':>{pad}} {metrics['arm_style_penalty']:.4f}\n"""
+                    self.writer.add_scalar('Stage2/arm_style_penalty', metrics['arm_style_penalty'], locs['it'])
                 actor = getattr(self.alg.actor_critic, 'actor', None)
                 if actor is not None and hasattr(actor, 'residual_scale'):
                     log_string += f"""{'Residual scale:':>{pad}} {float(actor.residual_scale):.4f}\n"""

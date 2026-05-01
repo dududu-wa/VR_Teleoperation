@@ -43,8 +43,8 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         residual_min_scale = 0.02
         residual_action_clip = 1.0
         residual_warmup_iters = 2000
-        style_reward_weight = 0.05
-        gait_reward_weight = 0.1
+        style_reward_weight = 3.0
+        gait_reward_weight = 1.0
         residual_action_penalty_weight = 0.001
         gait_reward_terms = {"no_fly": 1.0}
         safety_min_base_height = 0.55
@@ -55,3 +55,8 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         # 只对 hip/knee DOF 做限位检查，防止跪地
         # 排除 ankle(4,5,10,11)、waist(12,13)、手臂(14-23)
         safety_dof_check_indices = [0, 1, 2, 3, 6, 7, 8, 9]
+        # 手臂 DOF 软惩罚：接近限位时按比例衰减 style reward
+        # indices 14-23 对应左右手臂 5+5 个关节
+        arm_dof_indices = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+        arm_dof_limit_margin = 0.1          # 距限位多近开始衰减 (rad)
+        arm_style_penalty_scale = 5.0       # 衰减灵敏度，越大惩罚越陡

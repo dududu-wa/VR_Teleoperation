@@ -51,6 +51,7 @@ class AMPPPO(PPO):
         self.stage2_reward_collector = []
         self.stage2_safe_collector = []
         self.residual_penalty_collector = []
+        self.arm_penalty_collector = []
         self._update_residual_scale()
 
     def process_env_step(self, rewards, dones, infos):
@@ -88,7 +89,8 @@ class AMPPPO(PPO):
             style_reward = (style_reward * self.disc_reward_scale).squeeze(-1)
 
         safe_mask = self._compute_stage2_safe_mask(style_reward)
-        gated_style_reward = style_reward * safe_mask.float()
+        arm_penalty = self._compute_arm_style_penalty()
+        gated_style_reward = style_reward * safe_mask.float() * arm_penalty
         self.style_reward_collector.append(style_reward.detach())
 
         ppo_rewards = rewards
@@ -110,6 +112,8 @@ class AMPPPO(PPO):
             self.stage2_reward_collector.append(stage2_bonus.detach())
             self.stage2_safe_collector.append(safe_mask.float().detach())
             self.residual_penalty_collector.append(residual_penalty.detach())
+            if torch.is_tensor(arm_penalty):
+                self.arm_penalty_collector.append(arm_penalty.detach())
             infos["amp_gait_reward"] = gait_reward.detach()
             infos["amp_stage2_reward"] = stage2_bonus.detach()
             infos["amp_stage2_safe"] = safe_mask.detach()
@@ -153,6 +157,10 @@ class AMPPPO(PPO):
         if self.residual_penalty_collector:
             metrics["residual_action_penalty"] = torch.cat(self.residual_penalty_collector).mean().item()
             self.residual_penalty_collector.clear()
+
+        if self.arm_penalty_collector:
+            metrics["arm_style_penalty"] = torch.cat(self.arm_penalty_collector).mean().item()
+            self.arm_penalty_collector.clear()
 
         if hasattr(self, "_last_safe_breakdown") and self._last_safe_breakdown:
             for k, v in self._last_safe_breakdown.items():
@@ -257,6 +265,32 @@ class AMPPPO(PPO):
 
         self._last_safe_breakdown = breakdown
         return safe
+
+    def _compute_arm_style_penalty(self):
+        """Soft penalty (0~1) that attenuates style reward when arm DOFs approach limits."""
+        env = self.env
+        arm_indices = self.stage2_cfg.get("arm_dof_indices", None)
+        if arm_indices is None or not hasattr(env, "dof_pos") or not hasattr(env, "dof_pos_limits"):
+            return 1.0
+
+        margin = float(self.stage2_cfg.get("arm_dof_limit_margin", 0.1))
+        scale = float(self.stage2_cfg.get("arm_style_penalty_scale", 5.0))
+
+        idx = arm_indices
+        pos = env.dof_pos[:, idx]                       # (num_envs, num_arm_dofs)
+        lower = env.dof_pos_limits[idx, 0] + margin     # safe lower bound
+        upper = env.dof_pos_limits[idx, 1] - margin     # safe upper bound
+
+        # How far each joint exceeds the safe zone (0 if inside)
+        over_lower = (lower - pos).clamp(min=0.0)       # positive when below safe lower
+        over_upper = (pos - upper).clamp(min=0.0)       # positive when above safe upper
+        violation = over_lower + over_upper              # (num_envs, num_arm_dofs)
+
+        # Sum across arm joints, then apply exp decay
+        total_violation = violation.sum(dim=1)           # (num_envs,)
+        penalty = torch.exp(-scale * total_violation)    # 1.0 when safe, → 0 when at limits
+
+        return penalty
 
     def _update_discriminator(self):
         metrics = defaultdict(float)
