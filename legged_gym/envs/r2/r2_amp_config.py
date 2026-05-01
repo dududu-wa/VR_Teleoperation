@@ -45,6 +45,7 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         residual_warmup_iters = 2000
         style_reward_weight = 3.0
         gait_reward_weight = 1.0
+        stage2_reward_dt_scale = True
         residual_action_penalty_weight = 0.001
         gait_reward_terms = {"no_fly": 1.0}
         safety_min_base_height = 0.55
@@ -60,3 +61,5 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         arm_dof_indices = [14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
         arm_dof_limit_margin = 0.1          # 距限位多近开始衰减 (rad)
         arm_style_penalty_scale = 5.0       # 衰减灵敏度，越大惩罚越陡
+        arm_limit_penalty_weight = 1.0
+        arm_residual_multiplier = 3.0

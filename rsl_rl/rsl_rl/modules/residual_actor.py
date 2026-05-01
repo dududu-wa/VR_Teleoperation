@@ -18,6 +18,7 @@ class ResidualActor(nn.Module):
         residual_scale=0.2,
         residual_min_scale=0.0,
         residual_action_clip=1.0,
+        residual_action_multipliers=None,
     ):
         super().__init__()
         if hidden_dims is None:
@@ -35,9 +36,26 @@ class ResidualActor(nn.Module):
         self.target_residual_scale = float(residual_scale)
         self.residual_min_scale = float(residual_min_scale)
         self.residual_action_clip = float(residual_action_clip)
+        self.register_buffer(
+            "residual_action_multipliers",
+            self._make_action_multipliers(residual_action_multipliers, act_dim),
+            persistent=False,
+        )
         self.z = 0
         self.last_base_action = None
         self.last_residual_action = None
+
+    def _make_action_multipliers(self, multipliers, act_dim):
+        if multipliers is None:
+            return torch.ones(act_dim, dtype=torch.float)
+        multipliers = torch.as_tensor(multipliers, dtype=torch.float).flatten()
+        if multipliers.numel() != act_dim:
+            raise ValueError(
+                f"Expected {act_dim} residual action multipliers, got {multipliers.numel()}"
+            )
+        if torch.any(multipliers < 0):
+            raise ValueError("Residual action multipliers must be non-negative")
+        return multipliers
 
     def _zero_init_last_layer(self):
         for layer in reversed(self.residual_net):
@@ -59,6 +77,7 @@ class ResidualActor(nn.Module):
         residual_action = self.residual_net(residual_input)
         if self.residual_action_clip > 0:
             residual_action = self.residual_action_clip * torch.tanh(residual_action / self.residual_action_clip)
+        residual_action = residual_action * self.residual_action_multipliers
         self.z = getattr(self.base_actor, "z", 0)
         self.last_base_action = base_action.detach()
         self.last_residual_action = residual_action.detach()

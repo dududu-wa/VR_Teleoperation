@@ -150,8 +150,47 @@ class OnPolicyRunner:
             residual_scale=self.stage2_cfg.get("residual_scale", 0.2),
             residual_min_scale=self.stage2_cfg.get("residual_min_scale", 0.0),
             residual_action_clip=self.stage2_cfg.get("residual_action_clip", 1.0),
+            residual_action_multipliers=self._build_residual_action_multipliers(),
         ).to(self.device)
         self._emit_log(f"Initialized Stage 2 residual actor from base checkpoint: {base_policy_path}")
+
+    def _build_residual_action_multipliers(self):
+        explicit = self.stage2_cfg.get("residual_action_multipliers", None)
+        if explicit is not None:
+            return explicit
+
+        arm_multiplier = float(self.stage2_cfg.get("arm_residual_multiplier", 1.0))
+        if arm_multiplier == 1.0:
+            return None
+        if arm_multiplier < 0:
+            raise ValueError("stage2.arm_residual_multiplier must be non-negative")
+
+        arm_indices = self.stage2_cfg.get("arm_dof_indices", None)
+        if not arm_indices:
+            return None
+
+        multipliers = [1.0] * self.env.num_actions
+        num_dof = getattr(self.env, "num_dof", self.env.num_actions)
+        if num_dof != self.env.num_actions:
+            raise ValueError(
+                f"stage2.arm_residual_multiplier assumes one action per DOF, got num_actions={self.env.num_actions}, num_dof={num_dof}"
+            )
+        dof_names = getattr(self.env, "dof_names", None)
+        expected_tokens = ("shoulder", "arm")
+        for idx in arm_indices:
+            idx = int(idx)
+            if idx < 0 or idx >= self.env.num_actions:
+                raise ValueError(
+                    f"stage2.arm_dof_indices contains {idx}, but num_actions={self.env.num_actions}"
+                )
+            if dof_names is not None and idx < len(dof_names):
+                dof_name = str(dof_names[idx]).lower()
+                if not any(token in dof_name for token in expected_tokens):
+                    raise ValueError(
+                        f"stage2.arm_dof_indices contains {idx} ({dof_names[idx]}), which does not look like an arm DOF"
+                    )
+            multipliers[idx] = arm_multiplier
+        return multipliers
 
     def _init_amp(self, amp_cfg):
         from rsl_rl.modules.discriminator import AMPDiscriminator
@@ -255,9 +294,13 @@ class OnPolicyRunner:
         ep_infos = []
         rewbuffer = deque(maxlen=100)
         style_rewbuffer = deque(maxlen=100)
+        style_raw_rewbuffer = deque(maxlen=100)
+        style_gated_rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_style_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_style_reward_raw_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_style_reward_gated_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
@@ -275,25 +318,45 @@ class OnPolicyRunner:
                         # Book keeping
                         cur_reward_sum += self._as_reward_vector(rewards)
                         style_rewards = self._as_reward_vector(infos.get("amp_style_reward"))
+                        style_raw_rewards = self._as_reward_vector(infos.get("amp_style_reward_raw"))
+                        style_gated_rewards = self._as_reward_vector(infos.get("amp_style_reward_gated"))
                         if style_rewards is not None:
                             cur_style_reward_sum += style_rewards
+                        if style_raw_rewards is not None:
+                            cur_style_reward_raw_sum += style_raw_rewards
+                        if style_gated_rewards is not None:
+                            cur_style_reward_gated_sum += style_gated_rewards
                         cur_episode_length += 1
                         new_ids = dones.nonzero(as_tuple=False).flatten()
                         if len(new_ids) > 0:
+                            ep_len = cur_episode_length[new_ids].clamp(min=1)
                             if 'episode' in infos:
                                 if style_rewards is not None:
                                     infos['episode']['rew_amp_style'] = (
-                                        torch.mean(cur_style_reward_sum[new_ids]) / self.env.max_episode_length_s
+                                        torch.mean(cur_style_reward_sum[new_ids] / ep_len)
+                                    )
+                                if style_raw_rewards is not None:
+                                    infos['episode']['rew_amp_style_raw'] = (
+                                        torch.mean(cur_style_reward_raw_sum[new_ids] / ep_len)
+                                    )
+                                if style_gated_rewards is not None:
+                                    infos['episode']['rew_amp_style_gated'] = (
+                                        torch.mean(cur_style_reward_gated_sum[new_ids] / ep_len)
                                     )
                                 ep_infos.append(infos['episode'])
                             rewbuffer.extend(cur_reward_sum[new_ids].cpu().numpy().tolist())
                             lenbuffer.extend(cur_episode_length[new_ids].cpu().numpy().tolist())
                             if style_rewards is not None:
-                                ep_len = cur_episode_length[new_ids].clamp(min=1)
                                 style_rewbuffer.extend((cur_style_reward_sum[new_ids] / ep_len).cpu().numpy().tolist())
+                            if style_raw_rewards is not None:
+                                style_raw_rewbuffer.extend((cur_style_reward_raw_sum[new_ids] / ep_len).cpu().numpy().tolist())
+                            if style_gated_rewards is not None:
+                                style_gated_rewbuffer.extend((cur_style_reward_gated_sum[new_ids] / ep_len).cpu().numpy().tolist())
                             cur_reward_sum[new_ids] = 0
                             cur_episode_length[new_ids] = 0
                             cur_style_reward_sum[new_ids] = 0
+                            cur_style_reward_raw_sum[new_ids] = 0
+                            cur_style_reward_gated_sum[new_ids] = 0
 
                 stop = time.time()
                 collection_time = stop - start
@@ -346,8 +409,14 @@ class OnPolicyRunner:
                 self.writer.add_scalar('Loss/' + k, v, locs['it'])
             if self.use_stage2_residual:
                 self.writer.add_scalar('Stage2/stage2_reward', locs['metrics'].get('stage2_reward', 0), locs['it'])
+                self.writer.add_scalar('Stage2/stage2_reward_rate', locs['metrics'].get('stage2_reward_rate', 0), locs['it'])
+                self.writer.add_scalar('Stage2/style_reward_rate', locs['metrics'].get('stage2_style_reward_rate', 0), locs['it'])
+                self.writer.add_scalar('Stage2/gait_reward_rate', locs['metrics'].get('stage2_gait_reward_rate', 0), locs['it'])
+                self.writer.add_scalar('Stage2/arm_limit_penalty_rate', locs['metrics'].get('stage2_arm_limit_penalty_rate', 0), locs['it'])
                 self.writer.add_scalar('Stage2/stage2_safe_fraction', locs['metrics'].get('stage2_safe_fraction', 0), locs['it'])
-                self.writer.add_scalar('Stage2/residual_penalty', locs['metrics'].get('residual_penalty', 0), locs['it'])
+                self.writer.add_scalar('Stage2/residual_penalty', locs['metrics'].get('residual_action_penalty', 0), locs['it'])
+                self.writer.add_scalar('Stage2/residual_penalty_rate', locs['metrics'].get('stage2_residual_penalty_rate', 0), locs['it'])
+                self.writer.add_scalar('Stage2/arm_residual_target_abs_rad', locs['metrics'].get('arm_residual_target_abs_rad', 0), locs['it'])
 
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
@@ -366,6 +435,14 @@ class OnPolicyRunner:
             mean_style_reward = statistics.mean(locs['style_rewbuffer'])
             self.writer.add_scalar('Train/mean_style_reward', mean_style_reward, locs['it'])
             self.writer.add_scalar('Train/mean_style_reward/time', mean_style_reward, self.tot_time)
+        if len(locs.get('style_raw_rewbuffer', [])) > 0:
+            mean_style_reward_raw = statistics.mean(locs['style_raw_rewbuffer'])
+            self.writer.add_scalar('Train/mean_style_reward_raw', mean_style_reward_raw, locs['it'])
+            self.writer.add_scalar('Train/mean_style_reward_raw/time', mean_style_reward_raw, self.tot_time)
+        if len(locs.get('style_gated_rewbuffer', [])) > 0:
+            mean_style_reward_gated = statistics.mean(locs['style_gated_rewbuffer'])
+            self.writer.add_scalar('Train/mean_style_reward_gated', mean_style_reward_gated, locs['it'])
+            self.writer.add_scalar('Train/mean_style_reward_gated/time', mean_style_reward_gated, self.tot_time)
 
         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
@@ -379,10 +456,16 @@ class OnPolicyRunner:
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
             if len(locs['style_rewbuffer']) > 0:
                 log_string += f"""{'Mean style reward:':>{pad}} {statistics.mean(locs['style_rewbuffer']):.2f}\n"""
+            if len(locs.get('style_raw_rewbuffer', [])) > 0:
+                log_string += f"""{'Mean raw style reward:':>{pad}} {statistics.mean(locs['style_raw_rewbuffer']):.2f}\n"""
+            if len(locs.get('style_gated_rewbuffer', [])) > 0 and self.use_stage2_residual:
+                log_string += f"""{'Mean gated style reward:':>{pad}} {statistics.mean(locs['style_gated_rewbuffer']):.2f}\n"""
             if self.use_stage2_residual and locs['metrics']:
                 metrics = locs['metrics']
                 if 'stage2_reward' in metrics:
                     log_string += f"""{'Mean stage2 bonus:':>{pad}} {metrics['stage2_reward']:.4f}\n"""
+                if 'stage2_reward_rate' in metrics:
+                    log_string += f"""{'Mean stage2 rate:':>{pad}} {metrics['stage2_reward_rate']:.4f}\n"""
                 if 'stage2_safe_fraction' in metrics:
                     log_string += f"""{'Stage2 safe fraction:':>{pad}} {metrics['stage2_safe_fraction']:.4f}\n"""
                 for safe_key in ['safe_height', 'safe_roll', 'safe_pitch', 'safe_contact', 'safe_dof']:
@@ -395,6 +478,10 @@ class OnPolicyRunner:
                 if 'arm_style_penalty' in metrics:
                     log_string += f"""{'Arm style penalty:':>{pad}} {metrics['arm_style_penalty']:.4f}\n"""
                     self.writer.add_scalar('Stage2/arm_style_penalty', metrics['arm_style_penalty'], locs['it'])
+                if 'arm_limit_violation' in metrics:
+                    log_string += f"""{'Arm limit violation:':>{pad}} {metrics['arm_limit_violation']:.4f}\n"""
+                if 'arm_residual_target_abs_rad' in metrics:
+                    log_string += f"""{'Arm residual target(rad):':>{pad}} {metrics['arm_residual_target_abs_rad']:.4f}\n"""
                 actor = getattr(self.alg.actor_critic, 'actor', None)
                 if actor is not None and hasattr(actor, 'residual_scale'):
                     log_string += f"""{'Residual scale:':>{pad}} {float(actor.residual_scale):.4f}\n"""
