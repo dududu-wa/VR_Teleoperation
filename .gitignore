@@ -10,7 +10,7 @@ runs/
 wandb/
 events.out.tfevents*
 *.log
-
+rsl_rl/rsl_rl.egg-info
 # Editor / OS noise
 .DS_Store
 Thumbs.db

@@ -344,7 +344,8 @@ class OnPolicyRunner:
             self.writer.add_scalar('Train/mean_task_reward/time', mean_task_reward, self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
         if len(locs['style_rewbuffer']) > 0:
-            mean_style_reward = statistics.mean(locs['style_rewbuffer'])
+            mean_episode_length = statistics.mean(locs['lenbuffer']) if len(locs['lenbuffer']) > 0 else 1.0
+            mean_style_reward = statistics.mean(locs['style_rewbuffer']) / max(mean_episode_length, 1.0)
             self.writer.add_scalar('Train/mean_style_reward', mean_style_reward, locs['it'])
             self.writer.add_scalar('Train/mean_style_reward/time', mean_style_reward, self.tot_time)
 
@@ -360,7 +361,8 @@ class OnPolicyRunner:
                           f"""{'Mean task reward:':>{pad}} {statistics.mean(locs['task_rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
             if len(locs['style_rewbuffer']) > 0:
-                log_string += f"""{'Mean style reward:':>{pad}} {statistics.mean(locs['style_rewbuffer']):.2f}\n"""
+                mean_ep_len = statistics.mean(locs['lenbuffer']) if len(locs['lenbuffer']) > 0 else 1.0
+                log_string += f"""{'Mean style reward:':>{pad}} {statistics.mean(locs['style_rewbuffer']) / max(mean_ep_len, 1.0):.2f}\n"""
         else:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
