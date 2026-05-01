@@ -16,8 +16,8 @@ class AMPPPO(PPO):
         disc_grad_penalty=5.0,
         disc_logit_reg=0.05,
         disc_weight_decay=1e-4,
-        disc_reward_scale=2.0,
-        style_reward_min=-1.0,
+        disc_reward_scale=5.0,
+        style_reward_min=0.0,
         style_reward_max=5.0,
         disc_batch_size=4096,
         **ppo_kwargs,
@@ -75,7 +75,8 @@ class AMPPPO(PPO):
 
         with torch.no_grad():
             disc_score = self.discriminator(amp_obs)
-            style_reward = 1.0 - 0.25 * torch.square(disc_score - 1.0)
+            # AMP style reward: max(0, 1 - 0.25 * (D - 1)^2).
+            style_reward = torch.clamp(1.0 - 0.25 * torch.square(disc_score - 1.0), min=0.0)
             style_reward = (style_reward * self.disc_reward_scale).squeeze(-1)
             style_reward = torch.clamp(
                 style_reward,
@@ -131,7 +132,8 @@ class AMPPPO(PPO):
 
         agent_logit = self.discriminator(agent_amp_obs)
         ref_logit = self.discriminator(ref_amp_obs)
-        disc_loss = 0.5 * (agent_logit ** 2).mean() + 0.5 * ((ref_logit - 1) ** 2).mean()
+        # AMP uses LSGAN labels -1 for policy samples and +1 for reference motions.
+        disc_loss = 0.5 * ((agent_logit + 1) ** 2).mean() + 0.5 * ((ref_logit - 1) ** 2).mean()
 
         grad_penalty = self.discriminator.compute_grad_penalty(torch.cat([agent_amp_obs, ref_amp_obs], dim=0))
         logit_reg = (agent_logit ** 2).mean() + (ref_logit ** 2).mean()

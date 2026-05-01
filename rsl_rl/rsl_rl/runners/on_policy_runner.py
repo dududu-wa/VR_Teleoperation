@@ -145,8 +145,8 @@ class OnPolicyRunner:
             disc_grad_penalty=amp_cfg.get("disc_grad_penalty", 5.0),
             disc_logit_reg=amp_cfg.get("disc_logit_reg", 0.05),
             disc_weight_decay=amp_cfg.get("disc_weight_decay", 1e-4),
-            disc_reward_scale=amp_cfg.get("disc_reward_scale", 2.0),
-            style_reward_min=amp_cfg.get("style_reward_min", -1.0),
+            disc_reward_scale=amp_cfg.get("disc_reward_scale", 5.0),
+            style_reward_min=amp_cfg.get("style_reward_min", 0.0),
             style_reward_max=amp_cfg.get("style_reward_max", 5.0),
             disc_batch_size=amp_cfg.get("disc_batch_size", 4096),
             device=self.device,
@@ -217,9 +217,11 @@ class OnPolicyRunner:
 
         ep_infos = []
         rewbuffer = deque(maxlen=100)
+        task_rewbuffer = deque(maxlen=100)
         style_rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_task_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_style_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
@@ -236,7 +238,15 @@ class OnPolicyRunner:
                     
                     if self.log_dir is not None:
                         # Book keeping
-                        cur_reward_sum += self._as_reward_vector(rewards)
+                        task_rewards = self._as_reward_vector(infos.get("amp_task_reward"))
+                        if task_rewards is None:
+                            task_rewards = self._as_reward_vector(rewards)
+                        mixed_rewards = self._as_reward_vector(infos.get("amp_mixed_reward"))
+                        if mixed_rewards is None:
+                            mixed_rewards = self._as_reward_vector(rewards)
+
+                        cur_reward_sum += mixed_rewards
+                        cur_task_reward_sum += task_rewards
                         style_rewards = self._as_reward_vector(infos.get("amp_style_reward"))
                         if style_rewards is not None:
                             cur_style_reward_sum += style_rewards
@@ -244,16 +254,25 @@ class OnPolicyRunner:
                         new_ids = dones.nonzero(as_tuple=False).flatten()
                         if len(new_ids) > 0:
                             if 'episode' in infos:
+                                if self.use_amp:
+                                    infos['episode']['rew_amp_task'] = (
+                                        torch.mean(cur_task_reward_sum[new_ids]) / self.env.max_episode_length_s
+                                    )
+                                    infos['episode']['rew_amp_mixed'] = (
+                                        torch.mean(cur_reward_sum[new_ids]) / self.env.max_episode_length_s
+                                    )
                                 if style_rewards is not None:
                                     infos['episode']['rew_amp_style'] = (
                                         torch.mean(cur_style_reward_sum[new_ids]) / self.env.max_episode_length_s
                                     )
                                 ep_infos.append(infos['episode'])
                             rewbuffer.extend(cur_reward_sum[new_ids].cpu().numpy().tolist())
+                            task_rewbuffer.extend(cur_task_reward_sum[new_ids].cpu().numpy().tolist())
                             lenbuffer.extend(cur_episode_length[new_ids].cpu().numpy().tolist())
                             if style_rewards is not None:
                                 style_rewbuffer.extend(cur_style_reward_sum[new_ids].cpu().numpy().tolist())
                             cur_reward_sum[new_ids] = 0
+                            cur_task_reward_sum[new_ids] = 0
                             cur_episode_length[new_ids] = 0
                             cur_style_reward_sum[new_ids] = 0
 
@@ -270,7 +289,7 @@ class OnPolicyRunner:
             learn_time = stop - start
             if self.log_dir is not None:
                 self.log(locals())
-                self._maybe_save_best_checkpoints(it, rewbuffer)
+                self._maybe_save_best_checkpoints(it, task_rewbuffer if len(task_rewbuffer) > 0 else rewbuffer)
             if it % self.save_interval == 0:
                 self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)), infos={"it": it})
             ep_infos.clear()
@@ -313,11 +332,15 @@ class OnPolicyRunner:
         self.writer.add_scalar('Perf/collection time', locs['collection_time'], locs['it'])
         self.writer.add_scalar('Perf/learning_time', locs['learn_time'], locs['it'])
         if len(locs['rewbuffer']) > 0:
-            mean_task_reward = statistics.mean(locs['rewbuffer'])
-            self.writer.add_scalar('Train/mean_reward', mean_task_reward, locs['it'])
+            mean_reward = statistics.mean(locs['rewbuffer'])
+            if 'task_rewbuffer' in locs and len(locs['task_rewbuffer']) > 0:
+                mean_task_reward = statistics.mean(locs['task_rewbuffer'])
+            else:
+                mean_task_reward = mean_reward
+            self.writer.add_scalar('Train/mean_reward', mean_reward, locs['it'])
             self.writer.add_scalar('Train/mean_task_reward', mean_task_reward, locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
-            self.writer.add_scalar('Train/mean_reward/time', mean_task_reward, self.tot_time)
+            self.writer.add_scalar('Train/mean_reward/time', mean_reward, self.tot_time)
             self.writer.add_scalar('Train/mean_task_reward/time', mean_task_reward, self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
         if len(locs['style_rewbuffer']) > 0:
@@ -333,7 +356,8 @@ class OnPolicyRunner:
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean task reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                          f"""{'Mean task reward:':>{pad}} {statistics.mean(locs['task_rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
             if len(locs['style_rewbuffer']) > 0:
                 log_string += f"""{'Mean style reward:':>{pad}} {statistics.mean(locs['style_rewbuffer']):.2f}\n"""
