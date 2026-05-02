@@ -254,7 +254,7 @@ R2 基础配置。
 
 关键类：
 
-- `R2Cfg`：定义 24 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。
+- `R2Cfg`：定义 24 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。`shoulder_deviation=-0.05` 会轻量惩罚肩/手臂关节偏离默认姿态，避免在 AMP 训练中压过模仿奖励。
 - `R2CfgPPO`：定义 policy 为 `MlpAdaptModel`，配置 proprioception/cmd/privileged/terrain 的维度分块，critic 网络和 PPO 训练参数。默认实验名 `r2_teacher`。
 
 ##### `r2interrupt_config.py`
@@ -290,6 +290,8 @@ AMP 配置层。
 - `key_body_names = ["left_arm_yaw_link", "right_arm_yaw_link", "left_ankle_roll_link", "right_ankle_roll_link"]`
 - `reference_body_name = "base_link"`
 - `disc_hidden_dims = [1024, 512]`
+- `disc_reward_scale = 15.0`
+- `style_reward_max = 15.0`
 - `normalize_style_reward = True`
 - `task_reward_weight = 1.0`
 - `style_reward_weight = 0.02`
@@ -337,6 +339,7 @@ reward 约定：
 
 - `_prepare_reward_function()` 会扫描 cfg 中非零 reward scale，并调用对应的 `_reward_<name>()`。
 - 文件末尾包含大量 reward：速度跟踪、角速度跟踪、站立、base height、orientation、torque、dof vel/acc、action rate、contact force、collision、termination、dof/torque limit、feet stumble、feet slip、feet clearance、gait contact、no fly、alive 等。
+- `_create_envs()` 会按 DOF 名称分组 upper-body reward 索引：`shoulder_inds` 包含全部 `shoulder_*` 关节，`elbow_inds` 在 R2 上对应 `arm_*` 关节；`_reward_shoulder_deviation()` 对肩关节使用更高权重，对 arm pitch/yaw 使用较低权重。
 
 ##### `r2interrupt.py`
 

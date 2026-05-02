@@ -1503,8 +1503,8 @@ class R2Robot(BaseTask):
         
         torso_inds = [i for i, n in enumerate(dof_names_lower) if ('torso' in n or 'waist' in n)]
         waist_pitch_inds = [i for i, n in enumerate(dof_names_lower) if ('waist_pitch' in n or 'torso_pitch' in n)]
-        shoulder_inds = [i for i, n in enumerate(dof_names_lower) if ('shoulder_roll' in n or 'shoulder_yaw' in n)]
-        elbow_inds = [i for i, n in enumerate(dof_names_lower) if ('elbow' in n or 'shoulder_pitch' in n)]
+        shoulder_inds = [i for i, n in enumerate(dof_names_lower) if 'shoulder' in n]
+        elbow_inds = [i for i, n in enumerate(dof_names_lower) if ('elbow' in n or 'arm_' in n)]
         hip_inds = [i for i, n in enumerate(dof_names_lower) if ('hip_roll' in n or 'hip_yaw' in n)]
         knee_inds = [i for i, n in enumerate(dof_names_lower) if ('knee' in n)]
         standing_joint_inds = [

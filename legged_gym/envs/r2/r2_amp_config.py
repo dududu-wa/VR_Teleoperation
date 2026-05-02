@@ -31,9 +31,9 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         disc_grad_penalty = 5.0
         disc_logit_reg = 0.05
         disc_weight_decay = 1e-4
-        disc_reward_scale = 5.0
+        disc_reward_scale = 15.0
         style_reward_min = 0.0
-        style_reward_max = 5.0
+        style_reward_max = 15.0
         normalize_style_reward = True
         task_reward_weight = 1.0
         style_reward_weight = 0.02

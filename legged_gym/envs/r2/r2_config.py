@@ -195,7 +195,7 @@ class R2Cfg( LeggedRobotCfg ):
             lin_vel_z = -0.1
             ang_vel_xy = -0.5
             hip_deviation = -2.0
-            shoulder_deviation = 0
+            shoulder_deviation = -0.1
             hip_yaw_deviation = -0
             hip_roll_deviation = -0
             shoulder_yaw_deviation = -0
