@@ -10,7 +10,7 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
 - `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward。
-- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward 作为日志信号，PPO 仍使用环境 task reward，并在 update 后训练 discriminator。
+- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward；`r2amp` 配置会把 style reward 归一化、加权并按 `env.dt` 缩小后，与 task reward contribution 相加写入 PPO storage。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
 - `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
@@ -31,7 +31,7 @@ AMP 数据和训练的最短路径是：
   -> R2Robot.compute_amp_observations()
   -> infos["amp_obs"]
   -> AMPPPO.process_env_step()
-  -> task reward 写入 PPO storage，style reward 只记录日志
+  -> task contribution + style contribution 写入 PPO storage
   -> PPO update + discriminator update
 ```
 
@@ -96,11 +96,14 @@ python legged_gym/scripts/train.py --task=r2amp --headless
     -> 用 AMPPPO 替换 PPO
 ```
 
-AMP 每步会根据 discriminator 计算 style reward，但当前 PPO storage 写入的仍是环境 task reward：
+AMP 每步会根据 discriminator 计算 style reward。`AMPPPO` 默认保持旧的裸加行为以兼容旧实验；`r2amp` 配置显式启用 task 主导的混合 reward：
 
 ```text
-ppo_reward = task_reward
-style_reward = f(discriminator(amp_obs))
+style_raw = clamp(f(discriminator(amp_obs)) * disc_reward_scale, style_reward_min, style_reward_max)
+style_norm = normalize(style_raw)
+style_contrib = style_reward_weight * env.dt * style_norm
+task_contrib = task_reward_weight * task_reward
+ppo_reward = task_contrib + style_contrib
 ```
 
 `AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
@@ -287,6 +290,10 @@ AMP 配置层。
 - `key_body_names = ["left_arm_yaw_link", "right_arm_yaw_link", "left_ankle_roll_link", "right_ankle_roll_link"]`
 - `reference_body_name = "base_link"`
 - `disc_hidden_dims = [1024, 512]`
+- `normalize_style_reward = True`
+- `task_reward_weight = 1.0`
+- `style_reward_weight = 0.02`
+- `scale_style_reward_by_dt = True`
 
 ##### `r2.py`
 
@@ -662,7 +669,7 @@ AMP 版本 PPO，继承 `PPO`。
 
 关键类 `AMPPPO`：
 
-- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 style reward；PPO storage 写入原始 task reward。
+- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 style reward；按配置生成 `amp_task_reward_contrib`、`amp_style_reward_contrib` 和 `amp_mixed_reward`，PPO storage 写入 mixed reward。
 - `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP reward，训练 discriminator。
 - `_update_discriminator`：从 replay buffer 采 agent 样本，从 `env.collect_reference_motions()` 采 reference 样本，训练 LSGAN 风格 discriminator，并加 gradient penalty/logit regularization。
 

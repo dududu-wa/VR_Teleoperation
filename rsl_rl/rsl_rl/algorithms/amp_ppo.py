@@ -19,10 +19,25 @@ class AMPPPO(PPO):
         disc_reward_scale=5.0,
         style_reward_min=0.0,
         style_reward_max=5.0,
+        normalize_style_reward=False,
+        task_reward_weight=1.0,
+        style_reward_weight=1.0,
+        scale_style_reward_by_dt=False,
         disc_batch_size=4096,
         **ppo_kwargs,
     ):
         super().__init__(actor_critic, **ppo_kwargs)
+        if normalize_style_reward and style_reward_max <= style_reward_min:
+            raise ValueError(
+                "style_reward_max must be greater than style_reward_min "
+                "when normalize_style_reward=True"
+            )
+        if task_reward_weight <= 0.0:
+            raise ValueError("task_reward_weight must be positive")
+        if style_reward_weight < 0.0:
+            raise ValueError("style_reward_weight must be non-negative")
+        if scale_style_reward_by_dt and not hasattr(env, "dt"):
+            raise ValueError("scale_style_reward_by_dt=True requires env.dt")
         self.discriminator = discriminator
         self.disc_optimizer = torch.optim.AdamW(
             discriminator.parameters(),
@@ -37,10 +52,17 @@ class AMPPPO(PPO):
         self.disc_reward_scale = disc_reward_scale
         self.style_reward_min = style_reward_min
         self.style_reward_max = style_reward_max
+        self.normalize_style_reward = normalize_style_reward
+        self.task_reward_weight = task_reward_weight
+        self.style_reward_weight = style_reward_weight
+        self.style_reward_time_scale = float(env.dt) if scale_style_reward_by_dt else 1.0
         self.disc_batch_size = disc_batch_size
 
         self.task_reward_collector = []
+        self.task_reward_weighted_collector = []
         self.amp_obs_collector = []
+        self.style_reward_raw_collector = []
+        self.style_reward_normalized_collector = []
         self.style_reward_collector = []
         self.mixed_reward_collector = []
 
@@ -76,27 +98,50 @@ class AMPPPO(PPO):
         with torch.no_grad():
             disc_score = self.discriminator(amp_obs)
             # AMP style reward: max(0, 1 - 0.25 * (D - 1)^2).
-            style_reward = torch.clamp(1.0 - 0.25 * torch.square(disc_score - 1.0), min=0.0)
-            style_reward = (style_reward * self.disc_reward_scale).squeeze(-1)
-            style_reward = torch.clamp(
-                style_reward,
+            style_reward_base = torch.clamp(
+                1.0 - 0.25 * torch.square(disc_score - 1.0),
+                min=0.0,
+                max=1.0,
+            ).squeeze(-1)
+            style_reward_raw = style_reward_base * self.disc_reward_scale
+            style_reward_raw = torch.clamp(
+                style_reward_raw,
                 min=self.style_reward_min,
                 max=self.style_reward_max,
             )
 
-        mixed_reward = task_reward + style_reward
+            style_reward = style_reward_raw
+            if self.normalize_style_reward:
+                style_reward = (
+                    style_reward - self.style_reward_min
+                ) / (self.style_reward_max - self.style_reward_min)
+                style_reward = torch.clamp(style_reward, min=0.0, max=1.0)
 
-        self.style_reward_collector.append(style_reward.detach())
+        task_reward_weighted = self.task_reward_weight * task_reward
+        style_reward_weighted = self.style_reward_weight * self.style_reward_time_scale * style_reward
+        mixed_reward = task_reward_weighted + style_reward_weighted
+
+        self.task_reward_weighted_collector.append(task_reward_weighted.detach())
+        self.style_reward_raw_collector.append(style_reward_raw.detach())
+        self.style_reward_normalized_collector.append(style_reward.detach())
+        self.style_reward_collector.append(style_reward_weighted.detach())
         self.mixed_reward_collector.append(mixed_reward.detach())
 
         infos["amp_task_reward"] = task_reward.detach()
-        infos["amp_style_reward"] = style_reward.detach()
+        infos["amp_task_reward_contrib"] = task_reward_weighted.detach()
+        infos["amp_task_reward_weighted"] = task_reward_weighted.detach()
+        infos["amp_style_reward"] = style_reward_raw.detach()
+        infos["amp_style_reward_raw"] = style_reward_raw.detach()
+        infos["amp_style_reward_norm"] = style_reward.detach()
+        infos["amp_style_reward_contrib"] = style_reward_weighted.detach()
         infos["amp_mixed_reward"] = mixed_reward.detach()
 
         super().process_env_step(mixed_reward, dones, infos)
 
     def update(self):
         metrics = super().update()
+        task_reward_contrib_abs = None
+        style_reward_contrib_abs = None
 
         if self.amp_obs_collector:
             all_amp_obs = torch.cat(self.amp_obs_collector, dim=0)
@@ -107,9 +152,30 @@ class AMPPPO(PPO):
             metrics["task_reward"] = torch.cat(self.task_reward_collector).mean().item()
             self.task_reward_collector.clear()
 
+        if self.task_reward_weighted_collector:
+            task_reward_contrib = torch.cat(self.task_reward_weighted_collector)
+            metrics["task_reward_contrib"] = task_reward_contrib.mean().item()
+            metrics["task_reward_weighted"] = metrics["task_reward_contrib"]
+            task_reward_contrib_abs = task_reward_contrib.abs().mean().item()
+            self.task_reward_weighted_collector.clear()
+
+        if self.style_reward_raw_collector:
+            metrics["style_reward_raw"] = torch.cat(self.style_reward_raw_collector).mean().item()
+            self.style_reward_raw_collector.clear()
+
+        if self.style_reward_normalized_collector:
+            metrics["style_reward_normalized"] = torch.cat(self.style_reward_normalized_collector).mean().item()
+            self.style_reward_normalized_collector.clear()
+
         if self.style_reward_collector:
-            metrics["style_reward"] = torch.cat(self.style_reward_collector).mean().item()
+            style_reward_contrib = torch.cat(self.style_reward_collector)
+            metrics["style_reward_contrib"] = style_reward_contrib.mean().item()
+            metrics["style_reward"] = metrics["style_reward_contrib"]
+            style_reward_contrib_abs = style_reward_contrib.abs().mean().item()
             self.style_reward_collector.clear()
+
+        if task_reward_contrib_abs is not None and style_reward_contrib_abs is not None:
+            metrics["style_to_task_abs_ratio"] = style_reward_contrib_abs / (task_reward_contrib_abs + 1e-8)
 
         if self.mixed_reward_collector:
             metrics["mixed_reward"] = torch.cat(self.mixed_reward_collector).mean().item()

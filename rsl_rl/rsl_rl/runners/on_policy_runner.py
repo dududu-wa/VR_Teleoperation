@@ -148,6 +148,10 @@ class OnPolicyRunner:
             disc_reward_scale=amp_cfg.get("disc_reward_scale", 5.0),
             style_reward_min=amp_cfg.get("style_reward_min", 0.0),
             style_reward_max=amp_cfg.get("style_reward_max", 5.0),
+            normalize_style_reward=amp_cfg.get("normalize_style_reward", False),
+            task_reward_weight=amp_cfg.get("task_reward_weight", 1.0),
+            style_reward_weight=amp_cfg.get("style_reward_weight", 1.0),
+            scale_style_reward_by_dt=amp_cfg.get("scale_style_reward_by_dt", False),
             disc_batch_size=amp_cfg.get("disc_batch_size", 4096),
             device=self.device,
             **self.alg_cfg,
@@ -218,11 +222,15 @@ class OnPolicyRunner:
         ep_infos = []
         rewbuffer = deque(maxlen=100)
         task_rewbuffer = deque(maxlen=100)
+        task_weighted_rewbuffer = deque(maxlen=100)
         style_rewbuffer = deque(maxlen=100)
+        style_raw_rewbuffer = deque(maxlen=100)
         lenbuffer = deque(maxlen=100)
         cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_task_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_task_reward_weighted_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_style_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        cur_style_reward_raw_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
         cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
@@ -241,15 +249,26 @@ class OnPolicyRunner:
                         task_rewards = self._as_reward_vector(infos.get("amp_task_reward"))
                         if task_rewards is None:
                             task_rewards = self._as_reward_vector(rewards)
+                        task_weighted_rewards = self._as_reward_vector(infos.get("amp_task_reward_contrib"))
+                        if task_weighted_rewards is None:
+                            task_weighted_rewards = self._as_reward_vector(infos.get("amp_task_reward_weighted"))
+                        if task_weighted_rewards is None:
+                            task_weighted_rewards = task_rewards
                         mixed_rewards = self._as_reward_vector(infos.get("amp_mixed_reward"))
                         if mixed_rewards is None:
                             mixed_rewards = self._as_reward_vector(rewards)
 
                         cur_reward_sum += mixed_rewards
                         cur_task_reward_sum += task_rewards
-                        style_rewards = self._as_reward_vector(infos.get("amp_style_reward"))
+                        cur_task_reward_weighted_sum += task_weighted_rewards
+                        style_rewards = self._as_reward_vector(infos.get("amp_style_reward_contrib"))
+                        if style_rewards is None:
+                            style_rewards = self._as_reward_vector(infos.get("amp_style_reward"))
                         if style_rewards is not None:
                             cur_style_reward_sum += style_rewards
+                        style_raw_rewards = self._as_reward_vector(infos.get("amp_style_reward_raw"))
+                        if style_raw_rewards is not None:
+                            cur_style_reward_raw_sum += style_raw_rewards
                         cur_episode_length += 1
                         new_ids = dones.nonzero(as_tuple=False).flatten()
                         if len(new_ids) > 0:
@@ -258,6 +277,9 @@ class OnPolicyRunner:
                                     infos['episode']['rew_amp_task'] = (
                                         torch.mean(cur_task_reward_sum[new_ids]) / self.env.max_episode_length_s
                                     )
+                                    infos['episode']['rew_amp_task_weighted'] = (
+                                        torch.mean(cur_task_reward_weighted_sum[new_ids]) / self.env.max_episode_length_s
+                                    )
                                     infos['episode']['rew_amp_mixed'] = (
                                         torch.mean(cur_reward_sum[new_ids]) / self.env.max_episode_length_s
                                     )
@@ -265,16 +287,25 @@ class OnPolicyRunner:
                                     infos['episode']['rew_amp_style'] = (
                                         torch.mean(cur_style_reward_sum[new_ids]) / self.env.max_episode_length_s
                                     )
+                                if style_raw_rewards is not None:
+                                    infos['episode']['rew_amp_style_raw'] = (
+                                        torch.mean(cur_style_reward_raw_sum[new_ids]) / self.env.max_episode_length_s
+                                    )
                                 ep_infos.append(infos['episode'])
                             rewbuffer.extend(cur_reward_sum[new_ids].cpu().numpy().tolist())
                             task_rewbuffer.extend(cur_task_reward_sum[new_ids].cpu().numpy().tolist())
+                            task_weighted_rewbuffer.extend(cur_task_reward_weighted_sum[new_ids].cpu().numpy().tolist())
                             lenbuffer.extend(cur_episode_length[new_ids].cpu().numpy().tolist())
                             if style_rewards is not None:
                                 style_rewbuffer.extend(cur_style_reward_sum[new_ids].cpu().numpy().tolist())
+                            if style_raw_rewards is not None:
+                                style_raw_rewbuffer.extend(cur_style_reward_raw_sum[new_ids].cpu().numpy().tolist())
                             cur_reward_sum[new_ids] = 0
                             cur_task_reward_sum[new_ids] = 0
+                            cur_task_reward_weighted_sum[new_ids] = 0
                             cur_episode_length[new_ids] = 0
                             cur_style_reward_sum[new_ids] = 0
+                            cur_style_reward_raw_sum[new_ids] = 0
 
                 stop = time.time()
                 collection_time = stop - start
@@ -337,17 +368,32 @@ class OnPolicyRunner:
                 mean_task_reward = statistics.mean(locs['task_rewbuffer'])
             else:
                 mean_task_reward = mean_reward
+            if 'task_weighted_rewbuffer' in locs and len(locs['task_weighted_rewbuffer']) > 0:
+                mean_task_weighted_reward = statistics.mean(locs['task_weighted_rewbuffer'])
+            else:
+                mean_task_weighted_reward = mean_task_reward
             self.writer.add_scalar('Train/mean_reward', mean_reward, locs['it'])
+            self.writer.add_scalar('Train/mean_mixed_reward', mean_reward, locs['it'])
             self.writer.add_scalar('Train/mean_task_reward', mean_task_reward, locs['it'])
+            self.writer.add_scalar('Train/mean_task_reward_weighted', mean_task_weighted_reward, locs['it'])
             self.writer.add_scalar('Train/mean_episode_length', statistics.mean(locs['lenbuffer']), locs['it'])
             self.writer.add_scalar('Train/mean_reward/time', mean_reward, self.tot_time)
+            self.writer.add_scalar('Train/mean_mixed_reward/time', mean_reward, self.tot_time)
             self.writer.add_scalar('Train/mean_task_reward/time', mean_task_reward, self.tot_time)
+            self.writer.add_scalar('Train/mean_task_reward_weighted/time', mean_task_weighted_reward, self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
         if len(locs['style_rewbuffer']) > 0:
             mean_episode_length = statistics.mean(locs['lenbuffer']) if len(locs['lenbuffer']) > 0 else 1.0
             mean_style_reward = statistics.mean(locs['style_rewbuffer']) / max(mean_episode_length, 1.0)
             self.writer.add_scalar('Train/mean_style_reward', mean_style_reward, locs['it'])
+            self.writer.add_scalar('Train/mean_style_reward_contrib', mean_style_reward, locs['it'])
             self.writer.add_scalar('Train/mean_style_reward/time', mean_style_reward, self.tot_time)
+            self.writer.add_scalar('Train/mean_style_reward_contrib/time', mean_style_reward, self.tot_time)
+        if len(locs['style_raw_rewbuffer']) > 0:
+            mean_episode_length = statistics.mean(locs['lenbuffer']) if len(locs['lenbuffer']) > 0 else 1.0
+            mean_style_reward_raw = statistics.mean(locs['style_raw_rewbuffer']) / max(mean_episode_length, 1.0)
+            self.writer.add_scalar('Train/mean_style_reward_raw', mean_style_reward_raw, locs['it'])
+            self.writer.add_scalar('Train/mean_style_reward_raw/time', mean_style_reward_raw, self.tot_time)
 
         str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
 
@@ -357,12 +403,16 @@ class OnPolicyRunner:
                           f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs[
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std.item():.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+                          f"""{'Mean mixed reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean task reward:':>{pad}} {statistics.mean(locs['task_rewbuffer']):.2f}\n"""
+                          f"""{'Mean task contrib:':>{pad}} {statistics.mean(locs['task_weighted_rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
             if len(locs['style_rewbuffer']) > 0:
                 mean_ep_len = statistics.mean(locs['lenbuffer']) if len(locs['lenbuffer']) > 0 else 1.0
-                log_string += f"""{'Mean style reward:':>{pad}} {statistics.mean(locs['style_rewbuffer']) / max(mean_ep_len, 1.0):.2f}\n"""
+                log_string += f"""{'Mean style contrib:':>{pad}} {statistics.mean(locs['style_rewbuffer']) / max(mean_ep_len, 1.0):.4f}\n"""
+            if len(locs['style_raw_rewbuffer']) > 0:
+                mean_ep_len = statistics.mean(locs['lenbuffer']) if len(locs['lenbuffer']) > 0 else 1.0
+                log_string += f"""{'Mean raw style reward:':>{pad}} {statistics.mean(locs['style_raw_rewbuffer']) / max(mean_ep_len, 1.0):.2f}\n"""
         else:
             log_string = (f"""{'#' * width}\n"""
                           f"""{str.center(width, ' ')}\n\n"""
