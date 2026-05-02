@@ -45,6 +45,9 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         residual_warmup_iters = 2000
         style_reward_weight = 3.0
         gait_reward_weight = 1.0
+        # Explicit arm pose recovery: defaults to cfg.init_state.default_joint_angles.
+        arm_recovery_reward_weight = 1.0
+        arm_recovery_sigma = 0.35
         stage2_reward_dt_scale = True
         residual_action_penalty_weight = 0.001
         gait_reward_terms = {"no_fly": 1.0}

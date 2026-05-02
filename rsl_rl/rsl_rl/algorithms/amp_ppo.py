@@ -39,6 +39,7 @@ class AMPPPO(PPO):
         self.stage2_enabled = bool(self.stage2_cfg.get("enable", False))
         self.stage2_style_reward_weight = float(self.stage2_cfg.get("style_reward_weight", 0.0))
         self.stage2_gait_reward_weight = float(self.stage2_cfg.get("gait_reward_weight", 0.0))
+        self.arm_recovery_reward_weight = float(self.stage2_cfg.get("arm_recovery_reward_weight", 0.0))
         self.stage2_gait_reward_terms = self.stage2_cfg.get("gait_reward_terms", {})
         self.residual_action_penalty_weight = float(self.stage2_cfg.get("residual_action_penalty_weight", 0.0))
         self.arm_limit_penalty_weight = float(self.stage2_cfg.get("arm_limit_penalty_weight", 0.0))
@@ -55,13 +56,18 @@ class AMPPPO(PPO):
         self.stage2_reward_rate_collector = []
         self.stage2_style_reward_rate_collector = []
         self.stage2_gait_reward_rate_collector = []
+        self.stage2_arm_recovery_reward_rate_collector = []
         self.stage2_residual_penalty_rate_collector = []
         self.stage2_arm_limit_penalty_rate_collector = []
         self.stage2_safe_collector = []
         self.residual_penalty_collector = []
+        self.arm_recovery_reward_collector = []
+        self.arm_recovery_error_collector = []
         self.arm_penalty_collector = []
         self.arm_limit_violation_collector = []
         self.arm_residual_target_collector = []
+        self.residual_action_abs_collector = []
+        self.arm_residual_action_abs_collector = []
         self.stage2_breakdown_collectors = defaultdict(list)
         self._update_residual_scale()
 
@@ -112,15 +118,20 @@ class AMPPPO(PPO):
             gated_style_reward = style_reward * safe_mask.float() * arm_penalty
             gait_reward = self._compute_gait_reward(style_reward)
             gated_gait_reward = gait_reward * safe_mask.float()
+            arm_recovery_reward, arm_recovery_error = self._compute_arm_recovery_terms(style_reward)
+            gated_arm_recovery_reward = arm_recovery_reward * safe_mask.float()
             residual_penalty = self._compute_residual_action_penalty(style_reward)
             arm_residual_target = self._compute_arm_residual_target(style_reward)
+            residual_action_abs, arm_residual_action_abs = self._compute_residual_action_abs_terms(style_reward)
             style_reward_rate = self.stage2_style_reward_weight * gated_style_reward
             gait_reward_rate = self.stage2_gait_reward_weight * gated_gait_reward
+            arm_recovery_reward_rate = self.arm_recovery_reward_weight * gated_arm_recovery_reward
             residual_penalty_rate = self.residual_action_penalty_weight * residual_penalty
             arm_limit_penalty_rate = self.arm_limit_penalty_weight * arm_limit_violation
             stage2_reward_rate = (
                 style_reward_rate
                 + gait_reward_rate
+                + arm_recovery_reward_rate
                 - residual_penalty_rate
                 - arm_limit_penalty_rate
             )
@@ -136,20 +147,29 @@ class AMPPPO(PPO):
             self.stage2_reward_rate_collector.append(stage2_reward_rate.detach())
             self.stage2_style_reward_rate_collector.append(style_reward_rate.detach())
             self.stage2_gait_reward_rate_collector.append(gait_reward_rate.detach())
+            self.stage2_arm_recovery_reward_rate_collector.append(arm_recovery_reward_rate.detach())
             self.stage2_residual_penalty_rate_collector.append(residual_penalty_rate.detach())
             self.stage2_arm_limit_penalty_rate_collector.append(arm_limit_penalty_rate.detach())
             self.stage2_safe_collector.append(safe_mask.float().detach())
             self.residual_penalty_collector.append(residual_penalty.detach())
+            self.arm_recovery_reward_collector.append(gated_arm_recovery_reward.detach())
+            self.arm_recovery_error_collector.append(arm_recovery_error.detach())
             self.arm_penalty_collector.append(arm_penalty.detach())
             self.arm_limit_violation_collector.append(arm_limit_violation.detach())
             self.arm_residual_target_collector.append(arm_residual_target.detach())
+            self.residual_action_abs_collector.append(residual_action_abs.detach())
+            self.arm_residual_action_abs_collector.append(arm_residual_action_abs.detach())
             infos["amp_gait_reward"] = gait_reward.detach()
+            infos["amp_arm_recovery_reward"] = gated_arm_recovery_reward.detach()
+            infos["amp_arm_recovery_error"] = arm_recovery_error.detach()
             infos["amp_stage2_reward"] = stage2_bonus.detach()
             infos["amp_stage2_safe"] = safe_mask.detach()
             infos["amp_residual_penalty"] = residual_penalty.detach()
             infos["amp_arm_style_penalty"] = arm_penalty.detach()
             infos["amp_arm_limit_violation"] = arm_limit_violation.detach()
             infos["amp_arm_residual_target"] = arm_residual_target.detach()
+            infos["amp_residual_action_abs"] = residual_action_abs.detach()
+            infos["amp_arm_residual_action_abs"] = arm_residual_action_abs.detach()
 
         infos["amp_task_reward"] = task_reward.detach()
         infos["amp_style_reward_raw"] = style_reward.detach()
@@ -200,6 +220,12 @@ class AMPPPO(PPO):
             metrics["stage2_gait_reward_rate"] = torch.cat(self.stage2_gait_reward_rate_collector).mean().item()
             self.stage2_gait_reward_rate_collector.clear()
 
+        if self.stage2_arm_recovery_reward_rate_collector:
+            metrics["stage2_arm_recovery_reward_rate"] = torch.cat(
+                self.stage2_arm_recovery_reward_rate_collector
+            ).mean().item()
+            self.stage2_arm_recovery_reward_rate_collector.clear()
+
         if self.stage2_residual_penalty_rate_collector:
             metrics["stage2_residual_penalty_rate"] = torch.cat(self.stage2_residual_penalty_rate_collector).mean().item()
             self.stage2_residual_penalty_rate_collector.clear()
@@ -216,6 +242,14 @@ class AMPPPO(PPO):
             metrics["residual_action_penalty"] = torch.cat(self.residual_penalty_collector).mean().item()
             self.residual_penalty_collector.clear()
 
+        if self.arm_recovery_reward_collector:
+            metrics["arm_recovery_reward"] = torch.cat(self.arm_recovery_reward_collector).mean().item()
+            self.arm_recovery_reward_collector.clear()
+
+        if self.arm_recovery_error_collector:
+            metrics["arm_recovery_error_abs_rad"] = torch.cat(self.arm_recovery_error_collector).mean().item()
+            self.arm_recovery_error_collector.clear()
+
         if self.arm_penalty_collector:
             metrics["arm_style_penalty"] = torch.cat(self.arm_penalty_collector).mean().item()
             self.arm_penalty_collector.clear()
@@ -227,6 +261,14 @@ class AMPPPO(PPO):
         if self.arm_residual_target_collector:
             metrics["arm_residual_target_abs_rad"] = torch.cat(self.arm_residual_target_collector).mean().item()
             self.arm_residual_target_collector.clear()
+
+        if self.residual_action_abs_collector:
+            metrics["residual_action_abs"] = torch.cat(self.residual_action_abs_collector).mean().item()
+            self.residual_action_abs_collector.clear()
+
+        if self.arm_residual_action_abs_collector:
+            metrics["arm_residual_action_abs"] = torch.cat(self.arm_residual_action_abs_collector).mean().item()
+            self.arm_residual_action_abs_collector.clear()
 
         if self.stage2_breakdown_collectors:
             for k, values in self.stage2_breakdown_collectors.items():
@@ -292,6 +334,29 @@ class AMPPPO(PPO):
         residual_action = residual_action.to(device=like.device, dtype=like.dtype)
         return torch.mean(residual_action.pow(2), dim=-1)
 
+    def _compute_residual_action_abs_terms(self, like):
+        actor = getattr(self.actor_critic, "actor", None)
+        residual_action = getattr(actor, "last_residual_action", None)
+        if residual_action is None:
+            return torch.zeros_like(like), torch.zeros_like(like)
+
+        residual_action = residual_action.to(device=like.device, dtype=like.dtype)
+        residual_action_abs = torch.mean(torch.abs(residual_action), dim=-1)
+
+        arm_indices = self.stage2_cfg.get("arm_dof_indices", None)
+        if not arm_indices:
+            return residual_action_abs, torch.zeros_like(like)
+
+        idx = torch.as_tensor(arm_indices, dtype=torch.long, device=like.device)
+        if idx.numel() == 0:
+            return residual_action_abs, torch.zeros_like(like)
+        if bool(torch.any(idx < 0).item()) or bool(torch.any(idx >= residual_action.shape[1]).item()):
+            raise ValueError(
+                f"stage2.arm_dof_indices must be within [0, {residual_action.shape[1] - 1}]"
+            )
+        arm_residual_action_abs = torch.mean(torch.abs(residual_action[:, idx]), dim=-1)
+        return residual_action_abs, arm_residual_action_abs
+
     def _compute_arm_residual_target(self, like):
         actor = getattr(self.actor_critic, "actor", None)
         residual_action = getattr(actor, "last_residual_action", None)
@@ -329,6 +394,51 @@ class AMPPPO(PPO):
             residual_scale = residual_scale.to(device=like.device, dtype=like.dtype)
         target_delta = residual_action[:, idx] * residual_scale * action_scale
         return torch.mean(torch.abs(target_delta), dim=1)
+
+    def _compute_arm_recovery_terms(self, like):
+        env = self.env
+        arm_indices = self.stage2_cfg.get("arm_dof_indices", None)
+        if arm_indices is None or not hasattr(env, "dof_pos"):
+            return torch.zeros_like(like), torch.zeros_like(like)
+
+        sigma = float(self.stage2_cfg.get("arm_recovery_sigma", 0.35))
+        if sigma <= 0:
+            raise ValueError("stage2.arm_recovery_sigma must be positive")
+
+        idx = torch.as_tensor(arm_indices, dtype=torch.long, device=env.dof_pos.device)
+        if idx.numel() == 0:
+            return torch.zeros_like(like), torch.zeros_like(like)
+        if bool(torch.any(idx < 0).item()) or bool(torch.any(idx >= env.dof_pos.shape[1]).item()):
+            raise ValueError(
+                f"stage2.arm_dof_indices must be within [0, {env.dof_pos.shape[1] - 1}]"
+            )
+
+        pos = env.dof_pos[:, idx]
+        target_cfg = self.stage2_cfg.get("arm_recovery_target", None)
+        if target_cfg is None:
+            if not hasattr(env, "default_dof_pos"):
+                return torch.zeros_like(like), torch.zeros_like(like)
+            target = env.default_dof_pos
+            if target.dim() == 2:
+                target = target[:, idx]
+            else:
+                target = target[idx].unsqueeze(0)
+        else:
+            target = torch.as_tensor(target_cfg, dtype=pos.dtype, device=pos.device).flatten()
+            if target.numel() == env.dof_pos.shape[1]:
+                target = target[idx].unsqueeze(0)
+            elif target.numel() == idx.numel():
+                target = target.unsqueeze(0)
+            else:
+                raise ValueError(
+                    "stage2.arm_recovery_target must have one value per arm DOF or one value per action"
+                )
+
+        error = pos - target
+        mean_sq_error = torch.mean(error.pow(2), dim=1)
+        mean_abs_error = torch.mean(torch.abs(error), dim=1)
+        reward = torch.exp(-mean_sq_error / (sigma * sigma))
+        return reward.to(device=like.device, dtype=like.dtype), mean_abs_error.to(device=like.device, dtype=like.dtype)
 
     def _compute_stage2_safe_mask(self, like):
         safe = torch.ones_like(like, dtype=torch.bool)

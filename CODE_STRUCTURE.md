@@ -4,13 +4,13 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 
 最该先看的 AMP 文件：
 
-- `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、AMP observation 维度、关键 body、discriminator 超参和 best checkpoint 保存策略。
+- `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、AMP observation 维度、关键 body、discriminator 超参、Stage 2 residual/arm recovery 奖励和 best checkpoint 保存策略。
 - `legged_gym/envs/r2/r2.py`：环境侧 AMP 实现。`compute_amp_obs()` 拼单帧 AMP 观测；`R2Robot._init_buffers()` 在 `cfg.amp.enable=True` 时创建 `MotionLoader`、AMP history buffer 和 body/dof 索引；`compute_amp_observations()` 把当前策略状态写入 `infos["amp_obs"]`；`collect_reference_motions()` 从参考 motion 中采样 discriminator 的真样本。
 - `legged_gym/utils/motion_loader.py`：AMP motion 加载器。扫描 `legged_gym/motions/*.npz`，校验多 clip 的 `dof_names/body_names/dt` 一致，并按时间插值采样 DOF、body pose 和速度。
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
-- `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward。
-- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 bounded style reward；默认 PPO 仍使用环境 task reward，Stage 2 打开时才加入安全门控后的 style/gait bonus。
+- `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward 以及 Stage 2 arm recovery / residual action 诊断指标。
+- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 bounded style reward；默认 PPO 仍使用环境 task reward，Stage 2 打开时加入安全门控后的 style/gait/arm recovery bonus，并扣 residual 与 arm limit penalty。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/modules/residual_actor.py`：Stage 2 residual actor。冻结 Stage 1 base actor，只训练小 residual head，最终 action 为 base action 加限幅 residual action。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
@@ -113,10 +113,12 @@ final_action = frozen_base_actor(obs)
 ppo_reward = task_reward
            + style_weight * safe_mask * bounded_style_reward
            + gait_weight * safe_mask * gait_reward
+           + arm_recovery_weight * safe_mask * exp(-mean(square(arm_pose_error)) / sigma^2)
            - residual_penalty_weight * residual_action_l2
+           - arm_limit_penalty_weight * arm_limit_violation
 ```
 
-`safe_mask` 会在 base height 太低、roll/pitch 过大、非脚部接触或 DOF 贴近限位时关闭 style/gait bonus，避免重新奖励跪姿。
+`safe_mask` 会在 base height 太低、roll/pitch 过大、非脚部接触或 DOF 贴近限位时关闭 style/gait/arm recovery bonus，避免重新奖励跪姿。arm recovery 以配置的 arm DOF 与默认关节角或显式 `arm_recovery_target` 的误差为目标，日志会额外输出 `Arm recovery reward`、`Arm recovery error(rad)`、`Arm residual action abs` 和 `Arm residual target(rad)`。
 
 `AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
 
@@ -677,8 +679,8 @@ AMP 版本 PPO，继承 `PPO`。
 
 关键类 `AMPPPO`：
 
-- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 bounded style reward；Stage 2 关闭时 PPO storage 写入原始 task reward，Stage 2 打开时加入安全门控后的 style/gait bonus 和 residual penalty。
-- `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP/Stage 2 reward，训练 discriminator，并推进 residual scale warmup。
+- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 bounded style reward；Stage 2 关闭时 PPO storage 写入原始 task reward，Stage 2 打开时加入安全门控后的 style/gait/arm recovery bonus，并扣 residual 与 arm limit penalty。
+- `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP/Stage 2 reward、arm recovery error、residual action 幅度，训练 discriminator，并推进 residual scale warmup。
 - `_update_discriminator`：从 replay buffer 采 agent 样本，从 `env.collect_reference_motions()` 采 reference 样本，训练 LSGAN 风格 discriminator，并加 gradient penalty/logit regularization。
 
 ### `rsl_rl/rsl_rl/modules/`

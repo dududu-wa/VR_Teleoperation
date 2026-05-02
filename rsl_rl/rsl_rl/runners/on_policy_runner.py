@@ -412,11 +412,16 @@ class OnPolicyRunner:
                 self.writer.add_scalar('Stage2/stage2_reward_rate', locs['metrics'].get('stage2_reward_rate', 0), locs['it'])
                 self.writer.add_scalar('Stage2/style_reward_rate', locs['metrics'].get('stage2_style_reward_rate', 0), locs['it'])
                 self.writer.add_scalar('Stage2/gait_reward_rate', locs['metrics'].get('stage2_gait_reward_rate', 0), locs['it'])
+                self.writer.add_scalar('Stage2/arm_recovery_reward_rate', locs['metrics'].get('stage2_arm_recovery_reward_rate', 0), locs['it'])
+                self.writer.add_scalar('Stage2/arm_recovery_reward', locs['metrics'].get('arm_recovery_reward', 0), locs['it'])
+                self.writer.add_scalar('Stage2/arm_recovery_error_abs_rad', locs['metrics'].get('arm_recovery_error_abs_rad', 0), locs['it'])
                 self.writer.add_scalar('Stage2/arm_limit_penalty_rate', locs['metrics'].get('stage2_arm_limit_penalty_rate', 0), locs['it'])
                 self.writer.add_scalar('Stage2/stage2_safe_fraction', locs['metrics'].get('stage2_safe_fraction', 0), locs['it'])
                 self.writer.add_scalar('Stage2/residual_penalty', locs['metrics'].get('residual_action_penalty', 0), locs['it'])
                 self.writer.add_scalar('Stage2/residual_penalty_rate', locs['metrics'].get('stage2_residual_penalty_rate', 0), locs['it'])
                 self.writer.add_scalar('Stage2/arm_residual_target_abs_rad', locs['metrics'].get('arm_residual_target_abs_rad', 0), locs['it'])
+                self.writer.add_scalar('Stage2/residual_action_abs', locs['metrics'].get('residual_action_abs', 0), locs['it'])
+                self.writer.add_scalar('Stage2/arm_residual_action_abs', locs['metrics'].get('arm_residual_action_abs', 0), locs['it'])
 
         self.writer.add_scalar('Loss/learning_rate', self.alg.learning_rate, locs['it'])
         self.writer.add_scalar('Policy/mean_noise_std', mean_std.item(), locs['it'])
@@ -475,6 +480,10 @@ class OnPolicyRunner:
                     log_string += f"""{'  max_contact_force:':>{pad}} {metrics['max_penalised_contact_force']:.2f}\n"""
                 if 'residual_action_penalty' in metrics:
                     log_string += f"""{'Mean residual penalty:':>{pad}} {metrics['residual_action_penalty']:.4f}\n"""
+                if 'arm_recovery_reward' in metrics:
+                    log_string += f"""{'Arm recovery reward:':>{pad}} {metrics['arm_recovery_reward']:.4f}\n"""
+                if 'arm_recovery_error_abs_rad' in metrics:
+                    log_string += f"""{'Arm recovery error(rad):':>{pad}} {metrics['arm_recovery_error_abs_rad']:.4f}\n"""
                 if 'arm_style_penalty' in metrics:
                     log_string += f"""{'Arm style penalty:':>{pad}} {metrics['arm_style_penalty']:.4f}\n"""
                     self.writer.add_scalar('Stage2/arm_style_penalty', metrics['arm_style_penalty'], locs['it'])
@@ -482,6 +491,8 @@ class OnPolicyRunner:
                     log_string += f"""{'Arm limit violation:':>{pad}} {metrics['arm_limit_violation']:.4f}\n"""
                 if 'arm_residual_target_abs_rad' in metrics:
                     log_string += f"""{'Arm residual target(rad):':>{pad}} {metrics['arm_residual_target_abs_rad']:.4f}\n"""
+                if 'arm_residual_action_abs' in metrics:
+                    log_string += f"""{'Arm residual action abs:':>{pad}} {metrics['arm_residual_action_abs']:.4f}\n"""
                 actor = getattr(self.alg.actor_critic, 'actor', None)
                 if actor is not None and hasattr(actor, 'residual_scale'):
                     log_string += f"""{'Residual scale:':>{pad}} {float(actor.residual_scale):.4f}\n"""
