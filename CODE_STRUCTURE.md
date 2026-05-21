@@ -13,6 +13,8 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward；`r2amp` 配置会把 style reward 归一化、加权并按 `env.dt` 缩小后，与 task reward contribution 相加写入 PPO storage。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
+- `configs/ablation/*.json`：AMP 消融配置覆盖文件。通过 `--cfg_override_json` 参数覆盖 `r2amp` 的 env/train 配置，不再为每个消融单独注册 task。
+- `legged_gym/scripts/evaluate.py`：AMP/普通 PPO checkpoint 的参数化评估入口。复用现有 task registry 和 runner 加载路径，按固定 command preset 导出 `metrics.json` / `metrics.csv`。
 - `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
 - `scripts/convert_lafan1_to_amp.py`：把 LaFAN1 风格 R2V2 `.npz` 转成当前项目 AMP motion 格式，保留 `base_link`、左右 `arm_yaw_link`、左右 `ankle_roll_link` 等 AMP key body。
 - `legged_gym/scripts/train.py`：启动 AMP 训练的入口，典型命令是 `python legged_gym/scripts/train.py --task=r2amp --headless`。
@@ -107,6 +109,14 @@ ppo_reward = task_contrib + style_contrib
 ```
 
 `AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
+
+AMP 消融实验不新增 `r2amp_style0` 这类 task。统一使用：
+
+```powershell
+python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json configs/ablation/style0.json
+```
+
+`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 61 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
 
 ### 2.3 回放链路
 
@@ -367,6 +377,9 @@ reward 约定：
 
 - `class_to_dict`：把嵌套配置对象转换成 dict，供 runner 使用。
 - `update_class_from_dict`：用 dict 覆盖配置对象。
+- `load_cfg_override_json`：读取 `--cfg_override_json` 指向的 JSON 文件，只允许顶层 `env` / `train` 两个配置 section，并允许 `notes` 作为人工说明。
+- `apply_cfg_override_json`：把 JSON 中的嵌套字段递归覆盖到 env/train cfg。用于 AMP 消融扫参，避免为每组参数注册新 task。
+- `validate_amp_cfg_dims`：校验 AMP key body 数和 `amp_obs_dim` 是否匹配。AMP 单帧 observation 的固定部分是 61 维，每个 key body 增加 3 维相对位置。
 - `set_seed`：设置 Python、NumPy、Torch、CUDA 随机种子。
 - `parse_sim_params`：把配置和 CLI 参数合成 Isaac Gym `SimParams`。
 - `get_load_path`：解析 checkpoint 路径，支持：
@@ -374,7 +387,7 @@ reward 约定：
   - `-2` `model_best_task.pt`
   - `-3` `model_best_mixed.pt`
 - `update_cfg_from_args`：用 CLI 参数覆盖 env/train cfg。
-- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick` 等参数。
+- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick`、`--cfg_override_json`，以及评估入口使用的 `--num_episodes`、`--output_dir`、`--episode_seconds`、`--preset`、`--compute_dtw` 等参数。
 
 #### `task_registry.py`
 
@@ -384,9 +397,9 @@ reward 约定：
 
 - `register(name, task_class, env_cfg, train_cfg)`：注册任务。
 - `get_task_class(name)`：取环境类。
-- `get_cfgs(name)`：取 env/train cfg，并同步 seed。
-- `make_env(...)`：解析参数、覆盖 cfg、设置 seed、解析 sim params、实例化环境。
-- `make_alg_runner(...)`：创建 `OnPolicyRunner`，建立日志目录，处理 resume checkpoint 加载。
+- `get_cfgs(name)`：取 env/train cfg 的 deep copy，并同步 seed，避免同一 Python 进程连续跑多个 JSON override 时污染注册表默认配置。
+- `make_env(...)`：解析参数、覆盖 cfg、应用 JSON override、校验 AMP 维度、设置 seed、解析 sim params、实例化环境。
+- `make_alg_runner(...)`：创建 `OnPolicyRunner`，应用同一个 JSON override，建立日志目录，处理 resume checkpoint 加载。
 
 全局对象：
 
@@ -509,6 +522,26 @@ Isaac Gym quaternion 辅助：
 ```powershell
 python legged_gym/scripts/train.py --task=r2int --headless
 python legged_gym/scripts/train.py --task=r2amp --headless
+python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json configs/ablation/style0.json
+```
+
+#### `evaluate.py`
+
+统一评估入口，用于把 checkpoint 结果导出成可统计的表格文件。
+
+主要行为：
+
+- 复用 `task_registry.make_env()` 和 `task_registry.make_alg_runner()`，因此 `--task`、`--checkpoint`、`--load_run`、`--cfg_override_json` 的语义和训练入口一致。
+- 当使用 `--cfg_override_json` 时，必须显式传入 `--load_run`，避免从 `logs/<experiment>` 自动选择最新 run 时加载到其他消融组的 checkpoint。
+- 默认关闭 terrain curriculum、noise、domain randomization、command curriculum，并使用 plane 地形，保证固定 preset 评估更可复现。
+- 固定 preset 包括 `stand`、`walk_slow`、`walk_fast`、`turn_left`、`strafe_right`，也可用 `--preset` 指定子集。
+- 输出 `metrics.json` 和 `metrics.csv`，字段包括速度 RMSE、task return、fall rate、episode length、base height / roll-pitch violation、AMP style reward、discriminator logit、torque/action-rate/dof-acc 平滑性指标。
+- `--compute_dtw` 目前只保留 DTW 字段和说明；真正的 DTW pose error 需要先定义 preset 与 reference motion 的匹配规则，避免把未对齐的 motion 误报成风格误差。
+
+典型命令：
+
+```powershell
+python legged_gym/scripts/evaluate.py --task=r2amp --load_run Apr01_00-00-00_style0 --checkpoint=-1 --cfg_override_json configs/ablation/style0.json --num_episodes=32 --output_dir outputs/r2amp_style0_eval
 ```
 
 #### `play.py`

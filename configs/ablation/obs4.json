@@ -1,0 +1,15 @@
+{
+  "env": {
+    "amp": {
+      "num_amp_obs_steps": 4
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "obs4"
+    },
+    "amp": {
+      "num_amp_obs_steps": 4
+    }
+  }
+}

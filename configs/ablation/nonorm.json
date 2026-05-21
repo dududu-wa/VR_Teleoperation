@@ -1,0 +1,10 @@
+{
+  "train": {
+    "runner": {
+      "run_name": "nonorm"
+    },
+    "amp": {
+      "normalize_style_reward": false
+    }
+  }
+}

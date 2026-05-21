@@ -1,0 +1,10 @@
+{
+  "train": {
+    "runner": {
+      "run_name": "disc5"
+    },
+    "amp": {
+      "disc_reward_scale": 5.0
+    }
+  }
+}

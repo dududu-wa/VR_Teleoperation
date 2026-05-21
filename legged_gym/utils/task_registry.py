@@ -1,4 +1,5 @@
 import os
+import copy
 from datetime import datetime
 from typing import Tuple
 import torch
@@ -9,7 +10,16 @@ sys.path.append(os.getcwd())
 from rsl_rl.env import VecEnv
 from rsl_rl.runners import OnPolicyRunner
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
-from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params
+from .helpers import (
+    get_args,
+    update_cfg_from_args,
+    apply_cfg_override_json,
+    validate_amp_cfg_dims,
+    class_to_dict,
+    get_load_path,
+    set_seed,
+    parse_sim_params,
+)
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
 class TaskRegistry():
@@ -27,8 +37,8 @@ class TaskRegistry():
         return self.task_classes[name]
     
     def get_cfgs(self, name) -> Tuple[LeggedRobotCfg, LeggedRobotCfgPPO]:
-        train_cfg = self.train_cfgs[name]
-        env_cfg = self.env_cfgs[name]
+        train_cfg = copy.deepcopy(self.train_cfgs[name])
+        env_cfg = copy.deepcopy(self.env_cfgs[name])
         # copy seed
         env_cfg.seed = train_cfg.seed
         return env_cfg, train_cfg
@@ -56,11 +66,19 @@ class TaskRegistry():
             task_class = self.get_task_class(name)
         else:
             raise ValueError(f"Task with name: {name} was not registered")
+        train_cfg = None
         if env_cfg is None:
             # load config files
-            env_cfg, _ = self.get_cfgs(name)
-        # override cfg from args (if specified)
+            env_cfg, train_cfg = self.get_cfgs(name)
+        elif name in self.train_cfgs:
+            train_cfg = copy.deepcopy(self.train_cfgs[name])
+        # Apply JSON overrides before sim creation so env and AMP buffers agree.
+        env_cfg, train_cfg = apply_cfg_override_json(env_cfg, train_cfg, args)
+        if train_cfg is not None:
+            env_cfg.seed = train_cfg.seed
+        # CLI args are applied last so explicit command-line values win.
         env_cfg, _ = update_cfg_from_args(env_cfg, None, args)
+        validate_amp_cfg_dims(env_cfg, train_cfg)
         set_seed(env_cfg.seed)
         # parse sim params (convert to dict first)
         sim_params = {"sim": class_to_dict(env_cfg.sim)}
@@ -105,8 +123,12 @@ class TaskRegistry():
         else:
             if name is not None:
                 print(f"'train_cfg' provided -> Ignoring 'name={name}'")
-        # override cfg from args (if specified)
+        # Re-apply the same JSON override here for direct runner construction paths.
+        env_cfg = getattr(env, "cfg", None)
+        env_cfg, train_cfg = apply_cfg_override_json(env_cfg, train_cfg, args)
+        # CLI args are applied last so explicit command-line values win.
         _, train_cfg = update_cfg_from_args(None, train_cfg, args)
+        validate_amp_cfg_dims(env_cfg, train_cfg)
 
         if log_root=="default":
             log_root = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name)

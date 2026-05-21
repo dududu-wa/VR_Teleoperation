@@ -1,6 +1,7 @@
 import os
 import copy
 import re
+import json
 import torch
 import numpy as np
 import random
@@ -34,6 +35,69 @@ def update_class_from_dict(obj, dict):
         else:
             setattr(obj, key, val)
     return
+
+def load_cfg_override_json(path):
+    if path is None:
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        override = json.load(f)
+    if not isinstance(override, dict):
+        raise ValueError(f"Config override must be a JSON object: {path}")
+    unknown_sections = set(override.keys()) - {"env", "train", "notes"}
+    if unknown_sections:
+        raise ValueError(
+            f"Unknown top-level override section(s): {sorted(unknown_sections)}. "
+            "Supported sections are 'env', 'train', and metadata field 'notes'."
+        )
+    return override
+
+def _recursive_update_cfg_obj(obj, override, prefix):
+    if not isinstance(override, dict):
+        raise ValueError(f"Override at '{prefix}' must be a JSON object")
+    for key, val in override.items():
+        if not hasattr(obj, key):
+            raise AttributeError(f"Unknown config field '{prefix}.{key}'")
+        attr = getattr(obj, key)
+        # Nested config groups are BaseConfig-instantiated objects; recurse into them.
+        if isinstance(val, dict) and hasattr(attr, "__dict__"):
+            _recursive_update_cfg_obj(attr, val, f"{prefix}.{key}")
+        else:
+            setattr(obj, key, val)
+
+def apply_cfg_override_json(env_cfg, train_cfg, args):
+    override_path = getattr(args, "cfg_override_json", None)
+    override = load_cfg_override_json(override_path)
+    if override is None:
+        return env_cfg, train_cfg
+    if env_cfg is not None and "env" in override:
+        _recursive_update_cfg_obj(env_cfg, override["env"], "env")
+    if train_cfg is not None and "train" in override:
+        _recursive_update_cfg_obj(train_cfg, override["train"], "train")
+    return env_cfg, train_cfg
+
+def validate_amp_cfg_dims(env_cfg, train_cfg=None):
+    env_amp = getattr(env_cfg, "amp", None) if env_cfg is not None else None
+    train_amp = getattr(train_cfg, "amp", None) if train_cfg is not None else None
+    if env_amp is None:
+        return
+    key_body_names = getattr(env_amp, "key_body_names", None)
+    env_amp_obs_dim = getattr(env_amp, "amp_obs_dim", None)
+    if key_body_names is None or env_amp_obs_dim is None:
+        return
+    # AMP obs layout is robot state base (61) plus xyz for each selected key body.
+    expected_dim = 61 + 3 * len(key_body_names)
+    if env_amp_obs_dim != expected_dim:
+        raise ValueError(
+            f"env.amp.amp_obs_dim={env_amp_obs_dim} does not match "
+            f"61 + 3 * len(env.amp.key_body_names)={expected_dim}"
+        )
+    if train_amp is not None and hasattr(train_amp, "amp_obs_dim"):
+        train_amp_obs_dim = train_amp.amp_obs_dim
+        if train_amp_obs_dim != expected_dim:
+            raise ValueError(
+                f"train.amp.amp_obs_dim={train_amp_obs_dim} does not match "
+                f"env AMP dim {expected_dim}"
+            )
 
 def set_seed(seed):
     if seed == -1:
@@ -80,7 +144,7 @@ def get_load_path(root, load_run=-1, checkpoint=-1):
         last_run = os.path.join(root, runs[-1])
     except:
         raise ValueError("No runs in this directory: " + root)
-    if load_run==-1:
+    if load_run == -1 or load_run == "-1":
         load_run = last_run
     else:
         load_run = os.path.join(root, load_run)
@@ -109,6 +173,8 @@ def get_load_path(root, load_run=-1, checkpoint=-1):
 def update_cfg_from_args(env_cfg, cfg_train, args):
     # seed
     if env_cfg is not None:
+        if args.seed is not None:
+            env_cfg.seed = args.seed
         # num envs
         if args.num_envs is not None:
             env_cfg.env.num_envs = args.num_envs
@@ -155,6 +221,12 @@ def get_args():
         {"name": "--seed", "type": int, "help": "Random seed. Overrides config file if provided."},
         {"name": "--max_iterations", "type": int, "help": "Maximum number of training iterations. Overrides config file if provided."},
         {"name": "--sim_joystick", "action": "store_true", "default":False, "help": "Sample commands from sim joystick"},
+        {"name": "--cfg_override_json", "type": str, "help": "JSON file with top-level env/train config overrides."},
+        {"name": "--num_episodes", "type": int, "default": 32, "help": "Evaluation episodes per preset."},
+        {"name": "--output_dir", "type": str, "default": "outputs/eval", "help": "Evaluation metrics output directory."},
+        {"name": "--episode_seconds", "type": float, "default": 10.0, "help": "Evaluation rollout length in seconds."},
+        {"name": "--preset", "action": "append", "help": "Evaluation preset name. Repeat or omit for all presets."},
+        {"name": "--compute_dtw", "action": "store_true", "default": False, "help": "Reserve DTW imitation metrics in evaluate.py."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(

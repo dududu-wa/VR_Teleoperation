@@ -1,0 +1,19 @@
+{
+  "env": {
+    "amp": {
+      "amp_obs_dim": 67,
+      "key_body_names": [
+        "left_arm_yaw_link",
+        "right_arm_yaw_link"
+      ]
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "handsonly"
+    },
+    "amp": {
+      "amp_obs_dim": 67
+    }
+  }
+}

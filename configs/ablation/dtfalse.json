@@ -1,0 +1,10 @@
+{
+  "train": {
+    "runner": {
+      "run_name": "dtfalse"
+    },
+    "amp": {
+      "scale_style_reward_by_dt": false
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "notes": "Explicit default AMP style reward weight for sweep bookkeeping.",
+  "train": {
+    "runner": {
+      "run_name": "sw002"
+    },
+    "amp": {
+      "style_reward_weight": 0.02
+    }
+  }
+}
