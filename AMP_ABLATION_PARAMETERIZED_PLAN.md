@@ -85,7 +85,7 @@
 Task-only PPO 基线：
 
 ```powershell
-python legged_gym/scripts/train.py --task=r2int --headless --seed=0 --max_iterations=3000
+python legged_gym/scripts/train.py --task=r2int --headless --seed=0
 ```
 
 AMP 默认方法：
