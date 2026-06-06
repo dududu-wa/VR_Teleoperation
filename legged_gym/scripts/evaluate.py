@@ -312,7 +312,8 @@ def evaluate(args):
     rows = []
     for preset_name in _selected_presets(args):
         start_time = time.time()
-        obs, critic_obs = env.reset()
+        with torch.inference_mode():
+            obs, critic_obs = env.reset()
         _apply_preset(env, preset_name)
         if hasattr(env, "use_disturb"):
             env.use_disturb = False
