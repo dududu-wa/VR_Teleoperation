@@ -1,10 +1,10 @@
 {
   "train": {
     "runner": {
-      "run_name": "sw001"
+      "run_name": "sw1"
     },
     "amp": {
-      "style_reward_weight": 0.01
+      "style_reward_weight": 1.0
     }
   }
 }
