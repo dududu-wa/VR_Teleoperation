@@ -264,7 +264,7 @@ R2 基础配置。
 
 关键类：
 
-- `R2Cfg`：定义 24 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。`shoulder_deviation=-0.05` 会轻量惩罚肩/手臂关节偏离默认姿态，避免在 AMP 训练中压过模仿奖励。
+- `R2Cfg`：定义 24 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。`shoulder_deviation=0` 会让 `R2Robot._prepare_reward_function()` 移除肩/手臂偏离默认姿态的奖励项，相当于关闭 PPO 训练里的肩膀回复/回正惩罚开关。
 - `R2CfgPPO`：定义 policy 为 `MlpAdaptModel`，配置 proprioception/cmd/privileged/terrain 的维度分块，critic 网络和 PPO 训练参数。默认实验名 `r2_teacher`。
 
 ##### `r2interrupt_config.py`
