@@ -1,7 +1,7 @@
 {
   "train": {
     "runner": {
-      "run_name": "r2amp_sw005_walk_fast"
+      "run_name": "r2amp_sw05"
     },
     "amp": {
       "style_reward_weight": 0.5

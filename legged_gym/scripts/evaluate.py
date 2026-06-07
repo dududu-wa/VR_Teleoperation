@@ -175,6 +175,140 @@ def _collect_step_metrics(env, rewards, infos, actions, last_actions, prev_dof_v
     acc["steps"] += 1.0
 
 
+def _collect_step_trajectories(env, traj_bufs):
+    """Append current dof_pos and key_body_pos to per-env trajectory buffers."""
+    dof_np = env.dof_pos.detach().cpu().numpy()  # (num_envs, num_dof)
+    if hasattr(env, "amp_key_body_indices"):
+        kb_np = env.rigid_body_states[:, env.amp_key_body_indices, :3].detach().cpu().numpy()  # (num_envs, K, 3)
+    else:
+        kb_np = None
+
+    for i in range(env.num_envs):
+        traj_bufs["dof"][i].append(dof_np[i])
+        if kb_np is not None:
+            traj_bufs["key_body"][i].append(kb_np[i])
+
+
+def _reset_traj_bufs(traj_bufs, env_ids):
+    for idx in env_ids:
+        i = int(idx.item())
+        traj_bufs["dof"][i] = []
+        traj_bufs["key_body"][i] = []
+
+
+def _init_traj_bufs(num_envs):
+    return {
+        "dof": [[] for _ in range(num_envs)],
+        "key_body": [[] for _ in range(num_envs)],
+    }
+
+
+# ---------------------------------------------------------------------------
+# DTW helpers
+# ---------------------------------------------------------------------------
+
+def _dtw_distance_fast(seq_a, seq_b):
+    """Vectorised DTW using numpy; O(N*M) time, O(min(N,M)) space.
+
+    seq_a: (T_a, D), seq_b: (T_b, D)
+    Returns the path-normalised cost  sum / (T_a + T_b).
+    """
+    n, d = seq_a.shape
+    m = seq_b.shape[0]
+    # Use two-row rolling array to save memory
+    prev = np.full(m + 1, np.inf, dtype=np.float64)
+    curr = np.full(m + 1, np.inf, dtype=np.float64)
+    prev[0] = 0.0
+
+    for i in range(1, n + 1):
+        curr[:] = np.inf
+        curr[0] = np.inf  # no free first-col insertion
+        diff = np.abs(seq_a[i - 1] - seq_b)  # (m, d)
+        costs = diff.mean(axis=1)  # (m,)
+        for j in range(1, m + 1):
+            curr[j] = costs[j - 1] + min(prev[j], curr[j - 1], prev[j - 1])
+        prev, curr = curr, prev
+
+    return float(prev[m]) / (n + m)
+
+
+def _compute_dtw_for_episode(env, traj_dof_list, traj_kb_list):
+    """Compute best-clip DTW for one completed episode trajectory.
+
+    traj_dof_list: list of np arrays, each shape (num_dof,)
+    traj_kb_list:  list of np arrays, each shape (K, 3)  — may be empty list if no key bodies
+
+    Returns (joint_dtw, key_body_dtw) or (None, None).
+    """
+    if not hasattr(env, "_motion_loader") or len(traj_dof_list) == 0:
+        return None, None
+
+    ml = env._motion_loader
+    traj_dof = np.stack(traj_dof_list, axis=0)          # (T, num_dof)
+    has_kb = len(traj_kb_list) > 0
+    if has_kb:
+        traj_kb = np.stack(traj_kb_list, axis=0)         # (T, K, 3)
+    T = len(traj_dof)
+
+    motion_dof_indices = getattr(env, "motion_dof_indices", None)
+    motion_key_body_indices = getattr(env, "motion_key_body_indices", None)
+
+    # Select DOF columns in policy trajectory that correspond to reference DOFs
+    if motion_dof_indices is not None:
+        pol_dof_idx = motion_dof_indices.cpu().numpy()  # indices into env.dof_pos
+        pol_dof = traj_dof[:, pol_dof_idx]
+    else:
+        pol_dof = traj_dof
+
+    best_joint_dtw = None
+    best_kb_dtw = None
+
+    for clip in ml._clips:
+        num_frames = clip["num_frames"]
+        if num_frames < 2:
+            continue
+
+        # Sample T evenly-spaced frames from reference clip
+        sample_idx = np.linspace(0, num_frames - 1, T).astype(int)
+        ref_dof_all = clip["dof_positions"][sample_idx].cpu().numpy()  # (T, ref_dofs)
+
+        if motion_dof_indices is not None:
+            ref_dof = ref_dof_all[:, motion_dof_indices.cpu().numpy()]
+        else:
+            min_d = min(pol_dof.shape[1], ref_dof_all.shape[1])
+            ref_dof = ref_dof_all[:, :min_d]
+            pol_dof_clip = pol_dof[:, :min_d]
+        if motion_dof_indices is not None:
+            pol_dof_clip = pol_dof
+
+        jd = _dtw_distance_fast(pol_dof_clip, ref_dof)
+        if best_joint_dtw is None or jd < best_joint_dtw:
+            best_joint_dtw = jd
+
+        if has_kb:
+            ref_body_all = clip["body_positions"][sample_idx].cpu().numpy()  # (T, all_bodies, 3)
+            if motion_key_body_indices is not None:
+                kidx = motion_key_body_indices.cpu().numpy()
+                ref_kb = ref_body_all[:, kidx, :]       # (T, K, 3)
+                pol_kb = traj_kb
+            else:
+                K = min(traj_kb.shape[1], ref_body_all.shape[1])
+                ref_kb = ref_body_all[:, :K, :]
+                pol_kb = traj_kb[:, :K, :]
+
+            # Compute root-relative positions (remove global translation)
+            ref_root = ref_kb[:, 0:1, :]  # (T, 1, 3) — first key body as pseudo-root
+            pol_root = pol_kb[:, 0:1, :]
+            ref_kb_rel = (ref_kb - ref_root).reshape(T, -1)
+            pol_kb_rel = (pol_kb - pol_root).reshape(T, -1)
+
+            kd = _dtw_distance_fast(pol_kb_rel, ref_kb_rel)
+            if best_kb_dtw is None or kd < best_kb_dtw:
+                best_kb_dtw = kd
+
+    return best_joint_dtw, best_kb_dtw
+
+
 def _compute_amp_eval_rewards(env, runner, infos):
     if getattr(runner, "discriminator", None) is None or "amp_obs" not in infos:
         return None
@@ -217,7 +351,7 @@ def _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values
             disc_ref_values.extend(ref_logit.detach().cpu().numpy().tolist())
 
 
-def _finalize_done_envs(env, dones, infos, acc, episode_rows):
+def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs):
     done_ids = dones.nonzero(as_tuple=False).flatten()
     if len(done_ids) == 0:
         return done_ids
@@ -225,6 +359,14 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows):
     for env_id in done_ids:
         idx = int(env_id.item())
         steps = max(float(acc["steps"][idx].item()), 1.0)
+
+        # DTW computation for this episode
+        joint_dtw, kb_dtw = _compute_dtw_for_episode(
+            env,
+            traj_bufs["dof"][idx],
+            traj_bufs["key_body"][idx],
+        )
+
         episode_rows.append(
             {
                 "lin_vel_rmse": float(np.sqrt(acc["lin_sq"][idx].item() / steps)),
@@ -239,9 +381,12 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows):
                 "roll_pitch_violation_rate": float(acc["roll_pitch_violations"][idx].item() / steps),
                 "episode_length_steps": steps,
                 "fall": 0.0 if bool(time_outs[idx].item()) else 1.0,
+                "joint_dtw": joint_dtw,
+                "key_body_dtw": kb_dtw,
             }
         )
     _reset_accumulators(acc, done_ids)
+    _reset_traj_bufs(traj_bufs, done_ids)
     return done_ids
 
 
@@ -251,6 +396,11 @@ def _summarize_preset(args, train_cfg, preset_name, episode_rows, disc_agent_val
     override_name = "none"
     if args.cfg_override_json:
         override_name = Path(args.cfg_override_json).stem
+
+    # DTW — filter out None episodes
+    jdtw_vals = [r["joint_dtw"] for r in episode_rows if r.get("joint_dtw") is not None]
+    kbdtw_vals = [r["key_body_dtw"] for r in episode_rows if r.get("key_body_dtw") is not None]
+
     return {
         "run_id": f"{args.task}_{override_name}_{preset_name}",
         "task_name": args.task,
@@ -273,13 +423,13 @@ def _summarize_preset(args, train_cfg, preset_name, episode_rows, disc_agent_val
         "disc_ref_logit_mean": ref_logit,
         "disc_policy_logit_mean": agent_logit,
         "disc_gap_mean": None if ref_logit is None or agent_logit is None else ref_logit - agent_logit,
-        "joint_pose_error_dtw_m": None,
-        "key_body_error_dtw_m": None,
+        "joint_pose_error_dtw_m": _mean_or_none(jdtw_vals) if jdtw_vals else None,
+        "key_body_error_dtw_m": _mean_or_none(kbdtw_vals) if kbdtw_vals else None,
         "torque_l2_mean": _mean_or_none([row["torque_l2"] for row in episode_rows]),
         "action_rate_l2_mean": _mean_or_none([row["action_rate_l2"] for row in episode_rows]),
         "dof_acc_l2_mean": _mean_or_none([row["dof_acc_l2"] for row in episode_rows]),
         "wall_clock_seconds": elapsed_s,
-        "notes": "DTW metrics reserved; enable after preset-to-motion matching is defined." if args.compute_dtw else "",
+        "notes": "",
     }
 
 
@@ -321,6 +471,7 @@ def evaluate(args):
             env.standing_envs_mask[:] = False
 
         acc = _init_accumulators(env.num_envs, env.device)
+        traj_bufs = _init_traj_bufs(env.num_envs)
         episode_rows = []
         disc_agent_values = []
         disc_ref_values = []
@@ -336,8 +487,9 @@ def evaluate(args):
                 obs, critic_obs, rewards, dones, infos = env.step(actions)
                 amp_eval_rewards = _compute_amp_eval_rewards(env, runner, infos)
                 _collect_step_metrics(env, rewards, infos, actions, last_actions, prev_dof_vel, acc, amp_eval_rewards)
+                _collect_step_trajectories(env, traj_bufs)
                 _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values)
-                done_ids = _finalize_done_envs(env, dones, infos, acc, episode_rows)
+                done_ids = _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs)
                 _apply_preset(env, preset_name, done_ids)
                 if len(done_ids) > 0:
                     env.compute_observations(done_ids)
