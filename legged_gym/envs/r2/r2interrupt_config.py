@@ -89,7 +89,7 @@ class R2InterruptCfgPPO(R2CfgPPO):
         experiment_name = "r2_interrupt"
         resume = False
         resume_path = None
-        max_iterations = 40000
+        max_iterations = 30000
         save_interval = 2000
     
     class policy(R2CfgPPO.policy):
