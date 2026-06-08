@@ -1,6 +1,6 @@
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
-NUM_ACTIONS = 24
+NUM_ACTIONS = 26
 PROPRIOCEPTION_DIM = 6 + 3 * NUM_ACTIONS
 CMD_DIM = 3 + 4 + 1 + 1
 TERRAIN_DIM = 221
@@ -52,6 +52,8 @@ class R2Cfg( LeggedRobotCfg ):
            'right_shoulder_yaw_joint' : 0.0,
            'right_arm_pitch_joint' : 0.0,
            'right_arm_yaw_joint' : 0.0,
+           'head_yaw_joint' : 0.0,
+           'head_pitch_joint' : 0.0,
         }
     
     class control( LeggedRobotCfg.control ):
@@ -71,6 +73,8 @@ class R2Cfg( LeggedRobotCfg ):
                      'shoulder_yaw': 80,
                      'arm_pitch': 40,
                      'arm_yaw': 40,
+                     'head_yaw': 20,
+                     'head_pitch': 20,
                      }  # [N*m/rad]
         damping = {  'hip_yaw': 5,
                      'hip_roll': 5,
@@ -85,6 +89,8 @@ class R2Cfg( LeggedRobotCfg ):
                      'shoulder_yaw': 2,
                      'arm_pitch': 1,
                      'arm_yaw': 1,
+                     'head_yaw': 1,
+                     'head_pitch': 1,
                      }  # [N*m/rad]  # [N*m*s/rad]
         torque_limits = {
                      'hip_yaw': 130,
@@ -100,6 +106,8 @@ class R2Cfg( LeggedRobotCfg ):
                      'shoulder_yaw': 75,
                      'arm_pitch': 36,
                      'arm_yaw': 36,
+                     'head_yaw': 12,
+                     'head_pitch': 12,
                      }
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25

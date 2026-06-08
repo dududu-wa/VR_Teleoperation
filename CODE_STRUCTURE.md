@@ -6,7 +6,7 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 
 - `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、AMP observation 维度、关键 body、discriminator 超参和 best checkpoint 保存策略。
 - `legged_gym/envs/r2/r2.py`：环境侧 AMP 实现。`compute_amp_obs()` 拼单帧 AMP 观测；`R2Robot._init_buffers()` 在 `cfg.amp.enable=True` 时创建 `MotionLoader`、AMP history buffer 和 body/dof 索引；`compute_amp_observations()` 把当前策略状态写入 `infos["amp_obs"]`；`collect_reference_motions()` 从参考 motion 中采样 discriminator 的真样本。
-- `legged_gym/utils/motion_loader.py`：AMP motion 加载器。扫描 `legged_gym/motions/*.npz`，校验多 clip 的 `dof_names/body_names/dt` 一致，并按时间插值采样 DOF、body pose 和速度。
+- `legged_gym/utils/motion_loader.py`：AMP motion 加载器。递归扫描 `legged_gym/motions/**/*.npz`，支持 `walk/run/jump` 分类子目录，校验多 clip 的 `dof_names/body_names/dt` 一致，并按时间插值采样 DOF、body pose 和速度。
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
 - `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward。
@@ -116,7 +116,7 @@ AMP 消融实验不新增 `r2amp_style0` 这类 task。统一使用：
 python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json configs/ablation/style0.json
 ```
 
-`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 61 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
+`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
 
 ### 2.3 回放链路
 
@@ -253,9 +253,12 @@ R2 机器人环境和配置。
 
 R2 基础配置。
 
+当前 DoF 合同：`NUM_ACTIONS = 26`，训练侧 URDF 解锁 `head_yaw_joint` 和
+`head_pitch_joint`，并在默认关节角、PD stiffness/damping、torque limits 中补齐头部参数。
+
 关键常量：
 
-- `NUM_ACTIONS = 24`
+- `NUM_ACTIONS = 26`
 - `PROPRIOCEPTION_DIM = 6 + 3 * NUM_ACTIONS`
 - `CMD_DIM = 3 + 4 + 1 + 1`
 - `TERRAIN_DIM = 221`
@@ -295,7 +298,7 @@ AMP 配置层。
 重要字段：
 
 - `motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions"`
-- `amp_obs_dim = 73`
+- `amp_obs_dim = 77`
 - `num_amp_obs_steps = 2`
 - `key_body_names = ["left_arm_yaw_link", "right_arm_yaw_link", "left_ankle_roll_link", "right_ankle_roll_link"]`
 - `reference_body_name = "base_link"`
@@ -879,6 +882,9 @@ R2V2 机器人资产目录，是当前 R2 训练配置实际引用的 asset 来�
 
 R2V2 URDF asset。`R2Cfg.asset.file` 默认指向它。
 
+当前头部状态：`head_yaw_joint` 和 `head_pitch_joint` 为 `revolute`，训练侧 active DoF 为 26，
+用于和 LAFAN1 R2V2 26DoF `.npz` motion 合同保持一致。
+
 内容包括：
 
 - `base_link`
@@ -886,7 +892,7 @@ R2V2 URDF asset。`R2Cfg.asset.file` 默认指向它。
 - 腰：waist yaw/pitch
 - 双臂：shoulder pitch/roll/yaw、arm pitch/yaw
 - 手部壳体 fixed link
-- 头部 fixed link
+- 头部 yaw/pitch revolute link
 - IMU fixed link
 
 训练环境会通过 Isaac Gym 读取这个 URDF，获取 DOF、body、collision、visual、joint limit 等。
@@ -905,12 +911,12 @@ R2V2 MuJoCo XML asset。
 
 ### `HEAD_LOCK_REVIEW.md`
 
-记录头部关节锁定说明：
+记录头部关节状态说明：
 
-- `head_yaw_joint`：从 revolute 改 fixed。
-- `head_pitch_joint`：从 revolute 改 fixed。
+- `head_yaw_joint`：当前为 revolute。
+- `head_pitch_joint`：当前为 revolute。
 
-目标是无灵巧手情况下锁头部 2 DOF，保持身体 active DOF 设定。
+目标是在无灵巧手情况下保留头部 2 DoF，使训练侧 26DoF 合同和 LAFAN1 R2V2 `.npz` motion 一致。
 
 ### `meshes_shell/`
 

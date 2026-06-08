@@ -84,12 +84,13 @@ def validate_amp_cfg_dims(env_cfg, train_cfg=None):
     env_amp_obs_dim = getattr(env_amp, "amp_obs_dim", None)
     if key_body_names is None or env_amp_obs_dim is None:
         return
-    # AMP obs layout is robot state base (61) plus xyz for each selected key body.
-    expected_dim = 61 + 3 * len(key_body_names)
+    # AMP obs layout is dof_pos + dof_vel + root scalars/vectors + key-body xyz.
+    num_actions = getattr(getattr(env_cfg, "env", None), "num_actions", 24)
+    expected_dim = 2 * num_actions + 13 + 3 * len(key_body_names)
     if env_amp_obs_dim != expected_dim:
         raise ValueError(
             f"env.amp.amp_obs_dim={env_amp_obs_dim} does not match "
-            f"61 + 3 * len(env.amp.key_body_names)={expected_dim}"
+            f"2 * env.num_actions + 13 + 3 * len(env.amp.key_body_names)={expected_dim}"
         )
     if train_amp is not None and hasattr(train_amp, "amp_obs_dim"):
         train_amp_obs_dim = train_amp.amp_obs_dim

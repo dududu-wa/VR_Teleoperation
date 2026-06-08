@@ -52,9 +52,10 @@ class MotionLoader:
         if os.path.isfile(motion_path):
             return [motion_path]
         if os.path.isdir(motion_path):
-            motion_files = sorted(glob.glob(os.path.join(motion_path, "*.npz")))
+            # Allow one motion root with category folders such as walk/run/jump.
+            motion_files = sorted(glob.glob(os.path.join(motion_path, "**", "*.npz"), recursive=True))
             if not motion_files:
-                raise FileNotFoundError(f"No .npz motion files found in directory: {motion_path}")
+                raise FileNotFoundError(f"No .npz motion files found under directory: {motion_path}")
             return motion_files
         raise FileNotFoundError(f"Motion path not found: {motion_path}")
 

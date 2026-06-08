@@ -6,15 +6,48 @@ The AMP pipeline reads `.npz` files directly from this folder. We do not require
 
 ## Directory Contract
 
-- Store one or more motion clips as `.npz` files in this directory.
-- The AMP config points to the directory itself, not to a single file.
-- The motion loader scans `*.npz` in filename-sorted order and treats each file as one clip.
+- Store one or more motion clips as `.npz` files in this directory or in one-level category folders.
+- The AMP config can point to the root directory or to a category subdirectory.
+- The motion loader scans `**/*.npz` in filename-sorted order and treats each file as one clip.
 
 Current default AMP path:
 
 ```text
 {LEGGED_GYM_ROOT_DIR}/legged_gym/motions
 ```
+
+Recommended category layout for the current LAFAN1 R2V2 exports:
+
+```text
+legged_gym/motions/
+  walk/
+    walk1_subject1.npz
+    walk1_subject2.npz
+    walk1_subject5.npz
+    walk2_subject1.npz
+    walk2_subject3.npz
+    walk2_subject4.npz
+    walk3_subject1.npz
+    walk3_subject2.npz
+    walk3_subject3.npz
+    walk3_subject4.npz
+    walk3_subject5.npz
+    walk4_subject1.npz
+  run/
+    run1_subject2.npz
+    run1_subject5.npz
+    run2_subject1.npz
+    run2_subject4.npz
+  jump/
+    jumps1_subject1.npz
+    jumps1_subject2.npz
+    jumps1_subject5.npz
+```
+
+Use `configs/ablation/motion_walk.json`, `motion_run.json`, or `motion_jump.json`
+when a run should use only one category. Pointing AMP at the root directory mixes
+all categories, which is useful for broad style priors but can conflict with
+fixed command presets such as stand, walk, turn, and strafe.
 
 ## Required NPZ Fields
 
