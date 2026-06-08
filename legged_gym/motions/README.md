@@ -49,6 +49,11 @@ when a run should use only one category. Pointing AMP at the root directory mixe
 all categories, which is useful for broad style priors but can conflict with
 fixed command presets such as stand, walk, turn, and strafe.
 
+For the 0.5 style-weight comparison, use:
+
+- `configs/ablation/mixed_sw05.json`: mixed `walk/run/jump` prior.
+- `configs/ablation/walk_sw05.json`: walk-only prior.
+
 ## Required NPZ Fields
 
 Each motion file must contain the fields below:
