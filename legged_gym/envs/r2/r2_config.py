@@ -323,7 +323,8 @@ class R2CfgPPO( LeggedRobotCfgPPO ):
 
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
-        use_wbc_sym_loss = False
+        # Keep HugWBC's legacy symmetry regularizer active for task-side gait structure.
+        use_wbc_sym_loss = True
         symmetry_loss_coef = 0.5
         sync_update = True
 

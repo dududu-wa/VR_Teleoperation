@@ -11,10 +11,10 @@ from legged_gym.envs.r2.r2_config import (
 from legged_gym import LEGGED_GYM_ROOT_DIR
 
 PROPRIOCEPTION_DIM = BASE_PROPRIOCEPTION_DIM
-INTERRUPT_IN_CMD = False
+INTERRUPT_IN_CMD = True
 NOISE_IN_PRIVILEGE = False
 EXECUTE_IN_PRIVILEGE = False
-DISTURB_DIM = 0
+DISTURB_DIM = 8
 CMD_DIM = BASE_CMD_DIM + int(INTERRUPT_IN_CMD)
 PRIVILEGED_DIM = BASE_PRIVILEGED_DIM + DISTURB_DIM * NOISE_IN_PRIVILEGE + NUM_ACTIONS * EXECUTE_IN_PRIVILEGE
 
@@ -25,7 +25,7 @@ class R2InterruptCfg(R2Cfg):
         num_partial_obs = PROPRIOCEPTION_DIM + CMD_DIM + CLOCK_INPUT
     
     class rewards(R2Cfg.rewards):
-        reward_curriculum_list = ['action_rate',
+        reward_curriculum_list = ['action_rate_upper', 'action_rate_lower',
                                   'feet_stumble',
                                   'joint_power_distribution', 'feet_contact_forces',
                                   'dof_acc', 'torques',  
@@ -37,9 +37,9 @@ class R2InterruptCfg(R2Cfg):
                                   'standing_air',
                                   ]
         class scales(R2Cfg.rewards.scales):
-            action_rate = -0.01
-            action_rate_lower = 0
-            action_rate_upper = 0
+            action_rate = 0
+            action_rate_lower = -0.01
+            action_rate_upper = -0.01
             base_height = -40.0
             stand_still = -10.0
             standing = 2.0
@@ -54,11 +54,30 @@ class R2InterruptCfg(R2Cfg):
     
     class disturb:
         max_curriculum = 1.0
-        use_disturb = False
+        use_disturb = True
         disturb_dim = DISTURB_DIM
         disturb_scale = 2
-        noise_scale = []
-        noise_lowerbound = []
+        # HugWBC-compatible 8-slot upper-body interrupt target range.
+        noise_scale = [
+            5.2,
+            3.3,
+            5.5,
+            3.7,
+            5.2,
+            3.3,
+            5.5,
+            3.7,
+        ]
+        noise_lowerbound = [
+            -2.6,
+            -0.3,
+            -1.2,
+            -1.2,
+            -2.6,
+            -3.0,
+            -4.3,
+            -1.2,
+        ]
         uniform_scale = 1 
         uniform_noise = True 
         noise_ratio = 1 
