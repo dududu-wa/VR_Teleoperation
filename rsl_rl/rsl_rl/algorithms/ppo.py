@@ -54,6 +54,10 @@ class PPO:
                  use_clipped_value_loss=True,
                  use_wbc_sym_loss=False,
                  symmetry_loss_coef=0.5,
+                 symmetry_action_indices=None,
+                 symmetry_action_signs=None,
+                 symmetry_obs_indices=None,
+                 symmetry_obs_signs=None,
                  sync_update=False,
                  schedule="fixed",
                  desired_kl=0.01,
@@ -69,11 +73,17 @@ class PPO:
         self.learning_rate = learning_rate
         self.use_wbc_sym_loss = use_wbc_sym_loss
         self.symmetry_loss_coef = symmetry_loss_coef
+        self.symmetry_action_indices = self._symmetry_tensor(symmetry_action_indices, dtype=torch.long)
+        self.symmetry_action_signs = self._symmetry_tensor(symmetry_action_signs)
+        self.symmetry_obs_indices = self._symmetry_tensor(symmetry_obs_indices, dtype=torch.long)
+        self.symmetry_obs_signs = self._symmetry_tensor(symmetry_obs_signs)
         self.sync_update = sync_update
 
         # PPO components
         self.actor_critic = actor_critic
         self.actor_critic.to(self.device)
+        if self.use_wbc_sym_loss:
+            self._validate_symmetry_cfg()
         self.storage = None # initialized later
         self.optimizer = optim.AdamW(self.actor_critic.parameters(), lr=learning_rate)
         self.transition = RolloutStorage.Transition()
@@ -88,6 +98,41 @@ class PPO:
         self.lam = lam
         self.max_grad_norm = max_grad_norm
         self.use_clipped_value_loss = use_clipped_value_loss
+
+    def _symmetry_tensor(self, values, dtype=torch.float):
+        if values is None:
+            return None
+        return torch.tensor(values, dtype=dtype, device=self.device, requires_grad=False)
+
+    def _validate_symmetry_cfg(self):
+        tensors = [
+            self.symmetry_action_indices,
+            self.symmetry_action_signs,
+            self.symmetry_obs_indices,
+            self.symmetry_obs_signs,
+        ]
+        if any(tensor is None for tensor in tensors):
+            raise ValueError("use_wbc_sym_loss=True requires explicit symmetry index and sign maps")
+        if len(self.symmetry_action_indices) != len(self.symmetry_action_signs):
+            raise ValueError("symmetry_action_indices and symmetry_action_signs must have the same length")
+        if len(self.symmetry_obs_indices) != len(self.symmetry_obs_signs):
+            raise ValueError("symmetry_obs_indices and symmetry_obs_signs must have the same length")
+        action_dim = int(self.actor_critic.std.numel())
+        if len(self.symmetry_action_indices) != action_dim:
+            raise ValueError(
+                f"symmetry action map length {len(self.symmetry_action_indices)} does not match action dim {action_dim}"
+            )
+        if int(torch.min(self.symmetry_action_indices)) < 0 or int(torch.max(self.symmetry_action_indices)) >= action_dim:
+            raise ValueError("symmetry_action_indices contains an index outside the action dimension")
+
+    def _mirror_tensor(self, tensor, indices, signs, name):
+        if tensor.shape[-1] != len(indices):
+            raise ValueError(f"{name} mirror map length {len(indices)} does not match tensor dim {tensor.shape[-1]}")
+        if int(torch.min(indices)) < 0 or int(torch.max(indices)) >= tensor.shape[-1]:
+            raise ValueError(f"{name} mirror map contains an out-of-range index")
+        sign_shape = [1] * tensor.dim()
+        sign_shape[-1] = len(signs)
+        return tensor.index_select(-1, indices) * signs.view(*sign_shape)
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
@@ -185,27 +230,22 @@ class PPO:
 
                 sym_loss = torch.tensor(0.0, device=self.device)
                 if self.use_wbc_sym_loss:
-                    # Legacy whole-body symmetry map. Keep disabled for other robot layouts.
-                    actions_permutation = torch.tensor([-5, -6, 7, 8, 9, -0.001, -1, 2, 3, 4, -10, 15, -16, -17, 18, 11, -12, -13, 14])
-                    observations_permutation = torch.tensor([-0.0001, 1, -2, 3, -4, 5,
-                                                            -11, -12, 13, 14, 15, -6, -7, 8, 9, 10, -16, 21, -22, -23, 24, 17, -18, -19, 20,
-                                                            -30, -31, 32, 33, 34, -25, 26, 27, 28, 29, -35, 40, -41, -42, 43, 36, -37, -38, 39,
-                                                            -49, -50, 51, 52, 53, -44, -45, 46, 47, 48, -54, 59, -60, -61, 62, 55, -56, -57, 58,
-                                                            63, -64, -65, 66, 67, 68, 69, 70, 71, -72, 73, 75, 74
-                                                            ])
-
-                    act_perm_mat = torch.zeros(len(actions_permutation), len(actions_permutation), requires_grad=False, device=self.device)
-                    obs_perm_mat = torch.zeros(len(observations_permutation), len(observations_permutation), requires_grad=False, device=self.device)
-                    for i, perm in enumerate(actions_permutation):
-                        act_perm_mat[i][int(torch.abs(perm))] = torch.sign(perm)
-                    for i, perm in enumerate(observations_permutation):
-                        obs_perm_mat[i][int(torch.abs(perm))] = torch.sign(perm)
-
+                    # Mirror loss follows the bilateral policy consistency idea from HugWBC,
+                    # but uses robot-specific index/sign maps instead of the old H1 constants.
                     origin_act, _ = self.actor_critic.act_inference(obs_batch, masks=masks_batch, privileged_obs=critic_obs_batch)
-                    mirror_partial_obs_batch = torch.matmul(obs_batch[..., :len(observations_permutation)], obs_perm_mat)
-                    mirror_obs_batch = torch.cat((mirror_partial_obs_batch, obs_batch[..., len(observations_permutation):]), dim=-1)
+                    mirror_obs_batch = self._mirror_tensor(
+                        obs_batch,
+                        self.symmetry_obs_indices,
+                        self.symmetry_obs_signs,
+                        "observation",
+                    )
                     mirror_act, _ = self.actor_critic.act_inference(mirror_obs_batch, masks=masks_batch, privileged_obs=critic_obs_batch)
-                    recovery_act = torch.matmul(mirror_act, act_perm_mat)
+                    recovery_act = self._mirror_tensor(
+                        mirror_act,
+                        self.symmetry_action_indices,
+                        self.symmetry_action_signs,
+                        "action",
+                    )
 
                     sym_loss = self.symmetry_loss_coef * (origin_act.detach() - recovery_act).pow(2).mean()
 

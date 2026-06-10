@@ -7,6 +7,43 @@ TERRAIN_DIM = 221
 PRIVILEGED_DIM = 3 + 1 + 2 + 1 + 6
 CLOCK_INPUT = 2
 
+# R2 bilateral mirror maps use the DOF order defined in init_state.default_joint_angles.
+# Signs follow sagittal-plane reflection: pitch-like joints keep sign, roll/yaw-like joints flip.
+R2_MIRROR_ACTION_INDICES = [
+    6, 7, 8, 9, 10, 11,
+    0, 1, 2, 3, 4, 5,
+    12, 13,
+    19, 20, 21, 22, 23,
+    14, 15, 16, 17, 18,
+    24, 25,
+]
+R2_MIRROR_ACTION_SIGNS = [
+    1, -1, -1, 1, 1, -1,
+    1, -1, -1, 1, 1, -1,
+    -1, 1,
+    1, -1, -1, 1, -1,
+    1, -1, -1, 1, -1,
+    -1, 1,
+]
+R2_MIRROR_BASE_COMMAND_INDICES = list(range(84, 84 + CMD_DIM))
+R2_MIRROR_BASE_COMMAND_SIGNS = [1, -1, -1, 1, 1, 1, 1, 1, 1]
+R2_MIRROR_BASE_OBS_INDICES = (
+    [0, 1, 2, 3, 4, 5]
+    + [6 + i for i in R2_MIRROR_ACTION_INDICES]
+    + [6 + NUM_ACTIONS + i for i in R2_MIRROR_ACTION_INDICES]
+    + [6 + 2 * NUM_ACTIONS + i for i in R2_MIRROR_ACTION_INDICES]
+    + R2_MIRROR_BASE_COMMAND_INDICES
+    + [94, 93]
+)
+R2_MIRROR_BASE_OBS_SIGNS = (
+    [-1, 1, -1, 1, -1, 1]
+    + R2_MIRROR_ACTION_SIGNS
+    + R2_MIRROR_ACTION_SIGNS
+    + R2_MIRROR_ACTION_SIGNS
+    + R2_MIRROR_BASE_COMMAND_SIGNS
+    + [1, 1]
+)
+
 class R2Cfg( LeggedRobotCfg ):
     class env( LeggedRobotCfg.env ):
         num_observations = PROPRIOCEPTION_DIM + CMD_DIM + CLOCK_INPUT + PRIVILEGED_DIM + TERRAIN_DIM
@@ -323,9 +360,13 @@ class R2CfgPPO( LeggedRobotCfgPPO ):
 
     class algorithm( LeggedRobotCfgPPO.algorithm ):
         entropy_coef = 0.01
-        # Keep HugWBC's legacy symmetry regularizer active for task-side gait structure.
+        # R2-specific bilateral mirror regularizer; do not reuse HugWBC's 19-action H1 table.
         use_wbc_sym_loss = True
         symmetry_loss_coef = 0.5
+        symmetry_action_indices = R2_MIRROR_ACTION_INDICES
+        symmetry_action_signs = R2_MIRROR_ACTION_SIGNS
+        symmetry_obs_indices = R2_MIRROR_BASE_OBS_INDICES
+        symmetry_obs_signs = R2_MIRROR_BASE_OBS_SIGNS
         sync_update = True
 
     

@@ -78,6 +78,20 @@ class R2InterruptRobot(R2Robot):
     def initial_disturb(self, cfg: R2InterruptCfg):
         self.use_disturb = cfg.disturb.use_disturb
         self.disturb_dim = cfg.disturb.disturb_dim
+        disturb_action_indices = getattr(cfg.disturb, "disturb_action_indices", None)
+        if disturb_action_indices is None:
+            raise ValueError("R2 interrupt requires explicit cfg.disturb.disturb_action_indices")
+        if len(disturb_action_indices) != self.disturb_dim:
+            raise ValueError("disturb_action_indices length must match cfg.disturb.disturb_dim")
+        self.disturb_action_indices = torch.tensor(disturb_action_indices, dtype=torch.long, device=self.device, requires_grad=False)
+        self.non_disturb_action_indices = torch.tensor(
+            [i for i in range(self.num_dof) if i not in disturb_action_indices],
+            dtype=torch.long,
+            device=self.device,
+            requires_grad=False,
+        )
+        self.default_disturb_dof_pos = self.default_dof_pos.index_select(1, self.disturb_action_indices)
+        self.disturb_dof_pos_limits = self.dof_pos_limits.index_select(0, self.disturb_action_indices)
         self.disturb_scale = cfg.disturb.disturb_scale
         self.disturb_switch_prob = cfg.disturb.switch_prob
         self.disturb_actions = torch.zeros(self.num_envs, self.disturb_dim, dtype=torch.float, device=self.device, requires_grad=False)
@@ -110,6 +124,12 @@ class R2InterruptRobot(R2Robot):
         self.num_steps = 0
         self.interrupt_in_command = cfg.disturb.interrupt_in_cmd
         self.stand_interrupt_only = cfg.disturb.stand_interrupt_only
+
+    def _disturb_values(self, tensor):
+        return tensor.index_select(1, self.disturb_action_indices)
+
+    def _non_disturb_values(self, tensor):
+        return tensor.index_select(1, self.non_disturb_action_indices)
         
 
     def _resample_commands(self, env_ids):
@@ -230,7 +250,7 @@ class R2InterruptRobot(R2Robot):
         self.disturb_masks[env_ids] = (torch.rand(len(env_ids))<=0.5).to(self.device) # Reset with half with disturb.
         is_noise = torch.rand(len(env_ids)) <= self.disturb_noise_ratio
         self.disturb_isnoise[env_ids] = is_noise.to(self.device)
-        self.disturb_actions[env_ids] = self.dof_pos[env_ids, -self.disturb_dim:] - self.default_dof_pos[:, -self.disturb_dim:]
+        self.disturb_actions[env_ids] = self._disturb_values(self.dof_pos)[env_ids] - self.default_disturb_dof_pos
         if self.disturb_replace_action:
             self.interrupt_mask[env_ids] = self.disturb_masks[env_ids]
         else:
@@ -260,9 +280,9 @@ class R2InterruptRobot(R2Robot):
         std = torch.ones(self.disturb_dim, device=self.device) * self.disturb_scale
 
         return torch.clamp(
-            torch.normal(mean, std) + self.dof_pos[:, -self.disturb_dim:] - self.default_dof_pos[:, -self.disturb_dim:],
-            self.dof_pos_limits[-self.disturb_dim:, 0].view(1,-1).repeat(self.num_envs, 1) - self.default_dof_pos[:, -self.disturb_dim:],
-            self.dof_pos_limits[-self.disturb_dim:, 1].view(1,-1).repeat(self.num_envs, 1) - self.default_dof_pos[:, -self.disturb_dim:]
+            torch.normal(mean, std) + self._disturb_values(self.dof_pos) - self.default_disturb_dof_pos,
+            self.disturb_dof_pos_limits[:, 0].view(1,-1).repeat(self.num_envs, 1) - self.default_disturb_dof_pos,
+            self.disturb_dof_pos_limits[:, 1].view(1,-1).repeat(self.num_envs, 1) - self.default_disturb_dof_pos
         )
     
     def Uniform_disturb_resample(self):
@@ -281,9 +301,9 @@ class R2InterruptRobot(R2Robot):
             targets[right_env_maks][:, [6, 7]] = 0
 
         return torch.clamp(
-            targets - self.default_dof_pos[:, -self.disturb_dim:],
-            self.dof_pos_limits[-self.disturb_dim:, 0].view(1,-1).repeat(self.num_envs, 1) - self.default_dof_pos[:, -self.disturb_dim:],
-            self.dof_pos_limits[-self.disturb_dim:, 1].view(1,-1).repeat(self.num_envs, 1) - self.default_dof_pos[:, -self.disturb_dim:]
+            targets - self.default_disturb_dof_pos,
+            self.disturb_dof_pos_limits[:, 0].view(1,-1).repeat(self.num_envs, 1) - self.default_disturb_dof_pos,
+            self.disturb_dof_pos_limits[:, 1].view(1,-1).repeat(self.num_envs, 1) - self.default_disturb_dof_pos
         )
 
     def reset_idx(self, env_ids):         
@@ -321,19 +341,19 @@ class R2InterruptRobot(R2Robot):
     def curriculum_disturb_fusion(self, actions):
         disturb_action = torch.clamp(
             self.disturb_actions,
-            (- self.disturb_rad + self.dof_pos[:, -self.disturb_dim:] - self.default_dof_pos[:, -self.disturb_dim:]) / self.cfg.control.action_scale,
-            (self.disturb_rad + self.dof_pos[:, -self.disturb_dim:] - self.default_dof_pos[:, -self.disturb_dim:]) / self.cfg.control.action_scale
+            (- self.disturb_rad + self._disturb_values(self.dof_pos) - self.default_disturb_dof_pos) / self.cfg.control.action_scale,
+            (self.disturb_rad + self._disturb_values(self.dof_pos) - self.default_disturb_dof_pos) / self.cfg.control.action_scale
         ) # Nosie or traj Target
 
         fused_disturb_action = self.disturb_rad_curriculum.unsqueeze(-1) * disturb_action +  \
-                         (1 - self.disturb_rad_curriculum.unsqueeze(-1)) * actions[:, -self.disturb_dim:]
+                         (1 - self.disturb_rad_curriculum.unsqueeze(-1)) * self._disturb_values(actions)
         
         return fused_disturb_action
 
     def curriculum_disturb_clipping_mean(self, actions):
         # cliping mean with curriculum
-        noise_mean = self.disturb_rad_curriculum.unsqueeze(-1) * (self.dof_pos[:, -self.disturb_dim:] - self.default_dof_pos[:, -self.disturb_dim:])+ \
-                (1-self.disturb_rad_curriculum.unsqueeze(-1))  * (actions[:, -self.disturb_dim:] * self.cfg.control.action_scale)
+        noise_mean = self.disturb_rad_curriculum.unsqueeze(-1) * (self._disturb_values(self.dof_pos) - self.default_disturb_dof_pos)+ \
+                (1-self.disturb_rad_curriculum.unsqueeze(-1))  * (self._disturb_values(actions) * self.cfg.control.action_scale)
 
         disturb_actions = torch.clamp(
             self.disturb_actions,
@@ -344,8 +364,8 @@ class R2InterruptRobot(R2Robot):
     
     def curriculum_disturb_clipping_mean_rad(self, actions):
         # clipping mean with curriculum
-        noise_mean = self.disturb_rad_curriculum.unsqueeze(-1) * (self.dof_pos[:, -self.disturb_dim:] - self.default_dof_pos[:, -self.disturb_dim:])+ \
-                (1-self.disturb_rad_curriculum.unsqueeze(-1))  * (actions[:, -self.disturb_dim:] * self.cfg.control.action_scale)
+        noise_mean = self.disturb_rad_curriculum.unsqueeze(-1) * (self._disturb_values(self.dof_pos) - self.default_disturb_dof_pos)+ \
+                (1-self.disturb_rad_curriculum.unsqueeze(-1))  * (self._disturb_values(actions) * self.cfg.control.action_scale)
         
         # clipping action rate with curriculum by rad.
         disturb_actions = torch.clamp(
@@ -368,17 +388,17 @@ class R2InterruptRobot(R2Robot):
                 disturb_action_clip = self.curriculum_disturb_clipping_mean_rad(cliped_actions)
 
             if self.disturb_replace_action:
-                cliped_actions[:, -self.disturb_dim:] = torch.where(
+                cliped_actions[:, self.disturb_action_indices] = torch.where(
                     self.disturb_masks.view(-1, 1).repeat(1, self.disturb_dim),
                     disturb_action_clip,
-                    cliped_actions[:, -self.disturb_dim:]
+                    self._disturb_values(cliped_actions)
                 )
             else:
-                # print("ACTION: ", self.actions[0, -self.disturb_dim:], " DISTURB: ", self.disturb_actions[0])
-                cliped_actions[:, -self.disturb_dim:] = torch.where(
+                # Apply additive interrupt only to the configured R2 arm joints.
+                cliped_actions[:, self.disturb_action_indices] = torch.where(
                     self.disturb_masks.view(-1, 1).repeat(1, self.disturb_dim),
-                    cliped_actions[:, -self.disturb_dim:] + disturb_action_clip,
-                    cliped_actions[:, -self.disturb_dim:]
+                    self._disturb_values(cliped_actions) + disturb_action_clip,
+                    self._disturb_values(cliped_actions)
                 )
             
             cliped_actions = torch.clip(cliped_actions, -clip_actions, clip_actions).to(self.device)
@@ -445,17 +465,15 @@ class R2InterruptRobot(R2Robot):
     def _reward_action_rate_upper(self): 
         if not self.use_disturb or self.disturb_dim <= 0:
             return torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
-        upper_start = max(self.num_dof - self.disturb_dim, 0)
-        diff_1 = torch.sum(torch.square(self.actions[:, upper_start:self.num_dof] - self.last_actions[:, upper_start:self.num_dof]), dim=1)
-        diff_2 = torch.sum(torch.square(self.actions[:, upper_start:self.num_dof] - 2 * self.last_actions[:, upper_start:self.num_dof] + self.last_last_actions[:, upper_start:self.num_dof]), dim=1)
+        diff_1 = torch.sum(torch.square(self._disturb_values(self.actions) - self._disturb_values(self.last_actions)), dim=1)
+        diff_2 = torch.sum(torch.square(self._disturb_values(self.actions) - 2 * self._disturb_values(self.last_actions) + self._disturb_values(self.last_last_actions)), dim=1)
         return (diff_1 + diff_2) * (~self.interrupt_mask)
     
     def _reward_action_rate_lower(self): 
         if not self.use_disturb or self.disturb_dim <= 0:
             return super()._reward_action_rate()
-        upper_start = max(self.num_dof - self.disturb_dim, 0)
-        diff_1 = torch.sum(torch.square(self.actions[:, :upper_start] - self.last_actions[:, :upper_start]), dim=1)
-        diff_2 = torch.sum(torch.square(self.actions[:, :upper_start] - 2 * self.last_actions[:, :upper_start] + self.last_last_actions[:, :upper_start]), dim=1)
+        diff_1 = torch.sum(torch.square(self._non_disturb_values(self.actions) - self._non_disturb_values(self.last_actions)), dim=1)
+        diff_2 = torch.sum(torch.square(self._non_disturb_values(self.actions) - 2 * self._non_disturb_values(self.last_actions) + self._non_disturb_values(self.last_last_actions)), dim=1)
         return diff_1 + diff_2
 
     def _reward_standing_joint_deviation(self):
@@ -484,8 +502,8 @@ class R2InterruptRobot(R2Robot):
             return super()._reward_dof_pos_limits()
         out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0]).clip(max=0.) # lower limit
         out_of_limits += (self.dof_pos - self.dof_pos_limits[:, 1]).clip(min=0.)
-        upper_start = max(self.num_dof - self.disturb_dim, 0)
-        out_of_limits[:, upper_start:] = 0
+        # Exempt only the explicitly interrupted arm joints, not the last N R2 joints.
+        out_of_limits[:, self.disturb_action_indices] = 0
         return torch.sum(out_of_limits, dim=1)
     
     def _reward_dof_acc(self):
@@ -493,8 +511,8 @@ class R2InterruptRobot(R2Robot):
         if not self.use_disturb or self.disturb_dim <= 0:
             return super()._reward_dof_acc()
         reward = torch.square((self.last_dof_vel - self.dof_vel) / self.dt)
-        upper_start = max(self.num_dof - self.disturb_dim, 0)
-        reward[:, upper_start:] = 0
+        # Exempt only joints controlled by the external interrupt target.
+        reward[:, self.disturb_action_indices] = 0
         return torch.sum(reward, dim=1)
     
     def _reward_dof_vel_limits(self):       
@@ -502,7 +520,6 @@ class R2InterruptRobot(R2Robot):
         if not self.use_disturb or self.disturb_dim <= 0:
             return super()._reward_dof_vel_limits()
         dof_vel_limits = torch.clip(10 * self.velocity_level.unsqueeze(-1).repeat(1,self.num_dof), min=10, max=20)
-        upper_start = max(self.num_dof - self.disturb_dim, 0)
-        error = torch.sum((torch.abs(self.dof_vel[:, upper_start:]) - dof_vel_limits[:, upper_start:]).clip(min=0., max=15.), dim=1)
+        error = torch.sum((torch.abs(self._disturb_values(self.dof_vel)) - self._disturb_values(dof_vel_limits)).clip(min=0., max=15.), dim=1)
         rew = 1 - torch.exp(-1 * error)
         return rew

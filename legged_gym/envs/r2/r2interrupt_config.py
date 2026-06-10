@@ -7,6 +7,8 @@ from legged_gym.envs.r2.r2_config import (
     TERRAIN_DIM,
     PRIVILEGED_DIM as BASE_PRIVILEGED_DIM,
     CLOCK_INPUT,
+    R2_MIRROR_ACTION_INDICES,
+    R2_MIRROR_ACTION_SIGNS,
 )
 from legged_gym import LEGGED_GYM_ROOT_DIR
 
@@ -17,6 +19,24 @@ EXECUTE_IN_PRIVILEGE = False
 DISTURB_DIM = 8
 CMD_DIM = BASE_CMD_DIM + int(INTERRUPT_IN_CMD)
 PRIVILEGED_DIM = BASE_PRIVILEGED_DIM + DISTURB_DIM * NOISE_IN_PRIVILEGE + NUM_ACTIONS * EXECUTE_IN_PRIVILEGE
+R2_INTERRUPT_MIRROR_COMMAND_INDICES = list(range(PROPRIOCEPTION_DIM, PROPRIOCEPTION_DIM + CMD_DIM))
+R2_INTERRUPT_MIRROR_COMMAND_SIGNS = [1, -1, -1, 1, 1, 1, 1, 1, 1, 1]
+R2_INTERRUPT_MIRROR_OBS_INDICES = (
+    [0, 1, 2, 3, 4, 5]
+    + [6 + i for i in R2_MIRROR_ACTION_INDICES]
+    + [6 + NUM_ACTIONS + i for i in R2_MIRROR_ACTION_INDICES]
+    + [6 + 2 * NUM_ACTIONS + i for i in R2_MIRROR_ACTION_INDICES]
+    + R2_INTERRUPT_MIRROR_COMMAND_INDICES
+    + [PROPRIOCEPTION_DIM + CMD_DIM + 1, PROPRIOCEPTION_DIM + CMD_DIM]
+)
+R2_INTERRUPT_MIRROR_OBS_SIGNS = (
+    [-1, 1, -1, 1, -1, 1]
+    + R2_MIRROR_ACTION_SIGNS
+    + R2_MIRROR_ACTION_SIGNS
+    + R2_MIRROR_ACTION_SIGNS
+    + R2_INTERRUPT_MIRROR_COMMAND_SIGNS
+    + [1, 1]
+)
 
 
 class R2InterruptCfg(R2Cfg):
@@ -56,8 +76,11 @@ class R2InterruptCfg(R2Cfg):
         max_curriculum = 1.0
         use_disturb = True
         disturb_dim = DISTURB_DIM
+        # Mirrors HugWBC h1interrupt_config.py's 4+4 arm target ranges on R2's DOF order.
+        # R2 is legs(12), waist(2), left arm(5), right arm(5), head(2); the last 8 DOFs include head.
+        disturb_action_indices = [14, 15, 16, 17, 19, 20, 21, 22]
         disturb_scale = 2
-        # HugWBC-compatible 8-slot upper-body interrupt target range.
+        # HugWBC-compatible 8-slot bilateral arm interrupt target range.
         noise_scale = [
             5.2,
             3.3,
@@ -127,3 +150,7 @@ class R2InterruptCfgPPO(R2CfgPPO):
             
         critic_hidden_dims = [512, 256, 128]
         critic_obs_dim = PROPRIOCEPTION_DIM + CMD_DIM + CLOCK_INPUT + PRIVILEGED_DIM + TERRAIN_DIM
+
+    class algorithm(R2CfgPPO.algorithm):
+        symmetry_obs_indices = R2_INTERRUPT_MIRROR_OBS_INDICES
+        symmetry_obs_signs = R2_INTERRUPT_MIRROR_OBS_SIGNS

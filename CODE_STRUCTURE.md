@@ -267,8 +267,8 @@ R2 基础配置。
 
 关键类：
 
-- `R2Cfg`：定义 24 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。`shoulder_deviation=0` 会让 `R2Robot._prepare_reward_function()` 移除肩/手臂偏离默认姿态的奖励项，相当于关闭 PPO 训练里的肩膀回复/回正惩罚开关。
-- `R2CfgPPO`：定义 policy 为 `MlpAdaptModel`，配置 proprioception/cmd/privileged/terrain 的维度分块，critic 网络和 PPO 训练参数。默认实验名 `r2_teacher`。`use_wbc_sym_loss=True`，与 HugWBC 一样启用 legacy 镜像 symmetry regularizer，以保留任务侧步态结构约束。
+- `R2Cfg`：定义 26 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。`shoulder_deviation=0` 会让 `R2Robot._prepare_reward_function()` 移除肩/手臂偏离默认姿态的奖励项，相当于关闭 PPO 训练里的肩膀回复/回正惩罚开关。
+- `R2CfgPPO`：定义 policy 为 `MlpAdaptModel`，配置 proprioception/cmd/privileged/terrain 的维度分块，critic 网络和 PPO 训练参数。默认实验名 `r2_teacher`。`use_wbc_sym_loss=True`，但不复用 HugWBC/H1 的 19 维动作硬编码；当前提供 R2 专用 26 维 action mirror map 和 95 维 base partial-observation mirror map。
 
 ##### `r2interrupt_config.py`
 
@@ -284,15 +284,16 @@ R2 基础配置。
 Current R2 interrupt defaults keep the R2 runner budget at `max_iterations=30000`
 while aligning the HugWBC interrupt behavior: `interrupt_in_cmd=True`,
 `use_disturb=True`, and split `action_rate_upper` / `action_rate_lower`. The 8
-disturb slots map to the final 8 action dimensions through
-`R2InterruptRobot.calculate_action()`.
+disturb slots map to explicit R2 bilateral arm indices `[14, 15, 16, 17, 19, 20,
+21, 22]` through `R2InterruptRobot.calculate_action()`, rather than the final 8
+action dimensions.
 
 所以默认配置下干扰机制会实际启用：interrupt flag 写入 command，`DISTURB_DIM=8`，且 `use_disturb=True`。
 
 关键类：
 
 - `R2InterruptCfg`：调整 observation/command/privileged 维度，新增 `disturb` 子配置，修改部分 reward scale。
-- `R2InterruptCfgPPO`：实验名 `r2_interrupt`，`max_iterations=30000`，继续使用 `MlpAdaptModel`。
+- `R2InterruptCfgPPO`：实验名 `r2_interrupt`，`max_iterations=30000`，继续使用 `MlpAdaptModel`，并把 symmetry obs map 覆盖为 96 维 interrupt partial-observation 版本；`r2amp` 继承该版本。
 
 ##### `r2_amp_config.py`
 
@@ -369,12 +370,12 @@ reward 约定：
 - `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等。
 - `_create_envs`：在父类创建 env 后，补充 disturb termination body 索引和 disturb mode mask。
 - `_resample_commands`：继承命令采样，并在需要时更新 disturb curriculum。
-- `calculate_action`：核心逻辑。先 clip policy action，再根据 disturb mask 替换或叠加末尾 `disturb_dim` 维动作，保存真实执行动作。
+- `calculate_action`：核心逻辑。先 clip policy action，再根据 disturb mask 替换或叠加 `cfg.disturb.disturb_action_indices` 指定的 R2 双臂动作，保存真实执行动作。
 - `_preprocess_obs/add_other_privilege`：可把 interrupt flag、目标扰动、实际执行动作拼入观测或 privileged obs。
 - `check_termination`：干扰模式下对部分 termination 做豁免。
 - reward override：中断时对肩部偏差、upper/lower action rate、碰撞、DOF limits/acc/vel 等做特殊处理。
 
-当前默认 `DISTURB_DIM=8`、`use_disturb=True`，因此 `r2int/r2amp` 默认使用 HugWBC 风格的上肢 interrupt/disturb 训练；末尾 8 维动作由 `calculate_action()` 按 disturb mask 替换或融合。
+当前默认 `DISTURB_DIM=8`、`use_disturb=True`，因此 `r2int/r2amp` 默认使用 HugWBC 风格的上肢 interrupt/disturb 训练；R2 显式双臂索引 `[14, 15, 16, 17, 19, 20, 21, 22]` 由 `calculate_action()` 按 disturb mask 替换或融合，头部动作不再被误纳入 interrupt。
 
 ### `legged_gym/utils/`
 
@@ -705,7 +706,7 @@ README 中通过 `pip install -e rsl_rl` 安装这个包。
 特别点：
 
 - `sync_update=True` 时会训练 actor 内部的 privileged reconstruction。
-- `use_wbc_sym_loss=True` 时有一套 legacy 镜像 symmetry loss。
+- `use_wbc_sym_loss=True` 时使用配置化镜像一致性损失：`pi(obs)` 与 `mirror_action(pi(mirror_obs))` 做 MSE。R2 当前使用 26 维 action map、base 95 维 obs map、interrupt/r2amp 96 维 obs map；旧 HugWBC/H1 19/76 维硬编码已不再作为 PPO 默认路径。
 - recurrent 分支接口存在，但当前 storage 没有对应 generator，默认 `ActorCritic.is_recurrent=False`。
 
 #### `amp_ppo.py`
