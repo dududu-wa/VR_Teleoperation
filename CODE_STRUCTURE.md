@@ -544,9 +544,9 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 - 复用 `task_registry.make_env()` 和 `task_registry.make_alg_runner()`，因此 `--task`、`--checkpoint`、`--load_run`、`--cfg_override_json` 的语义和训练入口一致。
 - 当使用 `--cfg_override_json` 时，必须显式传入 `--load_run`，避免从 `logs/<experiment>` 自动选择最新 run 时加载到其他消融组的 checkpoint。
 - 默认关闭 terrain curriculum、noise、domain randomization、command curriculum，并使用 plane 地形，保证固定 preset 评估更可复现。
-- 固定 preset 包括 `stand`、`walk_slow`、`walk_fast`、`turn_left`、`strafe_right`，也可用 `--preset` 指定子集。
+- 固定 preset 包括 `stand`、`walk_slow`、`walk_fast`、`run`、`jump`、`turn_left`、`strafe_right`，也可用 `--preset` 指定子集；其中 `jump` 复用 `play.py` 的 demo 命令，`run` 对应 `configs/ablation/motion_run.json` 指向的 run 类 motion prior。
 - 输出 `metrics.json` 和 `metrics.csv`，字段包括速度 RMSE、task return、fall rate、episode length、base height / roll-pitch violation、AMP style reward、discriminator logit、torque/action-rate/dof-acc 平滑性指标。
-- `--compute_dtw` 目前只保留 DTW 字段和说明；真正的 DTW pose error 需要先定义 preset 与 reference motion 的匹配规则，避免把未对齐的 motion 误报成风格误差。
+- DTW 输出通过 `_compute_dtw_for_episode()` 在 episode 结束时对 policy 轨迹和 `_motion_loader` 中的参考 clip 做 best-clip DTW；新增 `run`、`jump` preset 后，可用 `--preset run --preset jump` 针对 run/jump 类 motion 做同一套 `joint_pose_error_dtw_m` / `key_body_error_dtw_m` 汇总。
 
 典型命令：
 

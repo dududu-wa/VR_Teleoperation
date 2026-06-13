@@ -20,6 +20,12 @@ PRESETS = {
     "stand": [0.0, 0.0, 0.0, 1.60, 0.5, 0.5, 0.08, 0.00, 0.00, 0.0],
     "walk_slow": [0.5, 0.0, 0.0, 2.20, 0.5, 0.5, 0.12, 0.00, 0.00, 0.0],
     "walk_fast": [1.2, 0.0, 0.0, 2.80, 0.5, 0.5, 0.17, 0.00, 0.03, 0.0],
+    # Match the repository's run-category AMP prior switch
+    # (configs/ablation/motion_run.json) with a forward high-speed command.
+    "run": [1.6, 0.0, 0.0, 3.00, 0.5, 0.5, 0.20, 0.00, 0.03, 0.0],
+    # Reuse the jump demo command from play.py so DTW evaluation can target
+    # clips under legged_gym/motions/jump without inventing a second command.
+    "jump": [0.0, 0.0, 0.0, 2.35, 0.0, 0.5, 0.20, 0.03, 0.00, 0.0],
     "turn_left": [0.4, 0.0, 0.6, 2.20, 0.5, 0.5, 0.12, 0.00, 0.00, 0.0],
     "strafe_right": [0.0, 0.3, 0.0, 2.20, 0.5, 0.5, 0.12, 0.00, 0.00, 0.0],
 }
