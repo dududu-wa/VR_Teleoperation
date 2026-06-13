@@ -1506,6 +1506,7 @@ class R2Robot(BaseTask):
         shoulder_inds = [i for i, n in enumerate(dof_names_lower) if 'shoulder' in n]
         elbow_inds = [i for i, n in enumerate(dof_names_lower) if ('elbow' in n or 'arm_' in n)]
         hip_inds = [i for i, n in enumerate(dof_names_lower) if ('hip_roll' in n or 'hip_yaw' in n)]
+        head_inds = [i for i, n in enumerate(dof_names_lower) if 'head_' in n]
         knee_inds = [i for i, n in enumerate(dof_names_lower) if ('knee' in n)]
         standing_joint_inds = [
             i for i, n in enumerate(dof_names_lower)
@@ -1514,6 +1515,7 @@ class R2Robot(BaseTask):
         print('torso_inds', torso_inds)
         print('waist_pitch_inds', waist_pitch_inds)
         print('shoulder_inds', shoulder_inds)
+        print('head_inds', head_inds)
         print('hip_inds', hip_inds)
         print('elbow_inds', elbow_inds)
         print('knee_inds', knee_inds)
@@ -1523,6 +1525,7 @@ class R2Robot(BaseTask):
         self.shoulder_inds = shoulder_inds
         self.elbow_inds = elbow_inds
         self.hip_inds = hip_inds
+        self.head_inds = head_inds
         self.knee_inds = knee_inds
         self.standing_joint_inds = standing_joint_inds
 
@@ -1866,6 +1869,13 @@ class R2Robot(BaseTask):
         reward = torch.square(self.dof_pos - self.default_dof_pos)[:, self.hip_inds]
         return torch.sum(reward, dim=-1)
     
+    def _reward_head_deviation(self):
+        # Explicitly regularize uncommanded head DOFs toward their nominal zero pose.
+        if len(self.head_inds) == 0:
+            return torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        reward = torch.square(self.dof_pos - self.default_dof_pos)[:, self.head_inds]
+        return torch.sum(reward, dim=-1)
+
     def _reward_shoulder_deviation(self):
         shoulder_reward = torch.square(self.dof_pos - self.default_dof_pos)[:, self.shoulder_inds]
         elbow_reward = torch.square(self.dof_pos - self.default_dof_pos)[:, self.elbow_inds]

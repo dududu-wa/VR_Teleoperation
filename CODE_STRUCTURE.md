@@ -255,6 +255,8 @@ R2 基础配置。
 
 当前 DoF 合同：`NUM_ACTIONS = 26`，训练侧 URDF 解锁 `head_yaw_joint` 和
 `head_pitch_joint`，并在默认关节角、PD stiffness/damping、torque limits 中补齐头部参数。
+`head_deviation=-1.0` 会显式惩罚 head yaw/pitch 偏离默认 0 姿态，用于抑制
+play 或训练回放时出现的无命令歪头动作。
 
 关键常量：
 
@@ -267,7 +269,7 @@ R2 基础配置。
 
 关键类：
 
-- `R2Cfg`：定义 26 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。`shoulder_deviation=0` 会让 `R2Robot._prepare_reward_function()` 移除肩/手臂偏离默认姿态的奖励项，相当于关闭 PPO 训练里的肩膀回复/回正惩罚开关。
+- `R2Cfg`：定义 26 个控制 DOF、默认关节角、PD stiffness/damping/torque limits、trimesh 地形、gait/body 命令、奖励项、R2 URDF asset 路径、domain randomization。`head_deviation=-1.0` 会启用头部回正惩罚；`shoulder_deviation=0` 会让 `R2Robot._prepare_reward_function()` 移除肩/手臂偏离默认姿态的奖励项，相当于关闭 PPO 训练里的肩膀回复/回正惩罚开关。
 - `R2CfgPPO`：定义 policy 为 `MlpAdaptModel`，配置 proprioception/cmd/privileged/terrain 的维度分块，critic 网络和 PPO 训练参数。默认实验名 `r2_teacher`。`use_wbc_sym_loss=True`，但不复用 HugWBC/H1 的 19 维动作硬编码；当前提供 R2 专用 26 维 action mirror map 和 95 维 base partial-observation mirror map。
 
 ##### `r2interrupt_config.py`
@@ -359,7 +361,7 @@ reward 约定：
 
 - `_prepare_reward_function()` 会扫描 cfg 中非零 reward scale，并调用对应的 `_reward_<name>()`。
 - 文件末尾包含大量 reward：速度跟踪、角速度跟踪、站立、base height、orientation、torque、dof vel/acc、action rate、contact force、collision、termination、dof/torque limit、feet stumble、feet slip、feet clearance、gait contact、no fly、alive 等。
-- `_create_envs()` 会按 DOF 名称分组 upper-body reward 索引：`shoulder_inds` 包含全部 `shoulder_*` 关节，`elbow_inds` 在 R2 上对应 `arm_*` 关节；`_reward_shoulder_deviation()` 对肩关节使用更高权重，对 arm pitch/yaw 使用较低权重。
+- `_create_envs()` 会按 DOF 名称分组 upper-body reward 索引：`shoulder_inds` 包含全部 `shoulder_*` 关节，`elbow_inds` 在 R2 上对应 `arm_*` 关节，`head_inds` 包含 `head_yaw_joint` / `head_pitch_joint`；`_reward_head_deviation()` 约束头部保持默认姿态，`_reward_shoulder_deviation()` 对肩关节使用更高权重，对 arm pitch/yaw 使用较低权重。
 
 ##### `r2interrupt.py`
 
@@ -564,8 +566,9 @@ python legged_gym/scripts/evaluate.py --task=r2amp --load_run Apr01_00-00-00_sty
 - 使用 plane 地形。
 - 关闭噪声、随机化、课程学习。
 - 加载 checkpoint。
-- 使用 `DEMO_PRESETS` 生成 `stand`、`jump`、`walk`、`fast_walk` 命令。
-- 通过 `R2_PLAY_INITIAL_GAIT` 选择初始 gait。
+- 使用 `DEMO_PRESETS` 生成 `stand`、`jump`、`walk`、`run`、`fast_walk` 命令。
+- 默认按 `walk -> jump -> run` 顺序播放；`run` 命令与 `evaluate.py` 的 run preset
+  以及 `configs/ablation/motion_run.json` 的 run 类 AMP prior 语义对齐。
 - 用 `policy.act_inference()` 输出动作均值。
 - 可通过 Isaac Gym viewer 截帧，并用 ffmpeg/imageio-ffmpeg 导出 mp4。
 
