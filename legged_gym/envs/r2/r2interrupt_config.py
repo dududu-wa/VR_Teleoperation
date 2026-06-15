@@ -16,7 +16,7 @@ PROPRIOCEPTION_DIM = BASE_PROPRIOCEPTION_DIM
 INTERRUPT_IN_CMD = True
 NOISE_IN_PRIVILEGE = False
 EXECUTE_IN_PRIVILEGE = False
-DISTURB_DIM = 8
+DISTURB_DIM = 10
 CMD_DIM = BASE_CMD_DIM + int(INTERRUPT_IN_CMD)
 PRIVILEGED_DIM = BASE_PRIVILEGED_DIM + DISTURB_DIM * NOISE_IN_PRIVILEGE + NUM_ACTIONS * EXECUTE_IN_PRIVILEGE
 R2_INTERRUPT_MIRROR_COMMAND_INDICES = list(range(PROPRIOCEPTION_DIM, PROPRIOCEPTION_DIM + CMD_DIM))
@@ -76,19 +76,23 @@ class R2InterruptCfg(R2Cfg):
         max_curriculum = 1.0
         use_disturb = True
         disturb_dim = DISTURB_DIM
-        # Mirrors HugWBC h1interrupt_config.py's 4+4 arm target ranges on R2's DOF order.
-        # R2 is legs(12), waist(2), left arm(5), right arm(5), head(2); the last 8 DOFs include head.
-        disturb_action_indices = [14, 15, 16, 17, 19, 20, 21, 22]
+        # Use the R2 26-DoF contract from R2Cfg.init_state.default_joint_angles:
+        # legs(12), waist(2), head(2), left arm(5), right arm(5). Keep the
+        # interrupt target on the full bilateral arm block and exclude head DOFs.
+        disturb_action_indices = [16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
         disturb_scale = 2
-        # HugWBC-compatible 8-slot bilateral arm interrupt target range.
+        # Bilateral full-arm interrupt target range:
+        # left shoulder pitch/roll/yaw, left arm pitch/yaw, then mirrored right arm.
         noise_scale = [
             5.2,
             3.3,
             5.5,
             3.7,
+            3.7,
             5.2,
             3.3,
             5.5,
+            3.7,
             3.7,
         ]
         noise_lowerbound = [
@@ -96,9 +100,11 @@ class R2InterruptCfg(R2Cfg):
             -0.3,
             -1.2,
             -1.2,
+            -1.2,
             -2.6,
             -3.0,
             -4.3,
+            -1.2,
             -1.2,
         ]
         uniform_scale = 1 

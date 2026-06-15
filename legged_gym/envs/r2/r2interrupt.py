@@ -293,8 +293,8 @@ class R2InterruptRobot(R2Robot):
         scale = self.disturb_uniform_scale
         targets = scale * self.disturb_noise_scale * torch.rand((self.num_envs, self.disturb_dim), device=self.device) + self.disturb_noise_lowerbound + self.disturb_noise_scale * (1-scale)/2
         
-        # legacy clipping branch for upper-body disturbance targets
-        if self.disturb_dim >= 8:
+        # Keep this legacy HugWBC 4+4 clipping branch out of R2's 10-slot full-arm contract.
+        if self.disturb_dim == 8:
             left_env_mask = targets[:, 1] < 0.5
             targets[left_env_mask][:, [2, 3]] = 0
             right_env_maks =  targets[:, 5] > 0.5

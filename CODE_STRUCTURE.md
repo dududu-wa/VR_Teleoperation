@@ -281,16 +281,18 @@ play 或训练回放时出现的无命令歪头动作。
 - `INTERRUPT_IN_CMD = True`
 - `NOISE_IN_PRIVILEGE = False`
 - `EXECUTE_IN_PRIVILEGE = False`
-- `DISTURB_DIM = 8`
+- `DISTURB_DIM = 10`
 
 Current R2 interrupt defaults keep the R2 runner budget at `max_iterations=30000`
 while aligning the HugWBC interrupt behavior: `interrupt_in_cmd=True`,
-`use_disturb=True`, and split `action_rate_upper` / `action_rate_lower`. The 8
-disturb slots map to explicit R2 bilateral arm indices `[14, 15, 16, 17, 19, 20,
-21, 22]` through `R2InterruptRobot.calculate_action()`, rather than the final 8
-action dimensions.
+`use_disturb=True`, and split `action_rate_upper` / `action_rate_lower`. The 10
+disturb slots map to the full R2 bilateral arm block `[16, 17, 18, 19, 20, 21,
+22, 23, 24, 25]` through `R2InterruptRobot.calculate_action()`. This follows the
+R2 26-DoF order used by `R2Cfg.init_state.default_joint_angles`: legs(12),
+waist(2), head(2), left arm(5), right arm(5). Head yaw/pitch are intentionally
+excluded from interrupt targets.
 
-所以默认配置下干扰机制会实际启用：interrupt flag 写入 command，`DISTURB_DIM=8`，且 `use_disturb=True`。
+所以默认配置下干扰机制会实际启用：interrupt flag 写入 command，`DISTURB_DIM=10`，且 `use_disturb=True`。
 
 关键类：
 
@@ -377,7 +379,7 @@ reward 约定：
 - `check_termination`：干扰模式下对部分 termination 做豁免。
 - reward override：中断时对肩部偏差、upper/lower action rate、碰撞、DOF limits/acc/vel 等做特殊处理。
 
-当前默认 `DISTURB_DIM=8`、`use_disturb=True`，因此 `r2int/r2amp` 默认使用 HugWBC 风格的上肢 interrupt/disturb 训练；R2 显式双臂索引 `[14, 15, 16, 17, 19, 20, 21, 22]` 由 `calculate_action()` 按 disturb mask 替换或融合，头部动作不再被误纳入 interrupt。
+当前默认 `DISTURB_DIM=10`、`use_disturb=True`，因此 `r2int/r2amp` 默认使用完整双臂 interrupt/disturb 训练；R2 显式双臂索引 `[16, 17, 18, 19, 20, 21, 22, 23, 24, 25]` 由 `calculate_action()` 按 disturb mask 替换或融合，头部动作不再被误纳入 interrupt。`Uniform_disturb_resample()` 中旧 HugWBC 4+4 clipping 分支仅在 legacy 8 维合同下启用，避免 10 维 R2 双臂槽位被旧索引解释。
 
 ### `legged_gym/utils/`
 
