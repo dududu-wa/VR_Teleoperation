@@ -10,7 +10,7 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
 - `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward。
-- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward；`r2amp` 配置会把 style reward 归一化、加权并按 `env.dt` 缩小后，与 task reward contribution 相加写入 PPO storage。
+- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward；`r2amp` 配置会把 style reward 归一化并按 `style_reward_weight` 加权后，与 task reward contribution 相加写入 PPO storage，默认不再额外按 `env.dt` 缩小 AMP 项。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
 - `configs/ablation/*.json`：AMP 消融配置覆盖文件。通过 `--cfg_override_json` 参数覆盖 `r2amp` 的 env/train 配置，不再为每个消融单独注册 task。
@@ -103,7 +103,7 @@ AMP 每步会根据 discriminator 计算 style reward。`AMPPPO` 默认保持旧
 ```text
 style_raw = clamp(f(discriminator(amp_obs)) * disc_reward_scale, style_reward_min, style_reward_max)
 style_norm = normalize(style_raw)
-style_contrib = style_reward_weight * env.dt * style_norm
+style_contrib = style_reward_weight * style_norm
 task_contrib = task_reward_weight * task_reward
 ppo_reward = task_contrib + style_contrib
 ```
@@ -318,8 +318,8 @@ AMP 配置层。
 - `style_reward_max = 15.0`
 - `normalize_style_reward = True`
 - `task_reward_weight = 1.0`
-- `style_reward_weight = 0.02`
-- `scale_style_reward_by_dt = True`
+- `style_reward_weight = 1.0`
+- `scale_style_reward_by_dt = False`：task reward scales 已在 `R2Robot._prepare_reward_function()` 中乘过 `env.dt`；AMP 默认保留归一化后的 per-step style reward 尺度，避免额外乘 `dt` 后被压到约 `0.02x`。
 
 ##### `r2.py`
 

@@ -37,6 +37,8 @@ class R2AmpCfgPPO(R2InterruptCfgPPO):
         normalize_style_reward = True
         task_reward_weight = 1.0
         style_reward_weight = 1.0
-        scale_style_reward_by_dt = True
+        # Task reward scales are already multiplied by env.dt in R2Robot;
+        # keep normalized AMP style reward on its own per-step scale.
+        scale_style_reward_by_dt = False
         disc_batch_size = 4096
         replay_buffer_size = 1000000
