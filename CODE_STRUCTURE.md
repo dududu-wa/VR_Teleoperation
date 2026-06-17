@@ -4,13 +4,13 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 
 最该先看的 AMP 文件：
 
-- `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、AMP observation 维度、关键 body、discriminator 超参和 best checkpoint 保存策略。
-- `legged_gym/envs/r2/r2.py`：环境侧 AMP 实现。`compute_amp_obs()` 拼单帧 AMP 观测；`R2Robot._init_buffers()` 在 `cfg.amp.enable=True` 时创建 `MotionLoader`、AMP history buffer 和 body/dof 索引；`compute_amp_observations()` 把当前策略状态写入 `infos["amp_obs"]`；`collect_reference_motions()` 从参考 motion 中采样 discriminator 的真样本。
+- `legged_gym/envs/r2/r2_amp_config.py`：AMP 配置入口。定义 `R2AmpCfg/R2AmpCfgPPO`，打开 `amp.enable`，指定 motion 目录、`motion_experts`、AMP observation 维度、关键 body、discriminator 超参、style reward schedule/gate 和 best/top-k checkpoint 保存策略。
+- `legged_gym/envs/r2/r2.py`：环境侧 AMP 实现。`compute_amp_obs()` 拼单帧 AMP 观测；`R2Robot._init_buffers()` 在 `cfg.amp.enable=True` 时创建单专家或多专家 `MotionLoader`、AMP history buffer 和 body/dof 索引；`get_amp_expert_ids()` 根据命令语义硬路由专家；`compute_amp_observations()` 把当前策略状态写入 `infos["amp_obs"]` 和 `infos["amp_expert_id"]`；`collect_reference_motions()` 从对应参考 motion 中采样 discriminator 的真样本。
 - `legged_gym/utils/motion_loader.py`：AMP motion 加载器。递归扫描 `legged_gym/motions/**/*.npz`，支持 `walk/run/jump` 分类子目录，校验多 clip 的 `dof_names/body_names/dt` 一致，并按时间插值采样 DOF、body pose 和速度。
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
-- `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward。
-- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用 discriminator 对 `infos["amp_obs"]` 计算 style reward；`r2amp` 配置会把 style reward 归一化，并按 `style_reward_weight * env.dt` 加权后，与 task reward contribution 相加写入 PPO storage，使 AMP style 项和已按 `env.dt` 积分的 task reward 保持同一时间尺度。
+- `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 为每个专家创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward，并可保留 top-k task checkpoint 供后评估。
+- `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用路由后的 discriminator 对 `infos["amp_obs"]` 计算 style reward；`r2amp` 配置会把 style reward 归一化，并按 `style_reward_weight * env.dt * schedule * gate` 加权后，与 task reward contribution 相加写入 PPO storage，使 AMP style 项和已按 `env.dt` 积分的 task reward 保持同一时间尺度。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
 - `configs/ablation/*.json`：AMP 消融配置覆盖文件。通过 `--cfg_override_json` 参数覆盖 `r2amp` 的 env/train 配置，不再为每个消融单独注册 task。
@@ -35,6 +35,32 @@ AMP 数据和训练的最短路径是：
   -> AMPPPO.process_env_step()
   -> task contribution + style contribution 写入 PPO storage
   -> PPO update + discriminator update
+```
+
+多专家 hard gate AMP 的最短路径是：
+
+```text
+commands
+  -> R2Robot.get_amp_expert_ids()
+  -> infos["amp_expert_id"]
+
+motion_experts
+  -> per-expert MotionLoader
+  -> R2Robot.collect_reference_motions(expert_ids=...)
+
+OnPolicyRunner._init_amp()
+  -> per-expert AMPDiscriminator
+  -> per-expert AMPReplayBuffer
+
+AMPPPO.process_env_step()
+  -> routed style reward
+
+AMPPPO._update_discriminator()
+  -> routed discriminator updates
+
+evaluate.py
+  -> _routed_discriminator_score()
+  -> routed discriminator score
 ```
 
 # VR_Teleoperation 代码结构说明
@@ -103,12 +129,15 @@ AMP 每步会根据 discriminator 计算 style reward。`AMPPPO` 默认保持旧
 ```text
 style_raw = clamp(f(discriminator(amp_obs)) * disc_reward_scale, style_reward_min, style_reward_max)
 style_norm = normalize(style_raw)
-style_contrib = style_reward_weight * env.dt * style_norm
+schedule = linear_warmup(iteration, style_reward_start_after, style_reward_warmup_iterations)
+gate = task_reward >= style_reward_min_task_reward  # disabled when threshold is None
+style_contrib = style_reward_weight * env.dt * schedule * gate * style_norm
+style_contrib = min(style_contrib, abs(task_contrib) * style_reward_max_task_ratio)
 task_contrib = task_reward_weight * task_reward
 ppo_reward = task_contrib + style_contrib
 ```
 
-`AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
+`style_reward_min_task_reward` 和 `style_reward_max_task_ratio` 都可设为 `None` 关闭对应 gate/cap。`AMPPPO.update()` 先做普通 PPO update，再从 replay buffer 取 agent AMP obs、从 `env.collect_reference_motions()` 取参考 motion obs，训练 discriminator。
 
 AMP 消融实验不新增 `r2amp_style0` 这类 task。统一使用：
 
@@ -116,7 +145,7 @@ AMP 消融实验不新增 `r2amp_style0` 这类 task。统一使用：
 python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json configs/ablation/style0.json
 ```
 
-`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
+`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`sw1_dt_nowarm.json` 复现 dt baseline，`sw1_dt_warmup.json` 是推荐 schedule/cap 组，`sw1_dt_ratio025.json` 只测 task-ratio cap，`sw1_dt_gate_task0.json` 叠加严格 task gate，`walk_sw1_dt_warmup.json` 用 walk-only prior 测命令和 motion prior 是否冲突。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`expert_hard_gate_walk_run_jump.json` 打开 walk/run/jump 三专家 hard routing，`expert_hard_gate_walk_run.json` 只注册 walk/run 并让 jump/hop 语义回退到默认 walk 专家，`expert_hard_gate_selective_walk.json` 保留三专家路由但只让 walk style reward 生效，`expert_hard_gate_no_style_warmup.json` 在 `train.amp` 把 `style_reward_start_after/style_reward_warmup_iterations` 设为 0，因为 `AMPPPO` 从 train cfg 读取 schedule。`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
 
 ### 2.3 回放链路
 
@@ -303,12 +332,15 @@ excluded from interrupt targets.
 
 AMP 配置层。
 
-- `R2AmpCfg` 继承 `R2InterruptCfg`，新增 `amp.enable=True`、motion 目录、AMP obs 维度、history 步数、key body 名。
-- `R2AmpCfgPPO` 继承 `R2InterruptCfgPPO`，新增 AMP 判别器和 style reward 统计相关超参。
+- `R2AmpCfg` 继承 `R2InterruptCfg`，新增 `amp.enable=True`、motion 目录、`motion_experts`、默认专家、命令阈值、AMP obs 维度、history 步数、key body 名。
+- `R2AmpCfgPPO` 继承 `R2InterruptCfgPPO`，新增 AMP 判别器、`expert_style_enabled` 和 style reward 统计相关超参。
 
 重要字段：
 
 - `motion_file = "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions"`
+- `motion_experts = {"walk": ".../motions/walk", "run": ".../motions/run", "jump": ".../motions/jump"}`：多专家 AMP hard gate 的 motion prior 来源；没有覆盖时仍可回退到单 `motion_file`。
+- `default_motion_expert = "walk"`：未命中 run/jump 硬门控时使用 walk 参考 motion。
+- `expert_style_enabled = {"walk": True, "run": True, "jump": True}`：每个专家是否把 style reward 写回 PPO reward；关闭某专家时仍保留路由和 replay/discriminator 更新，便于做 selective ablation。
 - `amp_obs_dim = 77`
 - `num_amp_obs_steps = 2`
 - `key_body_names = ["left_arm_yaw_link", "right_arm_yaw_link", "left_ankle_roll_link", "right_ankle_roll_link"]`
@@ -320,6 +352,10 @@ AMP 配置层。
 - `task_reward_weight = 1.0`
 - `style_reward_weight = 1.0`
 - `scale_style_reward_by_dt = True`：task reward scales 已在 `R2Robot._prepare_reward_function()` 中乘过 `env.dt`；AMP style reward 也乘 `env.dt`，使 style prior 不再以 per-step 尺度压过 task objective。
+- `style_reward_start_after = 1000`、`style_reward_warmup_iterations = 2000`：训练前期关闭/线性打开 AMP style contribution，让 locomotion task 先稳定。
+- `style_reward_min_task_reward = None`：默认不按单步 task reward 阈值硬 gate；消融可设为 `0.0`。
+- `style_reward_max_task_ratio = 0.25`：每步 style contribution 不超过 `abs(task_contrib) * 0.25`。
+- `save_top_task_checkpoints = 3`：除 `model_best_task.pt` 外，额外保留 top-3 task reward checkpoint，避免只评估退化后的最终 checkpoint。
 
 ##### `r2.py`
 
@@ -348,7 +384,7 @@ AMP 配置层。
 - `__init__`：解析 cfg，调用 `BaseTask` 创建 sim/env，初始化 buffer、reward、command curriculum、history observation。
 - `create_sim`：创建 sim，按 cfg 创建 plane/trimesh terrain，再创建 env actors。
 - `_create_envs`：加载 URDF，设置 asset options，创建多环境 actor，收集 body/dof 名字、feet/contact/base 索引。
-- `_init_buffers`：wrap Isaac Gym GPU tensor，初始化动作、命令、PD gains、randomization buffer、gait clock、reward sums、AMP 数据结构。
+- `_init_buffers`：wrap Isaac Gym GPU tensor，初始化动作、命令、PD gains、randomization buffer、gait clock、reward sums、AMP 数据结构；AMP 多专家打开时会为 `motion_experts` 下每个专家建立独立 `MotionLoader`，并记录 `amp_expert_names/default_amp_expert_id`。
 - `step`：处理 action，按控制 decimation 循环计算 torque、simulate，最后调用 `post_physics_step()`。
 - `post_physics_step`：刷新状态，计算 base/foot/contact 状态，更新命令和地形高度，检查终止，计算奖励，reset 结束环境，重新计算观测。
 - `reset_idx`：更新课程、重置 DOF/root、重采样命令、应用随机化、清 episode 统计。
@@ -357,7 +393,8 @@ AMP 配置层。
 - `_resample_commands`：采样线速度、yaw、gait frequency、phase、duration、foot swing height、body height、body pitch 等命令。
 - `_init_command_distribution/update_command_curriculum_grid`：使用 `RewardThresholdCurriculum` 扩展命令空间。
 - `_update_terrain_curriculum`：根据移动距离、tracking reward、姿态失败情况升降 terrain level。
-- `compute_amp_observations/_bootstrap_amp_buffer/collect_reference_motions`：AMP 观测和参考 motion 采样。
+- `compute_amp_observations/_bootstrap_amp_buffer/collect_reference_motions`：AMP 观测和参考 motion 采样；`collect_reference_motions(expert_ids=...)` 按样本路由到对应专家 loader，保证 discriminator 真样本和策略样本使用同一专家语义。
+- `get_amp_expert_ids`：读取当前 command 中的目标速度、gait frequency、foot swing height 和 body height，用 hard gate 生成每个环境的 AMP 专家 id；结果随 `infos["amp_expert_id"]` 传给 `AMPPPO` 和 `evaluate.py`。
 
 reward 约定：
 
@@ -549,7 +586,8 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 - 当使用 `--cfg_override_json` 时，必须显式传入 `--load_run`，避免从 `logs/<experiment>` 自动选择最新 run 时加载到其他消融组的 checkpoint。
 - 默认关闭 terrain curriculum、noise、domain randomization、command curriculum，并使用 plane 地形，保证固定 preset 评估更可复现。
 - 固定 preset 包括 `stand`、`walk_slow`、`walk_fast`、`run`、`jump`、`turn_left`、`strafe_right`，也可用 `--preset` 指定子集；其中 `jump` 复用 `play.py` 的 demo 命令，`run` 对应 `configs/ablation/motion_run.json` 指向的 run 类 motion prior。
-- 输出 `metrics.json` 和 `metrics.csv`，字段包括速度 RMSE、task return、fall rate、episode length、base height / roll-pitch violation、AMP style reward、discriminator logit、torque/action-rate/dof-acc 平滑性指标。
+- `_routed_discriminator_score()` 根据 `infos["amp_expert_id"]` 选择 runner 中对应专家的 discriminator；旧单 discriminator checkpoint 仍走兼容路径。
+- 输出 `metrics.json` 和 `metrics.csv`，字段包括速度 RMSE、task return、fall rate、episode length、base height / roll-pitch violation、AMP style reward、routed discriminator logit、torque/action-rate/dof-acc 平滑性指标。
 - DTW 输出通过 `_compute_dtw_for_episode()` 在 episode 结束时对 policy 轨迹和 `_motion_loader` 中的参考 clip 做 best-clip DTW；新增 `run`、`jump` preset 后，可用 `--preset run --preset jump` 针对 run/jump 类 motion 做同一套 `joint_pose_error_dtw_m` / `key_body_error_dtw_m` 汇总。
 
 典型命令：
@@ -720,9 +758,13 @@ AMP 版本 PPO，继承 `PPO`。
 
 关键类 `AMPPPO`：
 
-- `process_env_step`：要求 `infos["amp_obs"]`，用 discriminator 计算 style reward；按配置生成 `amp_task_reward_contrib`、`amp_style_reward_contrib` 和 `amp_mixed_reward`，PPO storage 写入 mixed reward。
-- `update`：先跑普通 PPO update，再把 agent AMP obs 放进 replay buffer，统计 AMP reward，训练 discriminator。
-- `_update_discriminator`：从 replay buffer 采 agent 样本，从 `env.collect_reference_motions()` 采 reference 样本，训练 LSGAN 风格 discriminator，并加 gradient penalty/logit regularization。
+- `process_env_step`：要求 `infos["amp_obs"]`，多专家时还要求 `infos["amp_expert_id"]`；按专家 id 选择 discriminator 计算 routed style reward，再按配置生成 `amp_task_reward_contrib`、`amp_style_reward_contrib` 和 `amp_mixed_reward`，PPO storage 写入 mixed reward。
+- `set_learning_iteration`：由 runner 每个 iteration 调用，提供 style reward warmup 所需的当前训练进度。
+- `_style_reward_schedule_weight`：根据 `style_reward_start_after` 和 `style_reward_warmup_iterations` 返回 0 到 1 的线性 schedule。
+- `_weight_style_reward`：把 normalized style reward 乘以 `style_reward_weight`、`env.dt`、schedule、task gate，并按 `style_reward_max_task_ratio` 做 per-transition cap。
+- `update`：先跑普通 PPO update，再按 `amp_expert_id` 把 agent AMP obs 放进对应 replay buffer，统计 AMP reward，训练 discriminator。
+- `_resolve_expert_ids`：把 `infos["amp_expert_id"]` 校验并转成当前 device 的 long tensor；多专家 AMP 缺少该字段或 id 越界会直接报错，避免 replay buffer 和 reference motion 错配。
+- `_update_discriminator`：逐专家从 replay buffer 采 agent 样本，从 `env.collect_reference_motions(expert_ids=...)` 采 reference 样本，训练 LSGAN 风格 routed discriminator，并加 gradient penalty/logit regularization。
 
 ### `rsl_rl/rsl_rl/modules/`
 
@@ -790,11 +832,12 @@ AMP 判别器。
 
 - 初始化时创建 `ActorCritic`。
 - 默认创建 `PPO`。
-- 如果 `train_cfg` 里有 `amp`，调用 `_init_amp()` 创建 discriminator、AMP replay buffer，并把算法替换成 `AMPPPO`。
+- 如果 `train_cfg` 里有 `amp`，调用 `_init_amp()` 按 `env.amp_expert_names` 创建单专家或多专家 discriminator、AMP replay buffer，并把算法替换成 `AMPPPO`。
 - `learn`：执行 rollout、PPO/AMP update、课程学习、日志和 checkpoint 保存。
 - `log`：写 TensorBoard 和 `train.log`。
-- `_maybe_save_best_checkpoints`：保存 `model_best_task.pt`。
-- `save/load`：保存/加载模型、optimizer、AMP discriminator。
+- `_maybe_save_best_checkpoints`：保存 `model_best_task.pt`，并按 `save_top_task_checkpoints` 维护 `model_top_task_{it}.pt`。
+- `_init_amp`：读取 `amp_observation_space`、`amp_expert_names` 和 `expert_style_enabled`，为每个专家创建独立 `AMPDiscriminator`、`AMPReplayBuffer` 和优化器入口；这样 hard gate 的每类 motion prior 有自己的真假判别边界。
+- `save/load`：保存/加载模型、optimizer、AMP discriminator；多专家 checkpoint 使用 `discriminator_state_dicts` 和 `disc_optimizer_state_dicts` 保存每个专家状态。
 - `get_inference_policy`：返回 eval 模式 policy。
 
 ### `rsl_rl/rsl_rl/storage/`
@@ -1117,7 +1160,7 @@ AMP 任务实验输出。
 
 ### `tests/`
 
-当前仓库未发现显式 `tests/` 目录，也未发现独立测试文件。验证主要依赖：
+当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint 和配置接线。完整训练验证仍主要依赖：
 
 - 能否创建环境。
 - 能否启动训练。

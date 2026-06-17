@@ -214,6 +214,7 @@ class R2Robot(BaseTask):
             self.compute_amp_observations()
             amp_obs_size = self.num_amp_obs_steps * self.amp_obs_dim
             self.extras["amp_obs"] = self.amp_observation_buffer.view(-1, amp_obs_size)
+            self.extras["amp_expert_id"] = self.get_amp_expert_ids()
 
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
@@ -326,23 +327,56 @@ class R2Robot(BaseTask):
         for i in range(self.num_amp_obs_steps):
             self.amp_observation_buffer[env_ids, i] = cur_obs
 
-    def collect_reference_motions(self, num_samples, current_times=None):
-        """Sample reference AMP observation histories for discriminator training."""
-        if not hasattr(self, "_motion_loader"):
-            raise RuntimeError("AMP motion loader is not initialized for this environment.")
+    def get_amp_expert_ids(self):
+        """Route each environment to a motion expert from the command semantics."""
+        expert_ids = torch.full(
+            (self.num_envs,),
+            self.default_amp_expert_id,
+            dtype=torch.long,
+            device=self.device,
+        )
+        if self.commands.shape[1] <= 7:
+            return expert_ids
 
-        history_margin = max(self.num_amp_obs_steps - 1, 0) * self._motion_loader.dt
+        expert_names = getattr(self, "amp_expert_names", ["default"])
+        # Command columns are defined by R2 command sampling: x velocity,
+        # gait frequency, gait phase, foot swing height, and body height.
+        is_jump = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        if "jump" in expert_names:
+            is_jump = (
+                (self.commands[:, 4] == 0)
+                & (
+                    (self.commands[:, 6] >= self.cfg.amp.expert_jump_swing_height_threshold)
+                    | (self.commands[:, 7] > self.cfg.amp.expert_jump_body_height_threshold)
+                )
+            )
+            expert_ids[is_jump] = expert_names.index("jump")
+
+        if "run" in expert_names:
+            is_run = (~is_jump) & (
+                (torch.abs(self.commands[:, 0]) > self.cfg.amp.expert_run_velocity_threshold)
+                | (self.commands[:, 3] >= self.cfg.amp.expert_run_frequency_threshold)
+            )
+            expert_ids[is_run] = expert_names.index("run")
+
+        return expert_ids
+
+    def _collect_reference_motions_from_loader(self, motion_loader, num_samples, current_times=None):
+        """Sample reference AMP observation histories for discriminator training."""
+        history_margin = max(self.num_amp_obs_steps - 1, 0) * motion_loader.dt
         if current_times is None:
-            current_times = self._motion_loader.sample_times(num_samples, margin=history_margin)
+            current_times = motion_loader.sample_times(num_samples, margin=history_margin)
         else:
-            current_times = self._motion_loader.ensure_time_margin(current_times, margin=history_margin)
+            current_times = motion_loader.ensure_time_margin(
+                self._motion_times_to_numpy(current_times), margin=history_margin
+            )
 
         times = (
-            np.expand_dims(np.asarray(current_times), axis=-1)
-            - self._motion_loader.dt * np.arange(0, self.num_amp_obs_steps)
+            np.expand_dims(np.asarray(current_times, dtype=np.float64), axis=-1)
+            - motion_loader.dt * np.arange(0, self.num_amp_obs_steps)
         ).flatten()
 
-        dof_pos, dof_vel, body_pos, body_rot_wxyz, body_lin_vel, body_ang_vel = self._motion_loader.sample(
+        dof_pos, dof_vel, body_pos, body_rot_wxyz, body_lin_vel, body_ang_vel = motion_loader.sample(
             num_samples=num_samples * self.num_amp_obs_steps,
             times=times,
         )
@@ -360,6 +394,66 @@ class R2Robot(BaseTask):
             body_pos[:, self.motion_key_body_indices],
         )
         return amp_obs.view(num_samples, self.num_amp_obs_steps, -1)
+
+    def _motion_times_to_numpy(self, current_times):
+        """Normalize motion times before NumPy-only sampling logic."""
+        if torch.is_tensor(current_times):
+            current_times = current_times.detach().cpu().numpy()
+        return np.asarray(current_times, dtype=np.float64).reshape(-1)
+
+    def collect_reference_motions(self, num_samples, current_times=None, expert_ids=None):
+        """Sample reference AMP histories, optionally routed by expert id."""
+        if not hasattr(self, "_motion_loader"):
+            raise RuntimeError("AMP motion loader is not initialized for this environment.")
+
+        if expert_ids is None:
+            if len(getattr(self, "amp_expert_names", ["default"])) > 1:
+                expert_ids = torch.randint(len(self.amp_expert_names), (num_samples,), device=self.device)
+                return self.collect_reference_motions(
+                    num_samples,
+                    current_times=current_times,
+                    expert_ids=expert_ids,
+                )
+            return self._collect_reference_motions_from_loader(
+                self._motion_loader,
+                num_samples,
+                current_times=current_times,
+            )
+
+        expert_ids = torch.as_tensor(expert_ids, dtype=torch.long, device=self.device).view(-1)
+        if expert_ids.numel() != num_samples:
+            raise ValueError(f"Expected {num_samples} expert ids, got {expert_ids.numel()}")
+
+        current_times_np = None
+        if current_times is not None:
+            current_times_np = self._motion_times_to_numpy(current_times)
+            if current_times_np.size != num_samples:
+                raise ValueError(f"Expected {num_samples} motion times, got {current_times_np.size}")
+
+        result = torch.empty(
+            num_samples,
+            self.num_amp_obs_steps,
+            self.amp_obs_dim,
+            device=self.device,
+        )
+        expert_names = getattr(self, "amp_expert_names", ["default"])
+        for expert_id in torch.unique(expert_ids).tolist():
+            if expert_id < 0 or expert_id >= len(expert_names):
+                raise ValueError(f"AMP expert id out of range: {expert_id}")
+
+            indices = (expert_ids == expert_id).nonzero(as_tuple=False).flatten()
+            if current_times_np is not None:
+                group_times = current_times_np[indices.detach().cpu().numpy()]
+            else:
+                group_times = None
+
+            motion_loader = self._motion_loaders[expert_names[expert_id]]
+            result[indices] = self._collect_reference_motions_from_loader(
+                motion_loader,
+                int(indices.numel()),
+                current_times=group_times,
+            )
+        return result
 
     def compute_reward(self):
         """ Compute rewards
@@ -1236,10 +1330,36 @@ class R2Robot(BaseTask):
 
             from legged_gym.utils.motion_loader import MotionLoader
 
-            motion_file = self.cfg.amp.motion_file.format(
-                LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR
-            )
-            self._motion_loader = MotionLoader(motion_file, self.device)
+            motion_experts = getattr(self.cfg.amp, "motion_experts", None)
+            if motion_experts:
+                self._motion_loaders = {}
+                self.amp_expert_names = list(motion_experts.keys())
+                self.default_amp_expert_name = getattr(
+                    self.cfg.amp, "default_motion_expert", self.amp_expert_names[0]
+                )
+                if self.default_amp_expert_name not in motion_experts:
+                    raise ValueError(
+                        f"Default AMP motion expert not found: {self.default_amp_expert_name}"
+                    )
+                self.default_amp_expert_id = self.amp_expert_names.index(
+                    self.default_amp_expert_name
+                )
+                for expert_name, expert_motion_file in motion_experts.items():
+                    motion_file = expert_motion_file.format(
+                        LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR
+                    )
+                    self._motion_loaders[expert_name] = MotionLoader(motion_file, self.device)
+                # Keep the legacy alias on the default loader for existing AMP code.
+                self._motion_loader = self._motion_loaders[self.default_amp_expert_name]
+            else:
+                motion_file = self.cfg.amp.motion_file.format(
+                    LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR
+                )
+                self._motion_loader = MotionLoader(motion_file, self.device)
+                self.amp_expert_names = ["default"]
+                self.default_amp_expert_name = "default"
+                self.default_amp_expert_id = 0
+                self._motion_loaders = {"default": self._motion_loader}
             try:
                 self.motion_dof_indices = self._motion_loader.get_dof_index(list(self.dof_names))
                 self.motion_ref_body_index = int(
@@ -1248,6 +1368,24 @@ class R2Robot(BaseTask):
                 self.motion_key_body_indices = self._motion_loader.get_body_index(
                     self.cfg.amp.key_body_names
                 )
+                # All expert loaders must share one motion schema because AMP obs
+                # uses the default loader's indices for every routed sample.
+                for expert_name, motion_loader in self._motion_loaders.items():
+                    expert_dof_indices = motion_loader.get_dof_index(list(self.dof_names))
+                    expert_ref_body_index = int(
+                        motion_loader.get_body_index([self.cfg.amp.reference_body_name])[0].item()
+                    )
+                    expert_key_body_indices = motion_loader.get_body_index(
+                        self.cfg.amp.key_body_names
+                    )
+                    if (
+                        not torch.equal(expert_dof_indices, self.motion_dof_indices)
+                        or expert_ref_body_index != self.motion_ref_body_index
+                        or not torch.equal(expert_key_body_indices, self.motion_key_body_indices)
+                    ):
+                        raise ValueError(
+                            f"AMP expert loader schema mismatch for expert: {expert_name}"
+                        )
             except KeyError as exc:
                 raise ValueError(
                     "AMP motion data in the configured path does not match robot dof/body names. "

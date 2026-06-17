@@ -315,13 +315,82 @@ def _compute_dtw_for_episode(env, traj_dof_list, traj_kb_list):
     return best_joint_dtw, best_kb_dtw
 
 
+def _has_amp_discriminator(runner):
+    return (
+        getattr(runner, "discriminator", None) is not None
+        or getattr(runner, "discriminators", None) is not None
+    )
+
+
+def _routed_discriminator_score(runner, amp_obs, expert_ids=None):
+    discriminators = getattr(runner, "discriminators", None)
+    if discriminators is None:
+        return runner.discriminator(amp_obs)
+
+    expert_names = list(discriminators.keys())
+    if expert_ids is None:
+        # Single-expert evaluation keeps the historical discriminator contract.
+        expert_ids = torch.zeros(amp_obs.shape[0], dtype=torch.long, device=amp_obs.device)
+    elif not torch.is_tensor(expert_ids):
+        expert_ids = torch.as_tensor(expert_ids, dtype=torch.long, device=amp_obs.device)
+    else:
+        expert_ids = expert_ids.to(device=amp_obs.device, dtype=torch.long)
+    expert_ids = expert_ids.view(-1)
+
+    if expert_ids.shape[0] != amp_obs.shape[0]:
+        raise ValueError(
+            f"AMP expert id batch size {expert_ids.shape[0]} does not match AMP obs batch size {amp_obs.shape[0]}"
+        )
+    if expert_ids.numel() > 0:
+        invalid = (expert_ids < 0) | (expert_ids >= len(expert_names))
+        if torch.any(invalid):
+            bad_ids = torch.unique(expert_ids[invalid]).detach().cpu().tolist()
+            raise ValueError(f"Invalid AMP expert ids: {bad_ids}")
+
+    # Mirrors AMPPPO multi-expert routing: score each sample with its expert's
+    # discriminator before applying the shared AMP reward transform.
+    scores = torch.empty(amp_obs.shape[0], 1, device=amp_obs.device)
+    for expert_idx, expert_name in enumerate(expert_names):
+        mask = expert_ids == expert_idx
+        if torch.any(mask):
+            scores[mask] = discriminators[expert_name](amp_obs[mask])
+    return scores
+
+
+def _apply_expert_style_enabled(runner, style_contrib, expert_ids=None):
+    """Mirror AMPPPO selective expert style masking during evaluation."""
+    expert_style_enabled = getattr(runner.alg, "expert_style_enabled", None)
+    expert_names = getattr(runner.alg, "expert_names", None)
+    if not expert_style_enabled or not expert_names:
+        return style_contrib
+
+    if expert_ids is None:
+        expert_ids = torch.zeros(
+            style_contrib.shape[0], dtype=torch.long, device=style_contrib.device
+        )
+    elif not torch.is_tensor(expert_ids):
+        expert_ids = torch.as_tensor(expert_ids, dtype=torch.long, device=style_contrib.device)
+    else:
+        expert_ids = expert_ids.to(device=style_contrib.device, dtype=torch.long)
+    expert_ids = expert_ids.view(-1)
+    if expert_ids.shape[0] != style_contrib.shape[0]:
+        raise ValueError(
+            f"AMP expert id batch size {expert_ids.shape[0]} does not match style reward batch size {style_contrib.shape[0]}"
+        )
+
+    for expert_idx, expert_name in enumerate(expert_names):
+        if not expert_style_enabled.get(expert_name, True):
+            style_contrib = style_contrib.masked_fill(expert_ids == expert_idx, 0.0)
+    return style_contrib
+
+
 def _compute_amp_eval_rewards(env, runner, infos):
-    if getattr(runner, "discriminator", None) is None or "amp_obs" not in infos:
+    if not _has_amp_discriminator(runner) or "amp_obs" not in infos:
         return None
     amp_cfg = getattr(runner.alg, "__dict__", {})
     with torch.no_grad():
         amp_obs = infos["amp_obs"].to(runner.device)
-        disc_score = runner.discriminator(amp_obs)
+        disc_score = _routed_discriminator_score(runner, amp_obs, infos.get("amp_expert_id"))
         # Same AMP reward transform as AMPPPO.process_env_step.
         style_base = torch.clamp(
             1.0 - 0.25 * torch.square(disc_score - 1.0),
@@ -341,19 +410,33 @@ def _compute_amp_eval_rewards(env, runner, infos):
             * float(amp_cfg.get("style_reward_time_scale", 1.0))
             * style_for_mix
         )
+        style_contrib = _apply_expert_style_enabled(
+            runner, style_contrib, infos.get("amp_expert_id")
+        )
     return style_raw.detach(), style_contrib.detach()
 
 
 def _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values):
-    if getattr(runner, "discriminator", None) is None or "amp_obs" not in infos:
+    if not _has_amp_discriminator(runner) or "amp_obs" not in infos:
         return
     with torch.no_grad():
         amp_obs = infos["amp_obs"].to(runner.device)
-        agent_logit = runner.discriminator(amp_obs).view(-1)
+        expert_ids = infos.get("amp_expert_id")
+        agent_logit = _routed_discriminator_score(runner, amp_obs, expert_ids).view(-1)
         disc_agent_values.extend(agent_logit.detach().cpu().numpy().tolist())
         if hasattr(env, "collect_reference_motions"):
-            ref_obs = env.collect_reference_motions(amp_obs.shape[0]).view(amp_obs.shape[0], -1)
-            ref_logit = runner.discriminator(ref_obs.to(runner.device)).view(-1)
+            if expert_ids is None:
+                ref_obs = env.collect_reference_motions(amp_obs.shape[0]).view(amp_obs.shape[0], -1)
+            else:
+                ref_obs = env.collect_reference_motions(
+                    amp_obs.shape[0],
+                    expert_ids=expert_ids,
+                ).view(amp_obs.shape[0], -1)
+            ref_logit = _routed_discriminator_score(
+                runner,
+                ref_obs.to(runner.device),
+                expert_ids,
+            ).view(-1)
             disc_ref_values.extend(ref_logit.detach().cpu().numpy().tolist())
 
 

@@ -1,0 +1,286 @@
+import sys
+import types
+import ast
+import json
+from pathlib import Path
+
+import torch
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR / "rsl_rl"))
+isaacgym_stub = types.ModuleType("isaacgym")
+isaacgym_torch_utils_stub = types.ModuleType("isaacgym.torch_utils")
+sys.modules.setdefault("isaacgym", isaacgym_stub)
+sys.modules.setdefault("isaacgym.torch_utils", isaacgym_torch_utils_stub)
+
+from rsl_rl.algorithms.amp_ppo import AMPPPO
+from rsl_rl.runners.on_policy_runner import OnPolicyRunner
+import rsl_rl.runners.on_policy_runner as runner_module
+
+
+def _bare_amp_algo():
+    alg = object.__new__(AMPPPO)
+    alg.style_reward_weight = 1.0
+    alg.style_reward_time_scale = 0.02
+    alg.style_reward_start_after = 10
+    alg.style_reward_warmup_iterations = 10
+    alg.style_reward_min_task_reward = None
+    alg.style_reward_max_task_ratio = 0.25
+    return alg
+
+
+def test_amp_style_schedule_and_task_ratio_gate():
+    alg = _bare_amp_algo()
+    style_reward = torch.ones(2)
+    task_reward = torch.tensor([-0.004, -1.0])
+    task_reward_weighted = task_reward.clone()
+
+    alg.set_learning_iteration(9)
+    weighted, task_gate = alg._weight_style_reward(
+        style_reward,
+        task_reward,
+        task_reward_weighted,
+    )
+    assert torch.allclose(weighted, torch.zeros_like(weighted))
+    assert torch.allclose(task_gate, torch.ones_like(task_gate))
+
+    alg.set_learning_iteration(10)
+    weighted, _ = alg._weight_style_reward(
+        style_reward,
+        task_reward,
+        task_reward_weighted,
+    )
+    assert torch.allclose(weighted, torch.tensor([0.001, 0.002]), atol=1e-7)
+
+    alg.set_learning_iteration(19)
+    weighted, _ = alg._weight_style_reward(
+        style_reward,
+        task_reward,
+        task_reward_weighted,
+    )
+    assert torch.allclose(weighted, torch.tensor([0.001, 0.02]), atol=1e-7)
+
+    alg.style_reward_min_task_reward = 0.0
+    weighted, task_gate = alg._weight_style_reward(
+        style_reward,
+        torch.tensor([-0.1, 0.1]),
+        torch.tensor([-0.1, 0.1]),
+    )
+    assert torch.allclose(task_gate, torch.tensor([0.0, 1.0]))
+    assert torch.allclose(weighted, torch.tensor([0.0, 0.02]), atol=1e-7)
+
+
+def test_runner_keeps_top_task_checkpoints():
+    runner = object.__new__(OnPolicyRunner)
+    runner.log_dir = "in_memory_log"
+    runner.save_best_after = 0
+    runner.save_best_task_checkpoint = True
+    runner.save_top_task_checkpoints = 2
+    runner.best_task_reward = float("-inf")
+    runner.top_task_checkpoints = []
+    runner._emit_log = lambda message: None
+    saved = {}
+    removed = set()
+
+    def save_stub(path, infos=None):
+        saved[path] = infos or {}
+
+    runner.save = save_stub
+    original_exists = runner_module.os.path.exists
+    original_remove = runner_module.os.remove
+    runner_module.os.path.exists = lambda path: path in saved and path not in removed
+    runner_module.os.remove = lambda path: removed.add(path)
+    try:
+        runner._maybe_save_best_checkpoints(1, [1.0])
+        runner._maybe_save_best_checkpoints(2, [2.0])
+        runner._maybe_save_best_checkpoints(3, [0.5])
+        runner._maybe_save_best_checkpoints(4, [3.0])
+    finally:
+        runner_module.os.path.exists = original_exists
+        runner_module.os.remove = original_remove
+
+    top_names = {
+        Path(path).name
+        for path in saved
+        if Path(path).name.startswith("model_top_task_") and path not in removed
+    }
+    assert top_names == {"model_top_task_2.pt", "model_top_task_4.pt"}
+    assert any(Path(path).name == "model_top_task_1.pt" for path in removed)
+    best_path = next(path for path in saved if Path(path).name == "model_best_task.pt")
+    assert saved[best_path]["best_metric_value"] == 3.0
+
+
+def test_runner_wires_amp_schedule_config_to_algorithm():
+    source = (ROOT_DIR / "rsl_rl/rsl_rl/runners/on_policy_runner.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    amp_call = None
+    has_iteration_call = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "AMPPPO":
+                amp_call = node
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "set_learning_iteration":
+                has_iteration_call = True
+    assert amp_call is not None
+    keyword_names = {keyword.arg for keyword in amp_call.keywords}
+    assert {
+        "style_reward_start_after",
+        "style_reward_warmup_iterations",
+        "style_reward_min_task_reward",
+        "style_reward_max_task_ratio",
+    }.issubset(keyword_names)
+    assert has_iteration_call
+
+
+def test_r2_amp_config_declares_schedule_and_topk_fields():
+    source = (ROOT_DIR / "legged_gym/envs/r2/r2_amp_config.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    fields = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    fields.add(target.id)
+    assert {
+        "save_top_task_checkpoints",
+        "style_reward_start_after",
+        "style_reward_warmup_iterations",
+        "style_reward_min_task_reward",
+        "style_reward_max_task_ratio",
+    }.issubset(fields)
+
+
+def test_r2_amp_config_declares_motion_experts():
+    source = (ROOT_DIR / "legged_gym/envs/r2/r2_amp_config.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    fields = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    fields.add(target.id)
+    assert {
+        "motion_experts",
+        "default_motion_expert",
+        "expert_run_velocity_threshold",
+        "expert_run_frequency_threshold",
+        "expert_jump_swing_height_threshold",
+        "expert_jump_body_height_threshold",
+        "expert_style_enabled",
+    }.issubset(fields)
+
+
+def test_r2_env_exposes_amp_expert_routing_contract():
+    source = (ROOT_DIR / "legged_gym/envs/r2/r2.py").read_text(encoding="utf-8")
+    assert "def get_amp_expert_ids" in source
+    assert "amp_expert_id" in source
+    assert "expert_ids=None" in source
+    assert "_motion_loaders" in source
+    assert "expert_jump_swing_height_threshold" in source
+    assert "current_times.detach().cpu().numpy()" in source
+    assert "AMP expert loader schema mismatch" in source
+    assert "torch.randint(len(self.amp_expert_names)" in source
+
+
+def test_runner_wires_amp_motion_experts():
+    source = (ROOT_DIR / "rsl_rl/rsl_rl/runners/on_policy_runner.py").read_text(
+        encoding="utf-8"
+    )
+    assert "discriminators" in source
+    assert "amp_replay_buffers" in source
+    assert "discriminator_state_dicts" in source
+    assert "disc_optimizer_state_dicts" in source
+    assert "expert_style_enabled" in source
+    amp_call_index = source.index("self.alg = AMPPPO")
+    storage_index = source.index("self.alg.init_storage", amp_call_index)
+    assert amp_call_index < storage_index
+
+
+def test_amp_ppo_routes_by_expert_id():
+    source = (ROOT_DIR / "rsl_rl/rsl_rl/algorithms/amp_ppo.py").read_text(
+        encoding="utf-8"
+    )
+    assert "amp_expert_id" in source
+    assert "disc_optimizers" in source
+    assert "expert_style_enabled" in source
+    assert "style_reward_contrib/" in source
+    assert "disc_update_skipped/" in source
+
+
+def test_amp_ppo_resolves_expert_ids_before_collector_mutation():
+    alg = object.__new__(AMPPPO)
+    alg.expert_names = ["walk", "run"]
+    try:
+        alg._resolve_expert_ids(
+            {"amp_expert_id": torch.tensor([0, 2])},
+            2,
+            torch.device("cpu"),
+        )
+    except ValueError as exc:
+        assert "Invalid AMP expert ids" in str(exc)
+        assert "2" in str(exc)
+    else:
+        raise AssertionError("invalid AMP expert id should raise ValueError")
+
+    try:
+        alg._resolve_expert_ids({}, 2, torch.device("cpu"))
+    except KeyError as exc:
+        assert "amp_expert_id" in str(exc)
+    else:
+        raise AssertionError("multi-expert AMP should require amp_expert_id")
+
+    alg.expert_names = ["walk"]
+    expert_ids = alg._resolve_expert_ids({}, 3, torch.device("cpu"))
+    assert torch.equal(expert_ids, torch.zeros(3, dtype=torch.long))
+
+
+def test_evaluate_uses_routed_amp_discriminator():
+    source = (ROOT_DIR / "legged_gym/scripts/evaluate.py").read_text(
+        encoding="utf-8"
+    )
+    assert "amp_expert_id" in source
+    assert "discriminators" in source
+    assert "_routed_discriminator_score" in source
+    assert "_apply_expert_style_enabled" in source
+    assert "expert_style_enabled" in source
+
+
+def test_expert_hard_gate_ablation_json_and_docs_contract():
+    ablation_dir = ROOT_DIR / "configs/ablation"
+    paths = sorted(ablation_dir.glob("expert_hard_gate*.json"))
+    assert {path.name for path in paths} == {
+        "expert_hard_gate_no_style_warmup.json",
+        "expert_hard_gate_selective_walk.json",
+        "expert_hard_gate_walk_run.json",
+        "expert_hard_gate_walk_run_jump.json",
+    }
+    for path in paths:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert isinstance(payload.get("notes"), str) and payload["notes"]
+        assert "motion_experts" in payload["env"]["amp"]
+        assert "expert_style_enabled" in payload["env"]["amp"]
+        assert "expert_style_enabled" in payload["train"]["amp"]
+
+    docs = (ROOT_DIR / "CODE_STRUCTURE.md").read_text(encoding="utf-8")
+    for token in ("get_amp_expert_ids", "amp_expert_id", "_routed_discriminator_score"):
+        assert token in docs
+
+
+if __name__ == "__main__":
+    test_amp_style_schedule_and_task_ratio_gate()
+    test_runner_keeps_top_task_checkpoints()
+    test_runner_wires_amp_schedule_config_to_algorithm()
+    test_r2_amp_config_declares_schedule_and_topk_fields()
+    test_r2_amp_config_declares_motion_experts()
+    test_r2_env_exposes_amp_expert_routing_contract()
+    test_runner_wires_amp_motion_experts()
+    test_amp_ppo_routes_by_expert_id()
+    test_amp_ppo_resolves_expert_ids_before_collector_mutation()
+    test_evaluate_uses_routed_amp_discriminator()
+    test_expert_hard_gate_ablation_json_and_docs_contract()

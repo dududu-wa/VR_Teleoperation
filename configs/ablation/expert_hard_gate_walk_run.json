@@ -1,0 +1,24 @@
+{
+  "env": {
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true
+      }
+    }
+  },
+  "train": {
+    "amp": {
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true
+      }
+    }
+  },
+  "notes": "Hard-routed walk/run AMP prior; no jump expert is registered, so phase-0 hopping commands route by the remaining walk/run velocity and frequency rules."
+}

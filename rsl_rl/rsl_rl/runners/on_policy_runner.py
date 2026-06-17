@@ -77,12 +77,18 @@ class OnPolicyRunner:
 
         self.use_amp = "amp" in train_cfg
         self.discriminator = None
+        self.discriminators = None
         self.amp_replay_buffer = None
+        self.amp_replay_buffers = None
         if self.use_amp:
             self._init_amp(train_cfg["amp"])
         self.save_best_task_checkpoint = self.cfg.get("save_best_task_checkpoint", False)
+        self.save_top_task_checkpoints = int(self.cfg.get("save_top_task_checkpoints", 0))
+        if self.save_top_task_checkpoints < 0:
+            raise ValueError("save_top_task_checkpoints must be non-negative")
         self.save_best_after = int(self.cfg.get("save_best_after", 0))
         self.best_task_reward = float("-inf")
+        self.top_task_checkpoints = []
 
         # Log
         self.log_dir = log_dir
@@ -124,23 +130,34 @@ class OnPolicyRunner:
             raise RuntimeError("AMP requires env.collect_reference_motions(), but current env does not provide it.")
 
         amp_obs_size = amp_cfg["amp_obs_dim"] * amp_cfg.get("num_amp_obs_steps", 2)
-        self.discriminator = AMPDiscriminator(
-            amp_obs_dim=amp_obs_size,
-            hidden_dims=amp_cfg.get("disc_hidden_dims", [1024, 512]),
-        ).to(self.device)
+        expert_names = list(getattr(self.env, "amp_expert_names", ["default"]))
+        if not expert_names:
+            expert_names = ["default"]
+        self.discriminators = torch.nn.ModuleDict()
+        self.amp_replay_buffers = {}
 
-        self.amp_replay_buffer = AMPReplayBuffer(
-            buffer_size=amp_cfg.get("replay_buffer_size", 1000000),
-            amp_obs_size=amp_obs_size,
-            device=self.device,
-        )
+        for expert_name in expert_names:
+            self.discriminators[expert_name] = AMPDiscriminator(
+                amp_obs_dim=amp_obs_size,
+                hidden_dims=amp_cfg.get("disc_hidden_dims", [1024, 512]),
+            ).to(self.device)
+            self.amp_replay_buffers[expert_name] = AMPReplayBuffer(
+                buffer_size=amp_cfg.get("replay_buffer_size", 1000000),
+                amp_obs_size=amp_obs_size,
+                device=self.device,
+            )
+
+        # Keep the single-expert aliases so older runner code and checkpoints keep a stable default path.
+        self.discriminator = self.discriminators[expert_names[0]]
+        self.amp_replay_buffer = self.amp_replay_buffers[expert_names[0]]
 
         actor_critic = self.alg.actor_critic
         self.alg = AMPPPO(
             actor_critic,
-            self.discriminator,
-            self.amp_replay_buffer,
+            discriminators=self.discriminators,
+            amp_replay_buffers=self.amp_replay_buffers,
             env=self.env,
+            expert_style_enabled=amp_cfg.get("expert_style_enabled", None),
             disc_learning_rate=amp_cfg.get("disc_learning_rate", 5e-5),
             disc_grad_penalty=amp_cfg.get("disc_grad_penalty", 5.0),
             disc_logit_reg=amp_cfg.get("disc_logit_reg", 0.05),
@@ -152,6 +169,10 @@ class OnPolicyRunner:
             task_reward_weight=amp_cfg.get("task_reward_weight", 1.0),
             style_reward_weight=amp_cfg.get("style_reward_weight", 1.0),
             scale_style_reward_by_dt=amp_cfg.get("scale_style_reward_by_dt", False),
+            style_reward_start_after=amp_cfg.get("style_reward_start_after", 0),
+            style_reward_warmup_iterations=amp_cfg.get("style_reward_warmup_iterations", 0),
+            style_reward_min_task_reward=amp_cfg.get("style_reward_min_task_reward", None),
+            style_reward_max_task_ratio=amp_cfg.get("style_reward_max_task_ratio", None),
             disc_batch_size=amp_cfg.get("disc_batch_size", 4096),
             device=self.device,
             **self.alg_cfg,
@@ -190,22 +211,74 @@ class OnPolicyRunner:
         if self.log_dir is None or it < self.save_best_after:
             return
 
-        if self.save_best_task_checkpoint and len(rewbuffer) > 0:
-            mean_task_reward = statistics.mean(rewbuffer)
-            if mean_task_reward > self.best_task_reward:
-                self.best_task_reward = mean_task_reward
-                path = os.path.join(self.log_dir, "model_best_task.pt")
-                self.save(
-                    path,
-                    infos={
-                        "it": it,
-                        "best_metric_name": "mean_task_reward",
-                        "best_metric_value": mean_task_reward,
-                    },
-                )
-                self._emit_log(
-                    f"Saved best task checkpoint to {path} (mean task reward {mean_task_reward:.4f})"
-                )
+        if len(rewbuffer) == 0:
+            return
+
+        mean_task_reward = statistics.mean(rewbuffer)
+        if self.save_best_task_checkpoint and mean_task_reward > self.best_task_reward:
+            self.best_task_reward = mean_task_reward
+            path = os.path.join(self.log_dir, "model_best_task.pt")
+            self.save(
+                path,
+                infos={
+                    "it": it,
+                    "best_metric_name": "mean_task_reward",
+                    "best_metric_value": mean_task_reward,
+                },
+            )
+            self._emit_log(
+                f"Saved best task checkpoint to {path} (mean task reward {mean_task_reward:.4f})"
+            )
+
+        top_k = int(getattr(self, "save_top_task_checkpoints", 0))
+        if top_k <= 0:
+            return
+
+        current = {
+            "it": it,
+            "best_metric_name": "mean_task_reward",
+            "best_metric_value": mean_task_reward,
+        }
+        candidates = [
+            checkpoint
+            for checkpoint in getattr(self, "top_task_checkpoints", [])
+            if int(checkpoint["it"]) != int(it)
+        ]
+        candidates.append(current)
+        candidates.sort(key=lambda checkpoint: (-checkpoint["best_metric_value"], checkpoint["it"]))
+        kept = candidates[:top_k]
+        displaced = candidates[top_k:]
+
+        # AMP/PPO task returns can regress after early peaks; keep top-k task snapshots
+        # separately from periodic and all-time-best checkpoints for later evaluation.
+        current_kept = any(int(checkpoint["it"]) == int(it) for checkpoint in kept)
+        if current_kept:
+            rank = next(
+                rank
+                for rank, checkpoint in enumerate(kept, start=1)
+                if int(checkpoint["it"]) == int(it)
+            )
+            path = os.path.join(self.log_dir, f"model_top_task_{it}.pt")
+            self.save(
+                path,
+                infos={
+                    "it": it,
+                    "best_metric_name": "mean_task_reward",
+                    "best_metric_value": mean_task_reward,
+                    "top_task_rank": rank,
+                },
+            )
+            self._emit_log(
+                f"Saved top-{top_k} task checkpoint to {path} "
+                f"(rank {rank}, mean task reward {mean_task_reward:.4f})"
+            )
+
+        for checkpoint in displaced:
+            path = os.path.join(self.log_dir, f"model_top_task_{checkpoint['it']}.pt")
+            if os.path.exists(path):
+                os.remove(path)
+
+        self.top_task_checkpoints = kept
 
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         metrics = defaultdict(float)
@@ -235,6 +308,8 @@ class OnPolicyRunner:
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
         for it in range(self.current_learning_iteration, tot_iter):
+            if hasattr(self.alg, "set_learning_iteration"):
+                self.alg.set_learning_iteration(it)
             start = time.time()
             # Rollout
             with torch.inference_mode():
@@ -442,8 +517,26 @@ class OnPolicyRunner:
             'infos': infos,
             }
         if self.use_amp:
-            save_dict['discriminator_state_dict'] = self.discriminator.state_dict()
-            save_dict['disc_optimizer_state_dict'] = self.alg.disc_optimizer.state_dict()
+            if self.discriminators is not None:
+                save_dict['discriminator_state_dicts'] = {
+                    name: discriminator.state_dict()
+                    for name, discriminator in self.discriminators.items()
+                }
+            disc_optimizers = getattr(self.alg, "disc_optimizers", None)
+            if disc_optimizers is not None:
+                save_dict['disc_optimizer_state_dicts'] = {
+                    name: optimizer.state_dict()
+                    for name, optimizer in disc_optimizers.items()
+                }
+
+            # Preserve the legacy keys for single-expert checkpoints and older evaluation scripts.
+            if self.discriminator is not None:
+                save_dict['discriminator_state_dict'] = self.discriminator.state_dict()
+            disc_optimizer = getattr(self.alg, "disc_optimizer", None)
+            if disc_optimizer is None and disc_optimizers:
+                disc_optimizer = next(iter(disc_optimizers.values()))
+            if disc_optimizer is not None:
+                save_dict['disc_optimizer_state_dict'] = disc_optimizer.state_dict()
         torch.save(save_dict, path)
 
     def load(self, path, load_optimizer=True, load_adaptation=False):
@@ -453,10 +546,30 @@ class OnPolicyRunner:
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
         self.current_learning_iteration = loaded_dict['iter']
-        if self.use_amp and 'discriminator_state_dict' in loaded_dict:
-            self.discriminator.load_state_dict(loaded_dict['discriminator_state_dict'])
-            if load_optimizer and 'disc_optimizer_state_dict' in loaded_dict:
-                self.alg.disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
+        if self.use_amp:
+            if (
+                'discriminator_state_dicts' in loaded_dict
+                and self.discriminators is not None
+            ):
+                for expert_name, state_dict in loaded_dict['discriminator_state_dicts'].items():
+                    if expert_name in self.discriminators:
+                        self.discriminators[expert_name].load_state_dict(state_dict)
+            elif 'discriminator_state_dict' in loaded_dict and self.discriminator is not None:
+                self.discriminator.load_state_dict(loaded_dict['discriminator_state_dict'])
+
+            disc_optimizers = getattr(self.alg, "disc_optimizers", None)
+            if (
+                load_optimizer
+                and 'disc_optimizer_state_dicts' in loaded_dict
+                and disc_optimizers is not None
+            ):
+                for expert_name, state_dict in loaded_dict['disc_optimizer_state_dicts'].items():
+                    if expert_name in disc_optimizers:
+                        disc_optimizers[expert_name].load_state_dict(state_dict)
+            elif load_optimizer and 'disc_optimizer_state_dict' in loaded_dict:
+                disc_optimizer = getattr(self.alg, "disc_optimizer", None)
+                if disc_optimizer is not None:
+                    disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):

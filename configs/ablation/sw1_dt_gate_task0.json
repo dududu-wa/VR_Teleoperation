@@ -1,0 +1,17 @@
+{
+  "notes": "Ablation: strict task gate. Style contribution is zero on transitions whose raw task reward is below 0, then capped to 25% of absolute task contribution.",
+  "train": {
+    "runner": {
+      "run_name": "sw1_dt_gate_task0",
+      "save_top_task_checkpoints": 3
+    },
+    "amp": {
+      "style_reward_weight": 1.0,
+      "scale_style_reward_by_dt": true,
+      "style_reward_start_after": 1000,
+      "style_reward_warmup_iterations": 2000,
+      "style_reward_min_task_reward": 0.0,
+      "style_reward_max_task_ratio": 0.25
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "notes": "Baseline: style_reward_weight=1.0 with env.dt scaling, no AMP warmup/gate. Use this to isolate checkpoint/top-k behavior from reward scheduling.",
+  "train": {
+    "runner": {
+      "run_name": "sw1_dt_nowarm",
+      "save_top_task_checkpoints": 3
+    },
+    "amp": {
+      "style_reward_weight": 1.0,
+      "scale_style_reward_by_dt": true,
+      "style_reward_start_after": 0,
+      "style_reward_warmup_iterations": 0,
+      "style_reward_min_task_reward": null,
+      "style_reward_max_task_ratio": null
+    }
+  }
+}
