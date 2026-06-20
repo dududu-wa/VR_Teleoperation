@@ -111,6 +111,7 @@ class R2InterruptRobot(R2Robot):
         self.disturb_in_last_action = cfg.disturb.disturb_in_last_action
         self.obs_target_interrupt_in_privilege = cfg.disturb.obs_target_interrupt_in_privilege
         self.obs_executed_actions_in_privilege = cfg.disturb.obs_executed_actions_in_privilege
+        self.start_disturb_by_curriculum = cfg.disturb.start_by_curriculum
         if cfg.disturb.disturb_rad_curriculum:
             self.disturb_rad_curriculum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         else:
@@ -157,10 +158,15 @@ class R2InterruptRobot(R2Robot):
             self.update_command_curriculum_grid(high_track_envs)
         
         if self.use_disturb:
-            update_disturb_mask = self.noise_disturb_mode[env_ids[~heading_mask]]
-            update_disturb_envs = env_ids[~heading_mask][update_disturb_mask]
-            noise_disturb_mask = self.disturb_masks[env_ids[~heading_mask]]
-            noise_disturb_envs = env_ids[~heading_mask][noise_disturb_mask]
+            disturb_ready_mask = ~heading_mask
+            if not self.start_disturb_by_curriculum:
+                # Decouple interrupt ablations from terrain/command curriculum release.
+                disturb_ready_mask = torch.ones_like(heading_mask)
+            disturb_env_ids = env_ids[disturb_ready_mask]
+            update_disturb_mask = self.noise_disturb_mode[disturb_env_ids]
+            update_disturb_envs = disturb_env_ids[update_disturb_mask]
+            noise_disturb_mask = self.disturb_masks[disturb_env_ids]
+            noise_disturb_envs = disturb_env_ids[noise_disturb_mask]
             if len(update_disturb_envs) > 0 and self.cfg.disturb.disturb_rad_curriculum:
                 self.update_disturb_curriculum_grid(update_disturb_envs, noise_disturb_envs)
         
@@ -315,7 +321,11 @@ class R2InterruptRobot(R2Robot):
         switch_rand = torch.rand(self.num_envs, device=self.device)
         switch = switch_rand < self.disturb_switch_prob 
         self.disturb_masks = torch.where(switch, ~self.disturb_masks, self.disturb_masks)
-        self.disturb_masks[:] *= self.noise_disturb_mode[:] * (~self.terrain_curriculum_mode[:])# Only disturb noise mode has disturb.
+        disturb_allowed_mask = ~self.terrain_curriculum_mode
+        if not self.start_disturb_by_curriculum:
+            # Keep noise-disturb partitioning but bypass the curriculum-mode gate.
+            disturb_allowed_mask = torch.ones_like(self.terrain_curriculum_mode)
+        self.disturb_masks[:] *= self.noise_disturb_mode[:] * disturb_allowed_mask
         if self.stand_interrupt_only:
             self.disturb_masks[:] *= self.standing_envs_mask[:]
         if self.disturb_replace_action:

@@ -8,13 +8,12 @@ This document is the running record for R2 AMP ablations. Keep it factual: recor
 
 The current multi-expert AMP policy can show useful early checkpoints but then regress late in training. The working hypothesis is that late collapse is driven more by command/curriculum/disturbance scheduling than by the discriminator architecture alone.
 
-The first July19 batch tests three levers:
+The first July19 batch tests four levers:
 
 - `scratch_command_hold`: keep multi-expert AMP, but disable command curriculum and hold the command range fixed.
 - `scratch_no_push`: keep curriculum and AMP, but remove randomized push impulses.
 - `scratch_amp_slow_lowcap`: keep multi-expert routing, but make AMP style reward weaker and slower.
-
-`scratch_slow_penalty_ramp` was configured but no July19 training directory exists, so it has no result in this batch.
+- `scratch_slow_penalty_ramp`: keep multi-expert AMP unchanged, but slow the shared penalty/push curriculum scale ramp by raising `penalize_curriculum_sigma` from `0.8` to `0.95`.
 
 ## Imported Historical Records
 
@@ -189,6 +188,8 @@ E:\codebase\VR_Teleoperation\outputs\eval\July19_command_hold_best
 E:\codebase\VR_Teleoperation\outputs\eval\July19_command_hold_8000
 E:\codebase\VR_Teleoperation\outputs\eval\July19_no_push_best
 E:\codebase\VR_Teleoperation\outputs\eval\July19_no_push_8000
+E:\codebase\VR_Teleoperation\outputs\eval\July19_slow_penalty_ramp_best
+E:\codebase\VR_Teleoperation\outputs\eval\July19_slow_penalty_ramp_8000
 ```
 
 Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.csv` has 7 rows, one row per preset.
@@ -200,7 +201,7 @@ Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.c
 | `scratch_amp_slow_lowcap` | `configs/ablation/scratch_amp_slow_lowcap.json` | `logs/r2_amp/July19/Jun19_16-08-42_scratch_amp_slow_lowcap` | `1214`, `1227`, `1806` | evaluated |
 | `scratch_command_hold` | `configs/ablation/scratch_command_hold.json` | `logs/r2_amp/July19/Jun19_16-09-11_scratch_command_hold` | `7120`, `7219`, `7966` | evaluated |
 | `scratch_no_push` | `configs/ablation/scratch_no_push.json` | `logs/r2_amp/July19/Jun19_16-12-37_scratch_no_push` | `1676`, `1685`, `1881` | evaluated |
-| `scratch_slow_penalty_ramp` | `configs/ablation/scratch_slow_penalty_ramp.json` | missing in July19 | none | not trained |
+| `scratch_slow_penalty_ramp` | `configs/ablation/scratch_slow_penalty_ramp.json` | `logs/r2_amp/July19/Jun20_04-58-31_scratch_slow_penalty_ramp` | `1163`, `1219`, `1222` | evaluated |
 
 ### Aggregate Evaluation
 
@@ -214,18 +215,59 @@ Higher `avg task return` is better. Lower `avg fall rate` is better.
 | `scratch_command_hold` | `8000` | -24.24 | 0.134 | 456.3 | 0.409 | 0.558 | 0.0038 | 0.0003 | 0.0047 | -0.722 | 1.607 |
 | `scratch_no_push` | `best` | -11.48 | 0.181 | 428.5 | 0.419 | 0.557 | 0.0010 | 0.0003 | 0.0039 | -0.797 | 1.670 |
 | `scratch_no_push` | `8000` | -64.47 | 0.161 | 428.9 | 0.385 | 0.473 | 0.0005 | 0.0004 | 0.0066 | -0.611 | 1.513 |
+| `scratch_slow_penalty_ramp` | `best` | -14.85 | 0.185 | 438.3 | 0.413 | 0.568 | 0.0048 | 0.0004 | 0.0043 | -0.777 | 1.638 |
+| `scratch_slow_penalty_ramp` | `8000` | -21.70 | 0.248 | 386.0 | 0.433 | 0.499 | 0.0002 | 0.0002 | 0.0072 | -0.529 | 1.420 |
 
 ### Supported Conclusion
 
-The strongest continuation target is `scratch_command_hold`.
+The strongest standalone continuation target remains `scratch_command_hold`.
 
 Reason:
 
 - `scratch_no_push` has the best early checkpoint, but its final checkpoint regresses from `-11.48` to `-64.47`. Removing push improves early learning but does not fix late training drift.
 - `scratch_amp_slow_lowcap` regresses from `-22.25` to `-142.87`. Weakening/slowing AMP style reward alone does not solve the problem and is not worth continuing as-is.
+- `scratch_slow_penalty_ramp` improves the early checkpoint relative to `scratch_command_hold` (`-14.85` vs `-21.57`) and keeps final task return close to command-hold final (`-21.70` vs `-24.24`), but the final fall rate is much worse (`0.248` vs `0.134`). Its final `run` preset has `fall_rate = 1.000`, so it is not a cleaner standalone fix.
 - `scratch_command_hold` stays close between best and final: `-21.57` to `-24.24`, with lower final fall rate than its best checkpoint. This supports the hypothesis that command/curriculum scheduling is a main driver of late instability.
 
-In plain terms: push is part of the stress, but the more important issue is the late training schedule. Holding command curriculum stabilizes training better than only weakening AMP or removing push.
+In plain terms: push and penalty ramp both affect early quality, but the more important issue is still the late training schedule. Holding command curriculum stabilizes training better than only weakening AMP, removing push, or slowing the penalty ramp.
+
+### Pure PPO `r2int_v7` Comparison
+
+User concern:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_interrupt
+```
+
+The relevant pure PPO run is:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_interrupt\r2int_v7
+```
+
+It contains only `model_30000.pt`. A same-protocol WSL CPU eval was added for comparison:
+
+```text
+E:\codebase\VR_Teleoperation\outputs\eval_r2int_v7_30000_ep64_cpu
+```
+
+This eval uses the same fixed 7 presets and `--num_episodes=64` protocol as the July19 AMP evals. Existing older PPO evals such as `outputs/eval_r2int_v7_30000_ep4_cpu` used only 3-4 episodes per preset, so they are useful as smoke checks but not the primary comparison.
+
+Aggregate result:
+
+| experiment | checkpoint | avg task return | avg fall rate | avg length steps | lin rmse | yaw rmse | height viol | roll/pitch viol | torque L2 | action-rate L2 | dof-acc L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `r2int_v7` pure PPO | `30000` | -66.85 | 0.185 | 427.8 | 0.421 | 0.663 | 0.0015 | 0.0012 | 37838 | 33.042 | 380717 |
+| `scratch_command_hold` AMP | `8000` | -24.24 | 0.134 | 456.3 | 0.409 | 0.558 | 0.0038 | 0.0003 | 32832 | 4.901 | 315275 |
+| `scratch_no_push` AMP | `best` | -11.48 | 0.181 | 428.5 | 0.419 | 0.557 | 0.0010 | 0.0003 | 16269 | 2.393 | 302449 |
+| `scratch_slow_penalty_ramp` AMP | `best` | -14.85 | 0.185 | 438.3 | 0.413 | 0.568 | 0.0048 | 0.0004 | 24321 | 2.924 | 320162 |
+
+Interpretation:
+
+- On fixed-preset quantitative eval, pure PPO is not better than the best July19 AMP checkpoints. It has worse avg task return than `scratch_command_hold_8000`, `scratch_no_push_best`, and `scratch_slow_penalty_ramp_best`.
+- Pure PPO also has much higher action-rate L2 (`33.042`) than `scratch_command_hold_8000` (`4.901`), so if it visually looks better, that impression is not captured by this smoothness metric.
+- Pure PPO may still be a useful visual or robustness reference because it is a long 30000-iteration run and does not carry AMP motion-prior artifacts. But under the current `evaluate.py` preset protocol, it should not be treated as a stronger quantitative baseline.
+- The fair next baseline is not old `r2int_v7` alone; it is a fresh PPO/control run under the same current code, same motion-independent evaluation protocol, same command schedule decision, and comparable training budget.
 
 ## Current Decision
 
@@ -236,6 +278,7 @@ Do not continue:
 Keep as diagnostic evidence, not as the final mechanism:
 
 - `scratch_no_push`
+- `scratch_slow_penalty_ramp`
 
 Continue from:
 
@@ -243,10 +286,39 @@ Continue from:
 
 Recommended next batch:
 
-1. `command_hold + no_push`: checks whether removing push on top of fixed commands improves early quality without the final collapse.
-2. `command_hold + slow push ramp`: keeps robustness training but restores push gradually instead of disabling it.
-3. `command_hold + late AMP/style reduction`: tests whether the final phase needs weaker style pressure after task behavior forms.
-4. `command_hold + staged command release`: start fixed, then gradually release walk/run before jump.
+1. `command_hold + controlled_disturb_release`: checks whether `scratch_command_hold` was stable because command ranges were fixed or because interrupt/disturb never released.
+2. `command_hold + no_push`: checks whether removing push on top of fixed commands improves early quality without the final collapse.
+3. `command_hold + conservative penalty ramp`: tests whether the early benefit of `scratch_slow_penalty_ramp` can be kept while avoiding the final `run` preset collapse.
+4. `command_hold + style low cap`: tests whether command-hold late stability improves when AMP style remains a weaker auxiliary prior.
+5. `command_hold + staged command release`: start fixed, then gradually release walk/run before jump. This still needs a separate command-schedule implementation and is not represented by the JSONs below.
+
+### Next-Batch Configs Added 2026-06-20
+
+Code change:
+
+```text
+legged_gym/envs/r2/r2interrupt_config.py
+legged_gym/envs/r2/r2interrupt.py
+```
+
+`cfg.disturb.start_by_curriculum` is now an active config switch. The default remains `true`, preserving the previous curriculum-style release. Setting it to `false` bypasses the `terrain_curriculum_mode` gate for noise-disturb environments while keeping the noise-disturb partition itself. This is meant to isolate the confound found in `scratch_command_hold`: fixed command curriculum also kept `disturb_curriculum=0.0000` in the tail training log.
+
+Planned configs:
+
+| experiment | config | hypothesis | status |
+|---|---|---|---|
+| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | Fixed command ranges remain, but disturb release is decoupled from terrain/command curriculum via `env.disturb.start_by_curriculum=false`; if this collapses, the main stabilizer in `scratch_command_hold` was likely suppressed disturb rather than command range alone. | not trained |
+| `command_hold_no_push` | `configs/ablation/command_hold_no_push.json` | Fixed command ranges plus zero randomized base push tests whether push removal improves early quality without reintroducing late drift. | not trained |
+| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | Fixed command ranges plus `penalize_curriculum_sigma=0.9` tests a middle ramp between default `0.8` and the too-slow `0.95` batch. | not trained |
+| `command_hold_style_lowcap` | `configs/ablation/command_hold_style_lowcap.json` | Fixed command ranges plus longer AMP warmup and lower task-ratio cap tests whether style pressure should stay weaker after task behavior forms. | not trained |
+
+Verification already completed for config plumbing only:
+
+```text
+KMP_DUPLICATE_LIB_OK=TRUE python tests/test_amp_training_contracts.py
+```
+
+Training and WSL CPU evaluation are still pending. Use the existing July19 evaluation protocol after each run: 64 episodes, 7 fixed presets, `--num_envs=64`, CPU sim/policy device, and both best-task and final checkpoints.
 
 ## Maintenance Rules
 

@@ -272,6 +272,49 @@ def test_expert_hard_gate_ablation_json_and_docs_contract():
         assert token in docs
 
 
+def test_interrupt_disturb_release_can_bypass_terrain_curriculum_gate():
+    source = (ROOT_DIR / "legged_gym/envs/r2/r2interrupt.py").read_text(
+        encoding="utf-8"
+    )
+    config_source = (
+        ROOT_DIR / "legged_gym/envs/r2/r2interrupt_config.py"
+    ).read_text(encoding="utf-8")
+    assert "start_by_curriculum = True" in config_source
+    assert "self.start_disturb_by_curriculum" in source
+    assert "disturb_ready_mask = ~heading_mask" in source
+    assert "if not self.start_disturb_by_curriculum:" in source
+    assert "disturb_ready_mask = torch.ones_like(heading_mask)" in source
+    assert "disturb_allowed_mask = ~self.terrain_curriculum_mode" in source
+    assert "torch.ones_like(self.terrain_curriculum_mode)" in source
+
+
+def test_next_batch_command_hold_ablation_json_contract():
+    ablation_dir = ROOT_DIR / "configs/ablation"
+    expected = {
+        "command_hold_controlled_disturb_release.json",
+        "command_hold_no_push.json",
+        "command_hold_conservative_penalty_ramp.json",
+        "command_hold_style_lowcap.json",
+    }
+    for filename in expected:
+        payload = json.loads((ablation_dir / filename).read_text(encoding="utf-8"))
+        assert isinstance(payload.get("notes"), str) and payload["notes"]
+        assert payload["env"]["commands"]["curriculum"] is False
+        assert payload["train"]["runner"]["run_name"] == Path(filename).stem
+        assert payload["train"]["runner"]["max_iterations"] == 8000
+        assert payload["train"]["runner"]["save_top_task_checkpoints"] == 3
+        assert "motion_experts" in payload["env"]["amp"]
+        assert "expert_style_enabled" in payload["env"]["amp"]
+        assert "expert_style_enabled" in payload["train"]["amp"]
+
+    controlled = json.loads(
+        (ablation_dir / "command_hold_controlled_disturb_release.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert controlled["env"]["disturb"]["start_by_curriculum"] is False
+
+
 if __name__ == "__main__":
     test_amp_style_schedule_and_task_ratio_gate()
     test_runner_keeps_top_task_checkpoints()
@@ -284,3 +327,5 @@ if __name__ == "__main__":
     test_amp_ppo_resolves_expert_ids_before_collector_mutation()
     test_evaluate_uses_routed_amp_discriminator()
     test_expert_hard_gate_ablation_json_and_docs_contract()
+    test_interrupt_disturb_release_can_bypass_terrain_curriculum_gate()
+    test_next_batch_command_hold_ablation_json_contract()

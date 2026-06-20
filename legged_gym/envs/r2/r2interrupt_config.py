@@ -111,6 +111,8 @@ class R2InterruptCfg(R2Cfg):
         uniform_noise = True 
         noise_ratio = 1 
         interrupt_action_buffer = None
+        # Curriculum-style release follows Bengio et al. 2009 and Rudin et al.
+        # 2021 by default; ablations may disable this to isolate disturb timing.
         start_by_curriculum = True 
         replace_action = True 
         disturb_rad = 0.2 

@@ -1,0 +1,44 @@
+{
+  "notes": "Next-batch ablation: keep command curriculum held fixed and remove randomized base push impulses. This tests whether command_hold can keep its late stability while improving early quality by removing push noise.",
+  "env": {
+    "commands": {
+      "curriculum": false,
+      "ranges": {
+        "lin_vel_x": [-0.6, 0.6],
+        "lin_vel_y": [-0.6, 0.6],
+        "ang_vel_yaw": [-0.6, 0.6]
+      }
+    },
+    "domain_rand": {
+      "max_push_vel_xy": 0.0,
+      "max_push_ang_vel_xy": 0.0
+    },
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run",
+        "jump": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/jump"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "command_hold_no_push",
+      "save_top_task_checkpoints": 3,
+      "max_iterations": 8000
+    },
+    "amp": {
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  }
+}

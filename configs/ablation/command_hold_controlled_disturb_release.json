@@ -1,0 +1,43 @@
+{
+  "notes": "Next-batch ablation: keep command curriculum held fixed, but decouple interrupt/disturb release from terrain-command curriculum by setting disturb.start_by_curriculum=false. This isolates whether scratch_command_hold was stable because commands were fixed or because disturb never released.",
+  "env": {
+    "commands": {
+      "curriculum": false,
+      "ranges": {
+        "lin_vel_x": [-0.6, 0.6],
+        "lin_vel_y": [-0.6, 0.6],
+        "ang_vel_yaw": [-0.6, 0.6]
+      }
+    },
+    "disturb": {
+      "start_by_curriculum": false
+    },
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run",
+        "jump": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/jump"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "command_hold_controlled_disturb_release",
+      "save_top_task_checkpoints": 3,
+      "max_iterations": 8000
+    },
+    "amp": {
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  }
+}

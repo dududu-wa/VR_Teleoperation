@@ -145,7 +145,7 @@ AMP 消融实验不新增 `r2amp_style0` 这类 task。统一使用：
 python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json configs/ablation/style0.json
 ```
 
-`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`sw1_dt_nowarm.json` 复现 dt baseline，`sw1_dt_warmup.json` 是推荐 schedule/cap 组，`sw1_dt_ratio025.json` 只测 task-ratio cap，`sw1_dt_gate_task0.json` 叠加严格 task gate，`walk_sw1_dt_warmup.json` 用 walk-only prior 测命令和 motion prior 是否冲突。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`expert_hard_gate_walk_run_jump.json` 打开 walk/run/jump 三专家 hard routing，`expert_hard_gate_walk_run.json` 只注册 walk/run 并让 jump/hop 语义回退到默认 walk 专家，`expert_hard_gate_selective_walk.json` 保留三专家路由但只让 walk style reward 生效，`expert_hard_gate_no_style_warmup.json` 在 `train.amp` 把 `style_reward_start_after/style_reward_warmup_iterations` 设为 0，因为 `AMPPPO` 从 train cfg 读取 schedule。`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
+`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`sw1_dt_nowarm.json` 复现 dt baseline，`sw1_dt_warmup.json` 是推荐 schedule/cap 组，`sw1_dt_ratio025.json` 只测 task-ratio cap，`sw1_dt_gate_task0.json` 叠加严格 task gate，`walk_sw1_dt_warmup.json` 用 walk-only prior 测命令和 motion prior 是否冲突。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`expert_hard_gate_walk_run_jump.json` 打开 walk/run/jump 三专家 hard routing，`expert_hard_gate_walk_run.json` 只注册 walk/run 并让 jump/hop 语义回退到默认 walk 专家，`expert_hard_gate_selective_walk.json` 保留三专家路由但只让 walk style reward 生效，`expert_hard_gate_no_style_warmup.json` 在 `train.amp` 把 `style_reward_start_after/style_reward_warmup_iterations` 设为 0，因为 `AMPPPO` 从 train cfg 读取 schedule。`command_hold_controlled_disturb_release.json`、`command_hold_no_push.json`、`command_hold_conservative_penalty_ramp.json`、`command_hold_style_lowcap.json` 是 July19 后续批次，用于在固定 command range 的基线上拆分 disturb release、push、penalty ramp 和 style cap。`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
 
 ### 2.3 回放链路
 
@@ -321,7 +321,7 @@ R2 26-DoF order used by `R2Cfg.init_state.default_joint_angles`: legs(12),
 waist(2), head(2), left arm(5), right arm(5). Head yaw/pitch are intentionally
 excluded from interrupt targets.
 
-所以默认配置下干扰机制会实际启用：interrupt flag 写入 command，`DISTURB_DIM=10`，且 `use_disturb=True`。
+所以默认配置下干扰机制会实际启用：interrupt flag 写入 command，`DISTURB_DIM=10`，且 `use_disturb=True`。`disturb.start_by_curriculum=True` 会保留原始 curriculum-style release：noise-disturb 环境只有离开 terrain curriculum mode 后才开始更新/触发 disturb；消融 JSON 可设为 `false`，用于隔离固定 command range 时的 disturb release 影响。
 
 关键类：
 
@@ -408,10 +408,11 @@ reward 约定：
 
 关键方法：
 
-- `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等。
+- `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等，并读取 `cfg.disturb.start_by_curriculum` 决定 disturb 是否等待 terrain/command curriculum release。
 - `_create_envs`：在父类创建 env 后，补充 disturb termination body 索引和 disturb mode mask。
-- `_resample_commands`：继承命令采样，并在需要时更新 disturb curriculum。
+- `_resample_commands`：继承命令采样，并在需要时更新 disturb curriculum；当 `start_by_curriculum=False` 时，noise-disturb 子环境即使仍在 terrain curriculum mode 中也可更新 disturb 半径。
 - `calculate_action`：核心逻辑。先 clip policy action，再根据 disturb mask 替换或叠加 `cfg.disturb.disturb_action_indices` 指定的 R2 双臂动作，保存真实执行动作。
+- `random_switch_disturb`：按 `switch_prob` 切换 disturb mask；默认仍受 `~terrain_curriculum_mode` 门控，`start_by_curriculum=False` 时只保留 noise-disturb 分区门控。
 - `_preprocess_obs/add_other_privilege`：可把 interrupt flag、目标扰动、实际执行动作拼入观测或 privileged obs。
 - `check_termination`：干扰模式下对部分 termination 做豁免。
 - reward override：中断时对肩部偏差、upper/lower action rate、碰撞、DOF limits/acc/vel 等做特殊处理。
@@ -1178,7 +1179,7 @@ AMP 任务实验输出。
 
 ### `tests/`
 
-当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint 和配置接线。完整训练验证仍主要依赖：
+当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint、多专家 AMP 接线、interrupt disturb release 开关和消融 JSON 合同。完整训练验证仍主要依赖：
 
 - 能否创建环境。
 - 能否启动训练。
