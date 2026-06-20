@@ -596,6 +596,24 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 python legged_gym/scripts/evaluate.py --task=r2amp --load_run Apr01_00-00-00_style0 --checkpoint=-1 --cfg_override_json configs/ablation/style0.json --num_episodes=32 --output_dir outputs/r2amp_style0_eval
 ```
 
+Windows 本机通过 WSL 评估 E 盘 checkpoint 时，项目路径是 `/mnt/e/codebase/VR_Teleoperation`。当前 `r2gym` 环境的 GPU PyTorch 是 `torch 2.4.1+cu118`，不支持 RTX 5080 Laptop 的 `sm_120`，GPU eval 会报 `no kernel image is available for execution on the device`；因此在未升级到支持 `sm_120` 的 PyTorch 前，使用 CPU PhysX/CPU policy 跑评估。为了避免 64 个 episode 串行过慢，必须显式加 `--num_envs=64`，让每个 preset 并行收集 64 个 episode。
+
+`July19` 的 `scratch_command_hold` 已实测跑通，命令如下：
+
+```powershell
+wsl.exe -d Ubuntu-22.04 --cd /mnt/e/codebase/VR_Teleoperation -- env PATH=/opt/miniconda3/envs/r2gym/bin:/opt/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin PYTHONPATH=/mnt/e/codebase/VR_Teleoperation:/mnt/e/codebase/VR_Teleoperation/rsl_rl LD_LIBRARY_PATH=/opt/miniconda3/envs/r2gym/lib:/mnt/e/wsl/isaacgym/isaacgym/python/isaacgym/_bindings/linux-x86_64 /opt/miniconda3/envs/r2gym/bin/python legged_gym/scripts/evaluate.py --task=r2amp --headless --sim_device=cpu --rl_device=cpu --num_envs=64 --load_run July19/Jun19_16-09-11_scratch_command_hold --checkpoint=-2 --cfg_override_json configs/ablation/scratch_command_hold.json --num_episodes=64 --episode_seconds=10 --output_dir outputs/eval/July19_command_hold_best
+
+wsl.exe -d Ubuntu-22.04 --cd /mnt/e/codebase/VR_Teleoperation -- env PATH=/opt/miniconda3/envs/r2gym/bin:/opt/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin PYTHONPATH=/mnt/e/codebase/VR_Teleoperation:/mnt/e/codebase/VR_Teleoperation/rsl_rl LD_LIBRARY_PATH=/opt/miniconda3/envs/r2gym/lib:/mnt/e/wsl/isaacgym/isaacgym/python/isaacgym/_bindings/linux-x86_64 /opt/miniconda3/envs/r2gym/bin/python legged_gym/scripts/evaluate.py --task=r2amp --headless --sim_device=cpu --rl_device=cpu --num_envs=64 --load_run July19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/scratch_command_hold.json --num_episodes=64 --episode_seconds=10 --output_dir outputs/eval/July19_command_hold_8000
+```
+
+关键参数说明：
+
+- `--load_run July19/<run_dir>`：`get_load_path()` 的根目录是 `logs/r2_amp`，所以 July19 子目录必须写进 `--load_run`。
+- `--checkpoint=-2`：加载 `model_best_task.pt`；`--checkpoint=8000` 加载 `model_8000.pt`。
+- `PYTHONPATH=/mnt/e/codebase/VR_Teleoperation:/mnt/e/codebase/VR_Teleoperation/rsl_rl`：在未 `pip install -e rsl_rl` 时让 `rsl_rl.env` 可被导入。
+- `LD_LIBRARY_PATH=.../r2gym/lib:.../isaacgym/_bindings/linux-x86_64`：让 Isaac Gym 找到 `libpython3.8.so.1.0` 和 PhysX/Isaac Gym bindings。
+- 输出会写到 Windows 侧的 `E:\codebase\VR_Teleoperation\outputs\eval\...`，每个目录包含 `metrics.csv` 和 `metrics.json`。
+
 #### `play.py`
 
 模型回放和视频录制脚本。

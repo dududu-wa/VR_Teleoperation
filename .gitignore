@@ -18,8 +18,6 @@ Thumbs.db
 .vscode/
 .claude/
 legged_gym/motions/
-<<<<<<< HEAD
 .codegraph/
-=======
 outputs/
->>>>>>> 9c796fca75e5df1e07d08a3d8da4fa1fbbd65672
+AGENTS.md
