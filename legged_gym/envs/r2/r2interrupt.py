@@ -112,10 +112,28 @@ class R2InterruptRobot(R2Robot):
         self.obs_target_interrupt_in_privilege = cfg.disturb.obs_target_interrupt_in_privilege
         self.obs_executed_actions_in_privilege = cfg.disturb.obs_executed_actions_in_privilege
         self.start_disturb_by_curriculum = cfg.disturb.start_by_curriculum
+        self.staged_disturb_release = getattr(cfg.disturb, "staged_release", False)
+        self.staged_disturb_levels = torch.tensor(
+            getattr(cfg.disturb, "stage_levels", [0.0, 0.25, 0.5, 0.75, 1.0]),
+            dtype=torch.float,
+            device=self.device,
+            requires_grad=False,
+        )
+        if self.staged_disturb_levels.numel() == 0:
+            raise ValueError("cfg.disturb.stage_levels must not be empty")
+        self.staged_disturb_stage_idx = 0
+        self.staged_disturb_min_episodes = int(getattr(cfg.disturb, "stage_min_episodes", 512))
+        self.staged_disturb_min_task_return = float(getattr(cfg.disturb, "stage_min_task_return", 20.0))
+        self.staged_disturb_max_fall_rate = float(getattr(cfg.disturb, "stage_max_fall_rate", 0.10))
+        self.staged_disturb_monitor_noise_only = bool(getattr(cfg.disturb, "stage_monitor_noise_only", True))
+        self.staged_disturb_episode_count = 0
+        self.staged_disturb_return_sum = 0.0
+        self.staged_disturb_fall_sum = 0.0
         if cfg.disturb.disturb_rad_curriculum:
             self.disturb_rad_curriculum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         else:
             self.disturb_rad_curriculum = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+        self._cap_staged_disturb_curriculum()
 
         if hasattr(cfg.disturb, "disturb_terminate_assets"):
             self.disturb_terminate_assets = cfg.disturb.disturb_terminate_assets
@@ -125,6 +143,64 @@ class R2InterruptRobot(R2Robot):
         self.num_steps = 0
         self.interrupt_in_command = cfg.disturb.interrupt_in_cmd
         self.stand_interrupt_only = cfg.disturb.stand_interrupt_only
+
+    def _current_staged_disturb_level(self):
+        if not self.staged_disturb_release:
+            return float(self.cfg.disturb.max_curriculum)
+        return float(self.staged_disturb_levels[self.staged_disturb_stage_idx].item())
+
+    def _cap_staged_disturb_curriculum(self):
+        if not self.staged_disturb_release or not hasattr(self, "disturb_rad_curriculum"):
+            return
+        stage_level = self._current_staged_disturb_level()
+        self.disturb_rad_curriculum[:] = torch.clamp(self.disturb_rad_curriculum, max=stage_level)
+
+    def _record_staged_disturb_episode_stats(self, env_ids):
+        if (
+            not self.staged_disturb_release
+            or len(env_ids) == 0
+            or not getattr(self, "init_done", False)
+        ):
+            return
+
+        monitor_ids = env_ids
+        if self.staged_disturb_monitor_noise_only and hasattr(self, "noise_disturb_mode"):
+            monitor_ids = monitor_ids[self.noise_disturb_mode[monitor_ids]]
+        if len(monitor_ids) == 0:
+            return
+
+        task_returns = torch.zeros(len(monitor_ids), dtype=torch.float, device=self.device)
+        for values in self.episode_sums.values():
+            task_returns += values[monitor_ids]
+
+        falls = (~self.time_out_buf[monitor_ids]).float()
+        self.staged_disturb_episode_count += int(monitor_ids.numel())
+        self.staged_disturb_return_sum += float(task_returns.sum().detach().cpu().item())
+        self.staged_disturb_fall_sum += float(falls.sum().detach().cpu().item())
+
+    def _maybe_advance_staged_disturb_release(self):
+        if not self.staged_disturb_release:
+            return
+        if self.staged_disturb_episode_count < self.staged_disturb_min_episodes:
+            self._cap_staged_disturb_curriculum()
+            return
+
+        avg_task_return = self.staged_disturb_return_sum / max(self.staged_disturb_episode_count, 1)
+        fall_rate = self.staged_disturb_fall_sum / max(self.staged_disturb_episode_count, 1)
+        can_advance = (
+            avg_task_return >= self.staged_disturb_min_task_return
+            and fall_rate <= self.staged_disturb_max_fall_rate
+            and self.staged_disturb_stage_idx < int(self.staged_disturb_levels.numel()) - 1
+        )
+        if can_advance:
+            self.staged_disturb_stage_idx += 1
+
+        # Use non-overlapping windows so a bad phase cannot be hidden by older,
+        # easier data after the stage cap changes.
+        self.staged_disturb_episode_count = 0
+        self.staged_disturb_return_sum = 0.0
+        self.staged_disturb_fall_sum = 0.0
+        self._cap_staged_disturb_curriculum()
 
     def _disturb_values(self, tensor):
         return tensor.index_select(1, self.disturb_action_indices)
@@ -251,6 +327,7 @@ class R2InterruptRobot(R2Robot):
                 self.disturb_rad_curriculum[noise_env_ids]
             )
         ) 
+        self._cap_staged_disturb_curriculum()
 
         # resample all noise envs disturb
         self.disturb_masks[env_ids] = (torch.rand(len(env_ids))<=0.5).to(self.device) # Reset with half with disturb.
@@ -313,9 +390,21 @@ class R2InterruptRobot(R2Robot):
         )
 
     def reset_idx(self, env_ids):         
+        if hasattr(self, "staged_disturb_release"):
+            self._record_staged_disturb_episode_stats(env_ids)
         super().reset_idx(env_ids)
         if self.use_disturb and self.cfg.disturb.disturb_rad_curriculum:
             self.extras['episode']['disturb_curriculum']= torch.mean(self.disturb_rad_curriculum[:self.noise_env_nums])
+        if getattr(self, "staged_disturb_release", False):
+            self.extras['episode']['staged_disturb_level'] = self._current_staged_disturb_level()
+            self.extras['episode']['staged_disturb_stage'] = self.staged_disturb_stage_idx
+            if self.staged_disturb_episode_count > 0:
+                self.extras['episode']['staged_disturb_window_task_return'] = (
+                    self.staged_disturb_return_sum / self.staged_disturb_episode_count
+                )
+                self.extras['episode']['staged_disturb_window_fall_rate'] = (
+                    self.staged_disturb_fall_sum / self.staged_disturb_episode_count
+                )
             
     def random_switch_disturb(self):
         switch_rand = torch.rand(self.num_envs, device=self.device)
@@ -347,6 +436,10 @@ class R2InterruptRobot(R2Robot):
             if self.num_steps % self.disturb_noise_update_step == 0:
                 self.resample_disturb_noise()
             self.num_steps %= self.disturb_noise_update_step          
+
+    def training_curriculum(self):
+        super().training_curriculum()
+        self._maybe_advance_staged_disturb_release()
     
     def curriculum_disturb_fusion(self, actions):
         disturb_action = torch.clamp(

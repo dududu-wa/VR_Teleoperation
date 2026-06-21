@@ -1,6 +1,6 @@
 # R2 AMP Experiment Progress
 
-Last updated: 2026-06-20
+Last updated: 2026-06-21
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -169,6 +169,8 @@ Common settings:
   - `--checkpoint=-2`: `model_best_task.pt`
   - `--checkpoint=8000`: final checkpoint
 
+As of 2026-06-21, `evaluate.py` keeps DTW imitation metrics opt-in. The default fixed-preset protocol below does not pass `--compute_dtw`, so `joint_pose_error_dtw_m` and `key_body_error_dtw_m` remain empty. This preserves the task/fall/RMSE/smoothness/discriminator metrics while avoiding per-episode best-clip DTW cost during 64-episode batch evaluation.
+
 The WSL command template and runtime caveat are documented in `CODE_STRUCTURE.md` under `legged_gym/scripts/evaluate.py`. GPU eval is blocked on this machine because the current `r2gym` PyTorch build does not support RTX 5080 Laptop `sm_120`.
 
 ## July19 Batch
@@ -307,10 +309,10 @@ Planned configs:
 
 | experiment | config | hypothesis | status |
 |---|---|---|---|
-| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | Fixed command ranges remain, but disturb release is decoupled from terrain/command curriculum via `env.disturb.start_by_curriculum=false`; if this collapses, the main stabilizer in `scratch_command_hold` was likely suppressed disturb rather than command range alone. | not trained |
-| `command_hold_no_push` | `configs/ablation/command_hold_no_push.json` | Fixed command ranges plus zero randomized base push tests whether push removal improves early quality without reintroducing late drift. | not trained |
-| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | Fixed command ranges plus `penalize_curriculum_sigma=0.9` tests a middle ramp between default `0.8` and the too-slow `0.95` batch. | not trained |
-| `command_hold_style_lowcap` | `configs/ablation/command_hold_style_lowcap.json` | Fixed command ranges plus longer AMP warmup and lower task-ratio cap tests whether style pressure should stay weaker after task behavior forms. | not trained |
+| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | Fixed command ranges remain, but disturb release is decoupled from terrain/command curriculum via `env.disturb.start_by_curriculum=false`; if this collapses, the main stabilizer in `scratch_command_hold` was likely suppressed disturb rather than command range alone. | evaluated in July20 |
+| `command_hold_no_push` | `configs/ablation/command_hold_no_push.json` | Fixed command ranges plus zero randomized base push tests whether push removal improves early quality without reintroducing late drift. | evaluated in July20 |
+| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | Fixed command ranges plus `penalize_curriculum_sigma=0.9` tests a middle ramp between default `0.8` and the too-slow `0.95` batch. | evaluated in July20 |
+| `command_hold_style_lowcap` | `configs/ablation/command_hold_style_lowcap.json` | Fixed command ranges plus longer AMP warmup and lower task-ratio cap tests whether style pressure should stay weaker after task behavior forms. | evaluated in July20 |
 
 Verification already completed for config plumbing only:
 
@@ -318,7 +320,161 @@ Verification already completed for config plumbing only:
 KMP_DUPLICATE_LIB_OK=TRUE python tests/test_amp_training_contracts.py
 ```
 
-Training and WSL CPU evaluation are still pending. Use the existing July19 evaluation protocol after each run: 64 episodes, 7 fixed presets, `--num_envs=64`, CPU sim/policy device, and both best-task and final checkpoints.
+Training and WSL CPU evaluation are recorded in the July20 batch below.
+
+## July20 Batch
+
+Training root:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_amp\July20
+```
+
+Evaluation outputs:
+
+```text
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_conservative_penalty_ramp_best
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_conservative_penalty_ramp_8000
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_controlled_disturb_release_best
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_controlled_disturb_release_8000
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_no_push_best
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_no_push_8000
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_style_lowcap_best
+E:\codebase\VR_Teleoperation\outputs\eval\July20_command_hold_style_lowcap_8000
+```
+
+Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.csv` has 7 rows, one row per fixed preset. DTW was not computed in this batch because `--compute_dtw` was not passed.
+
+### Training Artifacts
+
+| experiment | config | run directory | top task checkpoint iterations | final train task reward | final disturb curriculum | status |
+|---|---|---|---|---:|---:|---|
+| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | `logs/r2_amp/July20/Jun20_15-18-58_command_hold_conservative_penalty_ramp` | `5818`, `7663`, `7930` | `23.49` | `0.0000` | evaluated |
+| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | `logs/r2_amp/July20/Jun20_15-19-48_command_hold_controlled_disturb_release` | `1166`, `1706`, `1944` | `-4.26` | `0.9956` | evaluated |
+| `command_hold_no_push` | `configs/ablation/command_hold_no_push.json` | `logs/r2_amp/July20/Jun20_15-21-52_command_hold_no_push` | `6059`, `6973`, `7440` | `31.15` | `0.0000` | evaluated |
+| `command_hold_style_lowcap` | `configs/ablation/command_hold_style_lowcap.json` | `logs/r2_amp/July20/Jun20_15-22-56_command_hold_style_lowcap` | `7439`, `7600`, `7937` | `28.81` | `0.0000` | evaluated |
+
+### Aggregate Evaluation
+
+Higher `avg task return` is better. Lower `avg fall rate` is better.
+
+| experiment | checkpoint | avg task return | avg fall rate | avg length steps | lin rmse | yaw rmse | height viol | roll/pitch viol | style reward | policy logit | disc gap | torque L2 | action-rate L2 | dof-acc L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `command_hold_conservative_penalty_ramp` | `best` | -79.37 | 0.087 | 472.3 | 0.317 | 0.426 | 0.0005 | 0.0001 | 0.0054 | -0.704 | 1.597 | 22363 | 2.676 | 267651 |
+| `command_hold_conservative_penalty_ramp` | `8000` | -80.78 | 0.080 | 477.4 | 0.298 | 0.438 | 0.0015 | 0.0002 | 0.0054 | -0.701 | 1.590 | 22357 | 2.691 | 269447 |
+| `command_hold_controlled_disturb_release` | `best` | -9.44 | 0.435 | 318.6 | 0.536 | 0.651 | 0.0021 | 0.0009 | 0.0042 | -0.782 | 1.638 | 16030 | 2.743 | 318689 |
+| `command_hold_controlled_disturb_release` | `8000` | -67.70 | 0.049 | 485.1 | 0.318 | 0.466 | 0.0015 | 0.0001 | 0.0059 | -0.670 | 1.547 | 39303 | 5.165 | 258774 |
+| `command_hold_no_push` | `best` | -22.34 | 0.205 | 414.7 | 0.441 | 0.604 | 0.0021 | 0.0006 | 0.0027 | -0.845 | 1.738 | 26161 | 3.854 | 398908 |
+| `command_hold_no_push` | `8000` | -31.86 | 0.143 | 439.4 | 0.346 | 0.520 | 0.0005 | 0.0004 | 0.0026 | -0.853 | 1.734 | 25442 | 3.837 | 379619 |
+| `command_hold_style_lowcap` | `best` | -45.33 | 0.154 | 441.2 | 0.358 | 0.498 | 0.0004 | 0.0001 | 0.0048 | -0.724 | 1.593 | 31362 | 4.366 | 300206 |
+| `command_hold_style_lowcap` | `8000` | -44.22 | 0.167 | 433.6 | 0.368 | 0.489 | 0.0009 | 0.0001 | 0.0048 | -0.728 | 1.594 | 31139 | 4.344 | 298085 |
+
+### Preset-Level Failure Notes
+
+| experiment | checkpoint | worst-return preset | worst fall preset |
+|---|---:|---|---|
+| `command_hold_conservative_penalty_ramp` | `best` | `turn_left`, task `-93.46`, fall `0.000` | `run`, fall `0.188` |
+| `command_hold_conservative_penalty_ramp` | `8000` | `turn_left`, task `-91.15`, fall `0.016` | `jump`, fall `0.391` |
+| `command_hold_controlled_disturb_release` | `best` | `turn_left`, task `-13.58`, fall `0.141` | `run`, fall `1.000` |
+| `command_hold_controlled_disturb_release` | `8000` | `run`, task `-94.09`, fall `0.016` | `jump`, fall `0.172` |
+| `command_hold_no_push` | `best` | `jump`, task `-28.75`, fall `0.109` | `run`, fall `0.609` |
+| `command_hold_no_push` | `8000` | `jump`, task `-41.82`, fall `0.078` | `run`, fall `0.500` |
+| `command_hold_style_lowcap` | `best` | `walk_fast`, task `-61.84`, fall `0.031` | `run`, fall `1.000` |
+| `command_hold_style_lowcap` | `8000` | `walk_fast`, task `-61.55`, fall `0.062` | `run`, fall `1.000` |
+
+### Supported Conclusion
+
+The July20 result does not support continuing the batch as a direct replacement for `scratch_command_hold`.
+
+Facts:
+
+- `command_hold_controlled_disturb_release` confirms the suspected confound: once disturb release is decoupled from command/terrain curriculum, the final training tail reaches `disturb_curriculum=0.9956` and final train task reward drops to `-4.26`. Its best checkpoint has the best average task return in the batch (`-9.44`) but fails the `run` preset completely (`fall_rate=1.000`), so the good average is not robust.
+- `command_hold_no_push` is the best compromise inside July20 by average task return among the stable final checkpoints (`-31.86` at final) and improves from best to final in fall rate (`0.205` to `0.143`). However, it is still worse than July19 `scratch_command_hold_8000` (`-24.24`, fall `0.134`) and keeps a high `run` fall rate (`0.500` final).
+- `command_hold_style_lowcap` is stable between best and final (`-45.33` to `-44.22`), but `run` fails completely at both checkpoints (`fall_rate=1.000`), so weaker style pressure alone is not a usable fix.
+- `command_hold_conservative_penalty_ramp` has low fall rate (`0.080` final) but very poor task return (`-80.78`) and particularly bad `turn_left`, so conservative penalty ramp trades away task tracking quality.
+
+Interpretation:
+
+- The original `scratch_command_hold` stability was partly due to suppressing disturb release, not only due to fixed command ranges.
+- Removing push on top of command hold is the only July20 lever worth keeping as a secondary diagnostic, but it does not beat the July19 command-hold baseline.
+- The next serious experiment should not simply continue these four settings. It should use `scratch_command_hold` as the anchor and introduce a staged disturb or command release schedule that avoids a sudden jump to full disturb while separately monitoring the `run` preset.
+
+## Next Step Implementation - 2026-06-21
+
+Hypothesis: July19/July20 point to a coupled failure between command curriculum and disturbance release. The next useful evidence is not another horizontal AMP weight / no-push / penalty-ramp sweep, but a run-only disturbance threshold check plus two staged-release training experiments: one general command-hold anchor and one run-focused follow-up.
+
+Implemented artifacts:
+
+| artifact | status | purpose |
+| --- | --- | --- |
+| `legged_gym/utils/helpers.py` | implemented | Adds `--eval_disturb_ratio` for fixed disturbance-ratio evaluation. |
+| `legged_gym/scripts/evaluate.py` | implemented | Keeps default evaluation disturb-free, but enables fixed-ratio noise disturbance when `--eval_disturb_ratio` is supplied; adds `survival_time_mean_s` to output metrics. |
+| `scripts/run_run_disturb_sweep.ps1` | implemented, not run | Runs `run` preset at `0%, 20%, 40%, 60%, 80%, 100%` disturbance and aggregates fall rate, survival time, lin/yaw RMSE, and task return. |
+| `legged_gym/envs/r2/r2interrupt_config.py` | implemented | Adds default-off `disturb.staged_release` and stage gate parameters. |
+| `legged_gym/envs/r2/r2interrupt.py` | implemented | Clamps `disturb_rad_curriculum` by stage and only advances stage after recent task return and fall-rate gates pass. |
+| `configs/ablation/command_hold_staged_disturb_release.json` | implemented, not trained | Fixed command-range anchor with staged disturbance release `0.0 -> 0.25 -> 0.5 -> 0.75 -> 1.0`. |
+| `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | implemented, not trained | Same staged disturbance release, but command sampling is biased into the run expert region. |
+
+Training experiment pair:
+
+| experiment | config | controlled factor | status |
+| --- | --- | --- | --- |
+| `command_hold_staged_disturb_release` | `configs/ablation/command_hold_staged_disturb_release.json` | General fixed command range from `scratch_command_hold`; tests whether staged release alone prevents the July20 full-disturb collapse. | not trained |
+| `command_hold_run_focused_staged_disturb_release` | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | Run-focused command range with forward speed `1.1-1.6`, gait frequency `2.6-3.2`, narrow lateral/yaw range, and foot/body-height caps below the jump-routing thresholds. | not trained |
+
+Run-only disturb sweep command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_run_disturb_sweep.ps1 -Checkpoint 8000
+```
+
+Expected output root:
+
+```text
+outputs/eval/run_disturb_sweep_command_hold_8000
+```
+
+Each ratio writes its own `metrics.csv` / `metrics.json` under `ratio_0p0`, `ratio_0p2`, ..., `ratio_1p0`. The helper also writes:
+
+```text
+outputs/eval/run_disturb_sweep_command_hold_8000/run_disturb_sweep_summary.csv
+outputs/eval/run_disturb_sweep_command_hold_8000/run_disturb_sweep.png
+```
+
+The plot is best-effort; if matplotlib is missing in WSL, the CSV remains the authoritative artifact.
+
+Training is intended to run on the remote Linux machine, not on this Windows host. Use the remote repo path and Conda environment shown in the training example:
+
+```bash
+cd ~/lzxworkspace/codespace/VR_Teleoperation
+```
+
+General staged disturb release training command from scratch:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --cfg_override_json configs/ablation/command_hold_staged_disturb_release.json
+```
+
+Run-focused staged disturb release training command from scratch:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --cfg_override_json configs/ablation/command_hold_run_focused_staged_disturb_release.json
+```
+
+Optional focused fine-tuning from the July19 command-hold final checkpoint can use either config, if that checkpoint exists on the remote machine:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run July19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_staged_disturb_release.json
+
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run July19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_run_focused_staged_disturb_release.json
+```
+
+Current status:
+
+- `run-only disturb sweep`: pending; no `metrics.csv` has been generated yet.
+- `command_hold_staged_disturb_release`: not trained; no `logs/r2_amp/...command_hold_staged_disturb_release` run directory exists yet.
+- `command_hold_run_focused_staged_disturb_release`: not trained; no `logs/r2_amp/...command_hold_run_focused_staged_disturb_release` run directory exists yet.
+- Follow-up rule: evaluate the sweep first to locate the run failure threshold, then decide whether staged training should start from scratch or resume from `scratch_command_hold` `8000` / best-task checkpoint.
 
 ## Maintenance Rules
 

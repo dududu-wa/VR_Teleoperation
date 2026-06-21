@@ -251,6 +251,28 @@ def test_evaluate_uses_routed_amp_discriminator():
     assert "expert_style_enabled" in source
 
 
+def test_evaluate_dtw_is_opt_in():
+    source = (ROOT_DIR / "legged_gym/scripts/evaluate.py").read_text(
+        encoding="utf-8"
+    )
+    assert "compute_dtw" in source
+    assert "_finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, args.compute_dtw)" in source
+    assert "if compute_dtw:" in source
+
+
+def test_evaluate_supports_forced_disturbance_sweep_metrics():
+    helper_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
+        encoding="utf-8"
+    )
+    eval_source = (ROOT_DIR / "legged_gym/scripts/evaluate.py").read_text(
+        encoding="utf-8"
+    )
+    assert "--eval_disturb_ratio" in helper_source
+    assert "survival_time_mean_s" in eval_source
+    assert "_apply_eval_disturbance(env, args, done_ids)" in eval_source
+    assert "env.disturb_rad_curriculum[env_ids] = float(args.eval_disturb_ratio)" in eval_source
+
+
 def test_expert_hard_gate_ablation_json_and_docs_contract():
     ablation_dir = ROOT_DIR / "configs/ablation"
     paths = sorted(ablation_dir.glob("expert_hard_gate*.json"))
@@ -286,6 +308,63 @@ def test_interrupt_disturb_release_can_bypass_terrain_curriculum_gate():
     assert "disturb_ready_mask = torch.ones_like(heading_mask)" in source
     assert "disturb_allowed_mask = ~self.terrain_curriculum_mode" in source
     assert "torch.ones_like(self.terrain_curriculum_mode)" in source
+
+
+def test_staged_disturb_release_config_and_code_contract():
+    source = (ROOT_DIR / "legged_gym/envs/r2/r2interrupt.py").read_text(
+        encoding="utf-8"
+    )
+    config_source = (
+        ROOT_DIR / "legged_gym/envs/r2/r2interrupt_config.py"
+    ).read_text(encoding="utf-8")
+    payload = json.loads(
+        (ROOT_DIR / "configs/ablation/command_hold_staged_disturb_release.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "staged_release = False" in config_source
+    assert "self.staged_disturb_release" in source
+    assert "_record_staged_disturb_episode_stats" in source
+    assert "_maybe_advance_staged_disturb_release" in source
+    assert "torch.clamp(self.disturb_rad_curriculum, max=stage_level)" in source
+    assert payload["env"]["commands"]["curriculum"] is False
+    assert payload["env"]["disturb"]["start_by_curriculum"] is False
+    assert payload["env"]["disturb"]["staged_release"] is True
+    assert payload["env"]["disturb"]["stage_levels"] == [0.0, 0.25, 0.5, 0.75, 1.0]
+    assert payload["train"]["runner"]["run_name"] == "command_hold_staged_disturb_release"
+
+
+def test_second_staged_disturb_release_experiment_is_run_focused():
+    payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/command_hold_run_focused_staged_disturb_release.json"
+        ).read_text(encoding="utf-8")
+    )
+    ranges = payload["env"]["commands"]["ranges"]
+    disturb = payload["env"]["disturb"]
+
+    assert payload["env"]["commands"]["curriculum"] is False
+    assert payload["train"]["runner"]["run_name"] == "command_hold_run_focused_staged_disturb_release"
+    assert payload["train"]["runner"]["max_iterations"] == 8000
+    assert disturb["start_by_curriculum"] is False
+    assert disturb["staged_release"] is True
+    assert disturb["stage_levels"] == [0.0, 0.25, 0.5, 0.75, 1.0]
+    assert ranges["lin_vel_x"][0] > 1.0
+    assert ranges["gait_frequency"][0] >= 2.0
+    assert abs(ranges["lin_vel_y"][0]) <= 0.2 and abs(ranges["lin_vel_y"][1]) <= 0.2
+    assert ranges["foot_swing_height"][1] < 0.18
+    assert ranges["body_height"][1] <= 0.02
+
+
+def test_run_disturb_sweep_helper_contract():
+    script = (ROOT_DIR / "scripts/run_run_disturb_sweep.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "--preset run" in script
+    assert "--eval_disturb_ratio" in script
+    for token in ("0.0", "0.2", "0.4", "0.6", "0.8", "1.0"):
+        assert token in script
 
 
 def test_next_batch_command_hold_ablation_json_contract():

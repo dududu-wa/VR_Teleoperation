@@ -114,6 +114,16 @@ class R2InterruptCfg(R2Cfg):
         # Curriculum-style release follows Bengio et al. 2009 and Rudin et al.
         # 2021 by default; ablations may disable this to isolate disturb timing.
         start_by_curriculum = True 
+        # Optional staged release caps the existing disturb_rad_curriculum at
+        # discrete levels and only raises the cap after recent episodes are
+        # stable. This keeps the curriculum gradual instead of jumping directly
+        # from no interrupt to full interrupt.
+        staged_release = False
+        stage_levels = [0.0, 0.25, 0.5, 0.75, 1.0]
+        stage_min_episodes = 512
+        stage_min_task_return = 20.0
+        stage_max_fall_rate = 0.10
+        stage_monitor_noise_only = True
         replace_action = True 
         disturb_rad = 0.2 
         disturb_rad_curriculum = True 

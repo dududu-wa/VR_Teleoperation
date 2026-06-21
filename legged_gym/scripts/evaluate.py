@@ -46,6 +46,7 @@ METRIC_FIELDS = [
     "task_return_mean",
     "fall_rate",
     "episode_length_mean_steps",
+    "survival_time_mean_s",
     "base_height_violation_rate",
     "roll_pitch_violation_rate",
     "amp_style_reward_mean",
@@ -106,6 +107,60 @@ def _configure_eval_cfg(env_cfg, args):
     env_cfg.terrain.selected = False
     env_cfg.terrain.selected_terrain_type = "random_uniform"
     env_cfg.terrain.terrain_kwargs = {}
+
+
+def _validate_eval_disturb_ratio(args):
+    if args.eval_disturb_ratio is None:
+        return
+    if args.eval_disturb_ratio < 0.0 or args.eval_disturb_ratio > 1.0:
+        raise ValueError("--eval_disturb_ratio must be between 0.0 and 1.0")
+
+
+def _apply_eval_disturbance(env, args, env_ids=None):
+    """Force a fixed disturbance curriculum ratio for run-only robustness sweeps."""
+    if not hasattr(env, "use_disturb"):
+        return
+
+    if env_ids is None:
+        env_ids = torch.arange(env.num_envs, device=env.device)
+    if not torch.is_tensor(env_ids):
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=env.device)
+    else:
+        env_ids = env_ids.to(device=env.device, dtype=torch.long)
+    if len(env_ids) == 0:
+        return
+
+    if args.eval_disturb_ratio is None:
+        env.use_disturb = False
+        return
+
+    env.use_disturb = True
+    if hasattr(env, "noise_disturb_mode"):
+        env.noise_disturb_mode[env_ids] = True
+    if hasattr(env, "disturb_isnoise"):
+        env.disturb_isnoise[env_ids] = True
+    if hasattr(env, "disturb_rad_curriculum"):
+        env.disturb_rad_curriculum[env_ids] = float(args.eval_disturb_ratio)
+    if hasattr(env, "disturb_masks"):
+        env.disturb_masks[env_ids] = float(args.eval_disturb_ratio) > 0.0
+    if hasattr(env, "interrupt_mask"):
+        if getattr(env, "disturb_replace_action", False):
+            env.interrupt_mask[env_ids] = env.disturb_masks[env_ids]
+        else:
+            env.interrupt_mask[env_ids] = (
+                env.disturb_masks[env_ids] * (~env.disturb_isnoise[env_ids])
+            )
+    if float(args.eval_disturb_ratio) > 0.0 and hasattr(env, "disturb_actions"):
+        if getattr(env, "disturb_uniform", False) and hasattr(env, "Uniform_disturb_resample"):
+            sampled_disturb = env.Uniform_disturb_resample()
+        elif hasattr(env, "Gaussian_disturb_resample"):
+            sampled_disturb = env.Gaussian_disturb_resample()
+        else:
+            sampled_disturb = None
+        if sampled_disturb is not None:
+            # Only refresh reset environments so a robustness sweep does not
+            # change the disturbance target of episodes that are still active.
+            env.disturb_actions[env_ids] = sampled_disturb[env_ids] / env.cfg.control.action_scale
 
 
 def _selected_presets(args):
@@ -440,7 +495,7 @@ def _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values
             disc_ref_values.extend(ref_logit.detach().cpu().numpy().tolist())
 
 
-def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs):
+def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute_dtw):
     done_ids = dones.nonzero(as_tuple=False).flatten()
     if len(done_ids) == 0:
         return done_ids
@@ -449,12 +504,16 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs):
         idx = int(env_id.item())
         steps = max(float(acc["steps"][idx].item()), 1.0)
 
-        # DTW computation for this episode
-        joint_dtw, kb_dtw = _compute_dtw_for_episode(
-            env,
-            traj_bufs["dof"][idx],
-            traj_bufs["key_body"][idx],
-        )
+        # DTW is O(T * motion_frames) per completed episode, so keep it opt-in
+        # for targeted imitation checks rather than every fixed-preset eval.
+        if compute_dtw:
+            joint_dtw, kb_dtw = _compute_dtw_for_episode(
+                env,
+                traj_bufs["dof"][idx],
+                traj_bufs["key_body"][idx],
+            )
+        else:
+            joint_dtw, kb_dtw = None, None
 
         episode_rows.append(
             {
@@ -470,6 +529,7 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs):
                 "roll_pitch_violation_rate": float(acc["roll_pitch_violations"][idx].item() / steps),
                 "episode_length_steps": steps,
                 "fall": 0.0 if bool(time_outs[idx].item()) else 1.0,
+                "survival_time_s": steps * float(env.dt),
                 "joint_dtw": joint_dtw,
                 "key_body_dtw": kb_dtw,
             }
@@ -505,6 +565,7 @@ def _summarize_preset(args, train_cfg, preset_name, episode_rows, disc_agent_val
         "task_return_mean": _mean_or_none([row["task_return"] for row in episode_rows]),
         "fall_rate": _mean_or_none([row["fall"] for row in episode_rows]),
         "episode_length_mean_steps": _mean_or_none([row["episode_length_steps"] for row in episode_rows]),
+        "survival_time_mean_s": _mean_or_none([row["survival_time_s"] for row in episode_rows]),
         "base_height_violation_rate": _mean_or_none([row["base_height_violation_rate"] for row in episode_rows]),
         "roll_pitch_violation_rate": _mean_or_none([row["roll_pitch_violation_rate"] for row in episode_rows]),
         "amp_style_reward_mean": _mean_or_none([row["style_reward"] for row in episode_rows]),
@@ -535,6 +596,7 @@ def _write_outputs(rows, output_dir):
 
 
 def evaluate(args):
+    _validate_eval_disturb_ratio(args)
     if args.cfg_override_json is not None and args.load_run is None:
         raise ValueError(
             "evaluate.py requires --load_run when --cfg_override_json is used, "
@@ -554,8 +616,7 @@ def evaluate(args):
         with torch.inference_mode():
             obs, critic_obs = env.reset()
         _apply_preset(env, preset_name)
-        if hasattr(env, "use_disturb"):
-            env.use_disturb = False
+        _apply_eval_disturbance(env, args)
         if hasattr(env, "standing_envs_mask"):
             env.standing_envs_mask[:] = False
 
@@ -578,8 +639,9 @@ def evaluate(args):
                 _collect_step_metrics(env, rewards, infos, actions, last_actions, prev_dof_vel, acc, amp_eval_rewards)
                 _collect_step_trajectories(env, traj_bufs)
                 _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values)
-                done_ids = _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs)
+                done_ids = _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, args.compute_dtw)
                 _apply_preset(env, preset_name, done_ids)
+                _apply_eval_disturbance(env, args, done_ids)
                 if len(done_ids) > 0:
                     env.compute_observations(done_ids)
                     obs = env.get_observations()

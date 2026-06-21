@@ -145,7 +145,7 @@ AMP 消融实验不新增 `r2amp_style0` 这类 task。统一使用：
 python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json configs/ablation/style0.json
 ```
 
-`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`sw1_dt_nowarm.json` 复现 dt baseline，`sw1_dt_warmup.json` 是推荐 schedule/cap 组，`sw1_dt_ratio025.json` 只测 task-ratio cap，`sw1_dt_gate_task0.json` 叠加严格 task gate，`walk_sw1_dt_warmup.json` 用 walk-only prior 测命令和 motion prior 是否冲突。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`expert_hard_gate_walk_run_jump.json` 打开 walk/run/jump 三专家 hard routing，`expert_hard_gate_walk_run.json` 只注册 walk/run 并让 jump/hop 语义回退到默认 walk 专家，`expert_hard_gate_selective_walk.json` 保留三专家路由但只让 walk style reward 生效，`expert_hard_gate_no_style_warmup.json` 在 `train.amp` 把 `style_reward_start_after/style_reward_warmup_iterations` 设为 0，因为 `AMPPPO` 从 train cfg 读取 schedule。`command_hold_controlled_disturb_release.json`、`command_hold_no_push.json`、`command_hold_conservative_penalty_ramp.json`、`command_hold_style_lowcap.json` 是 July19 后续批次，用于在固定 command range 的基线上拆分 disturb release、push、penalty ramp 和 style cap。`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
+`--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`sw1_dt_nowarm.json` 复现 dt baseline，`sw1_dt_warmup.json` 是推荐 schedule/cap 组，`sw1_dt_ratio025.json` 只测 task-ratio cap，`sw1_dt_gate_task0.json` 叠加严格 task gate，`walk_sw1_dt_warmup.json` 用 walk-only prior 测命令和 motion prior 是否冲突。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`expert_hard_gate_walk_run_jump.json` 打开 walk/run/jump 三专家 hard routing，`expert_hard_gate_walk_run.json` 只注册 walk/run 并让 jump/hop 语义回退到默认 walk 专家，`expert_hard_gate_selective_walk.json` 保留三专家路由但只让 walk style reward 生效，`expert_hard_gate_no_style_warmup.json` 在 `train.amp` 把 `style_reward_start_after/style_reward_warmup_iterations` 设为 0，因为 `AMPPPO` 从 train cfg 读取 schedule。`command_hold_controlled_disturb_release.json`、`command_hold_no_push.json`、`command_hold_conservative_penalty_ramp.json`、`command_hold_style_lowcap.json` 是 July19 后续批次，用于在固定 command range 的基线上拆分 disturb release、push、penalty ramp 和 style cap。`command_hold_staged_disturb_release.json` 和 `command_hold_run_focused_staged_disturb_release.json` 是 July20 后续的两组正式训练实验：前者继续以固定 command range 为 anchor 并分阶段释放 disturb；后者保留同一 staged disturb 机制，但把 command 分布压到 run 专家区域，同时把 lateral/yaw、foot swing height 和 body height 控制在较窄范围，避免 run-focused fine-tune 混成 jump-focused。两者都把 disturb curriculum 限制为 `0.0 -> 0.25 -> 0.5 -> 0.75 -> 1.0`，并要求最近 episode 的 task return/fall rate 达标后才进入下一阶段。`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
 
 ### 2.3 回放链路
 
@@ -321,7 +321,7 @@ R2 26-DoF order used by `R2Cfg.init_state.default_joint_angles`: legs(12),
 waist(2), head(2), left arm(5), right arm(5). Head yaw/pitch are intentionally
 excluded from interrupt targets.
 
-所以默认配置下干扰机制会实际启用：interrupt flag 写入 command，`DISTURB_DIM=10`，且 `use_disturb=True`。`disturb.start_by_curriculum=True` 会保留原始 curriculum-style release：noise-disturb 环境只有离开 terrain curriculum mode 后才开始更新/触发 disturb；消融 JSON 可设为 `false`，用于隔离固定 command range 时的 disturb release 影响。
+所以默认配置下干扰机制会实际启用：interrupt flag 写入 command，`DISTURB_DIM=10`，且 `use_disturb=True`。`disturb.start_by_curriculum=True` 会保留原始 curriculum-style release：noise-disturb 环境只有离开 terrain curriculum mode 后才开始更新/触发 disturb；消融 JSON 可设为 `false`，用于隔离固定 command range 时的 disturb release 影响。`disturb.staged_release=False` 是默认兼容开关；打开后，`stage_levels` 给出 disturb curriculum 上限序列，`stage_min_episodes`、`stage_min_task_return` 和 `stage_max_fall_rate` 决定是否从当前上限进入下一阶段，避免在 run 还没稳定时直接释放到满扰动。
 
 关键类：
 
@@ -408,9 +408,12 @@ reward 约定：
 
 关键方法：
 
-- `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等，并读取 `cfg.disturb.start_by_curriculum` 决定 disturb 是否等待 terrain/command curriculum release。
+- `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等，并读取 `cfg.disturb.start_by_curriculum` 决定 disturb 是否等待 terrain/command curriculum release；同时读取 staged disturb release 的阶段列表和晋级门槛，默认关闭以保持旧训练语义。
 - `_create_envs`：在父类创建 env 后，补充 disturb termination body 索引和 disturb mode mask。
 - `_resample_commands`：继承命令采样，并在需要时更新 disturb curriculum；当 `start_by_curriculum=False` 时，noise-disturb 子环境即使仍在 terrain curriculum mode 中也可更新 disturb 半径。
+- `_cap_staged_disturb_curriculum`：当 staged release 打开时，把所有环境的 `disturb_rad_curriculum` clamp 到当前阶段上限，保证原有成功/失败 curriculum 只能在阶段内微调。
+- `_record_staged_disturb_episode_stats`：在 reset 前累计最近窗口内的环境 task return 和非 timeout fall 计数；默认只监控 noise-disturb 子环境，因为 staged release 的目标是约束噪声扰动释放。
+- `_maybe_advance_staged_disturb_release` / `training_curriculum`：每轮训练 curriculum 更新后检查窗口统计，只有 episode 数、平均 task return 和 fall rate 同时达标才把阶段推进一档，并清空窗口重新累计。
 - `calculate_action`：核心逻辑。先 clip policy action，再根据 disturb mask 替换或叠加 `cfg.disturb.disturb_action_indices` 指定的 R2 双臂动作，保存真实执行动作。
 - `random_switch_disturb`：按 `switch_prob` 切换 disturb mask；默认仍受 `~terrain_curriculum_mode` 门控，`start_by_curriculum=False` 时只保留 noise-disturb 分区门控。
 - `_preprocess_obs/add_other_privilege`：可把 interrupt flag、目标扰动、实际执行动作拼入观测或 privileged obs。
@@ -439,7 +442,7 @@ reward 约定：
   - `-2` `model_best_task.pt`
   - `-3` `model_best_mixed.pt`
 - `update_cfg_from_args`：用 CLI 参数覆盖 env/train cfg。
-- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick`、`--cfg_override_json`，以及评估入口使用的 `--num_episodes`、`--output_dir`、`--episode_seconds`、`--preset`、`--compute_dtw` 等参数。
+- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick`、`--cfg_override_json`，以及评估入口使用的 `--num_episodes`、`--output_dir`、`--episode_seconds`、`--preset`、`--compute_dtw`、`--eval_disturb_ratio` 等参数；`--eval_disturb_ratio` 只用于 `evaluate.py`，用于把 disturb curriculum 固定到 0.0-1.0 的指定强度。
 
 #### `task_registry.py`
 
@@ -587,9 +590,11 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 - 当使用 `--cfg_override_json` 时，必须显式传入 `--load_run`，避免从 `logs/<experiment>` 自动选择最新 run 时加载到其他消融组的 checkpoint。
 - 默认关闭 terrain curriculum、noise、domain randomization、command curriculum，并使用 plane 地形，保证固定 preset 评估更可复现。
 - 固定 preset 包括 `stand`、`walk_slow`、`walk_fast`、`run`、`jump`、`turn_left`、`strafe_right`，也可用 `--preset` 指定子集；其中 `jump` 复用 `play.py` 的 demo 命令，`run` 对应 `configs/ablation/motion_run.json` 指向的 run 类 motion prior。
+- 默认仍关闭 disturb/interruption；显式传入 `--eval_disturb_ratio <0.0-1.0>` 时，会开启 noise-disturb、固定 `disturb_rad_curriculum`，并在 reset 后只给刚重置的 env 重新采样扰动动作，用于 run-only disturb sweep。
 - `_routed_discriminator_score()` 根据 `infos["amp_expert_id"]` 选择 runner 中对应专家的 discriminator；旧单 discriminator checkpoint 仍走兼容路径。
-- 输出 `metrics.json` 和 `metrics.csv`，字段包括速度 RMSE、task return、fall rate、episode length、base height / roll-pitch violation、AMP style reward、routed discriminator logit、torque/action-rate/dof-acc 平滑性指标。
-- DTW 输出通过 `_compute_dtw_for_episode()` 在 episode 结束时对 policy 轨迹和 `_motion_loader` 中的参考 clip 做 best-clip DTW；新增 `run`、`jump` preset 后，可用 `--preset run --preset jump` 针对 run/jump 类 motion 做同一套 `joint_pose_error_dtw_m` / `key_body_error_dtw_m` 汇总。
+- 输出 `metrics.json` 和 `metrics.csv`，字段包括速度 RMSE、task return、fall rate、episode length、`survival_time_mean_s`、base height / roll-pitch violation、AMP style reward、routed discriminator logit、torque/action-rate/dof-acc 平滑性指标。
+- 默认固定 preset 评估不计算 DTW，以避免 64 episode 批量评估被每个完成 episode 的 `O(T * motion_frames)` best-clip DTW 拖慢；只有显式加 `--compute_dtw` 时，`_finalize_done_envs()` 才会调用 `_compute_dtw_for_episode()`。
+- DTW 输出通过 `_compute_dtw_for_episode()` 在 episode 结束时对 policy 轨迹和 `_motion_loader` 中的参考 clip 做 best-clip DTW；新增 `run`、`jump` preset 后，可用 `--compute_dtw --preset run --preset jump` 针对 run/jump 类 motion 做同一套 `joint_pose_error_dtw_m` / `key_body_error_dtw_m` 汇总。
 
 典型命令：
 
@@ -614,6 +619,12 @@ wsl.exe -d Ubuntu-22.04 --cd /mnt/e/codebase/VR_Teleoperation -- env PATH=/opt/m
 - `PYTHONPATH=/mnt/e/codebase/VR_Teleoperation:/mnt/e/codebase/VR_Teleoperation/rsl_rl`：在未 `pip install -e rsl_rl` 时让 `rsl_rl.env` 可被导入。
 - `LD_LIBRARY_PATH=.../r2gym/lib:.../isaacgym/_bindings/linux-x86_64`：让 Isaac Gym 找到 `libpython3.8.so.1.0` 和 PhysX/Isaac Gym bindings。
 - 输出会写到 Windows 侧的 `E:\codebase\VR_Teleoperation\outputs\eval\...`，每个目录包含 `metrics.csv` 和 `metrics.json`。
+
+`scripts/run_run_disturb_sweep.ps1` 是 run-only robustness helper。它以 `scratch_command_hold` checkpoint 为 anchor，循环调用 `evaluate.py --preset run --eval_disturb_ratio`，默认评估 `0.0, 0.2, 0.4, 0.6, 0.8, 1.0` 六档扰动；每档写入独立 `outputs/eval/run_disturb_sweep_command_hold_8000/ratio_*` 目录，然后汇总 `run_disturb_sweep_summary.csv`，若 WSL 环境有 matplotlib 则额外输出 `run_disturb_sweep.png`。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_run_disturb_sweep.ps1 -Checkpoint 8000
+```
 
 #### `play.py`
 
@@ -1179,7 +1190,7 @@ AMP 任务实验输出。
 
 ### `tests/`
 
-当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint、多专家 AMP 接线、interrupt disturb release 开关和消融 JSON 合同。完整训练验证仍主要依赖：
+当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint、多专家 AMP 接线、interrupt disturb release 开关、staged disturb release、run-only disturb sweep helper 和消融 JSON 合同。完整训练验证仍主要依赖：
 
 - 能否创建环境。
 - 能否启动训练。

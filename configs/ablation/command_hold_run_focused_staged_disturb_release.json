@@ -1,0 +1,52 @@
+{
+  "notes": "Second staged-release training experiment after July20: keep staged disturbance release, but bias command sampling into the run expert region. Forward velocity and gait frequency are above the run-routing thresholds, while lateral/yaw commands stay narrow and foot/body-height ranges stay below jump-routing thresholds so this is run-focused rather than jump-focused.",
+  "env": {
+    "commands": {
+      "curriculum": false,
+      "ranges": {
+        "lin_vel_x": [1.1, 1.6],
+        "lin_vel_y": [-0.1, 0.1],
+        "ang_vel_yaw": [-0.2, 0.2],
+        "gait_frequency": [2.6, 3.2],
+        "foot_swing_height": [0.12, 0.17],
+        "body_height": [0.0, 0.02]
+      }
+    },
+    "disturb": {
+      "start_by_curriculum": false,
+      "staged_release": true,
+      "stage_levels": [0.0, 0.25, 0.5, 0.75, 1.0],
+      "stage_min_episodes": 512,
+      "stage_min_task_return": 20.0,
+      "stage_max_fall_rate": 0.10,
+      "stage_monitor_noise_only": true
+    },
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run",
+        "jump": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/jump"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "command_hold_run_focused_staged_disturb_release",
+      "save_top_task_checkpoints": 3,
+      "max_iterations": 8000
+    },
+    "amp": {
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  }
+}

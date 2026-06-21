@@ -228,6 +228,7 @@ def get_args():
         {"name": "--episode_seconds", "type": float, "default": 10.0, "help": "Evaluation rollout length in seconds."},
         {"name": "--preset", "action": "append", "help": "Evaluation preset name. Repeat or omit for all presets."},
         {"name": "--compute_dtw", "action": "store_true", "default": False, "help": "Reserve DTW imitation metrics in evaluate.py."},
+        {"name": "--eval_disturb_ratio", "type": float, "help": "Force a fixed disturb curriculum ratio during evaluate.py, e.g. 0.0 to 1.0 for run-only disturb sweeps."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(
