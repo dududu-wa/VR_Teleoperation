@@ -126,6 +126,11 @@ class R2InterruptRobot(R2Robot):
         self.staged_disturb_min_task_return = float(getattr(cfg.disturb, "stage_min_task_return", 20.0))
         self.staged_disturb_max_fall_rate = float(getattr(cfg.disturb, "stage_max_fall_rate", 0.10))
         self.staged_disturb_monitor_noise_only = bool(getattr(cfg.disturb, "stage_monitor_noise_only", True))
+        self.staged_disturb_monitor_expert = getattr(cfg.disturb, "stage_monitor_expert", None)
+        if self.staged_disturb_monitor_expert == "":
+            self.staged_disturb_monitor_expert = None
+        if self.staged_disturb_monitor_expert not in (None, "walk", "run", "jump"):
+            raise ValueError("cfg.disturb.stage_monitor_expert must be one of None, walk, run, or jump")
         self.staged_disturb_episode_count = 0
         self.staged_disturb_return_sum = 0.0
         self.staged_disturb_fall_sum = 0.0
@@ -155,6 +160,44 @@ class R2InterruptRobot(R2Robot):
         stage_level = self._current_staged_disturb_level()
         self.disturb_rad_curriculum[:] = torch.clamp(self.disturb_rad_curriculum, max=stage_level)
 
+    def _staged_disturb_expert_mask(self, env_ids):
+        """Return staged-release monitor envs using the same command semantics as AMP routing."""
+        if self.staged_disturb_monitor_expert is None:
+            return torch.ones(len(env_ids), dtype=torch.bool, device=self.device)
+        if len(env_ids) == 0:
+            return torch.zeros(0, dtype=torch.bool, device=self.device)
+
+        commands = self.commands[env_ids]
+        amp_cfg = getattr(self.cfg, "amp", None)
+        run_velocity_threshold = float(getattr(amp_cfg, "expert_run_velocity_threshold", 1.0))
+        run_frequency_threshold = float(getattr(amp_cfg, "expert_run_frequency_threshold", 2.0))
+        jump_swing_height_threshold = float(getattr(amp_cfg, "expert_jump_swing_height_threshold", 0.18))
+        jump_body_height_threshold = float(getattr(amp_cfg, "expert_jump_body_height_threshold", 0.02))
+
+        # Match R2Robot.get_amp_expert_ids(): jump wins first, then run, and
+        # the remainder is walk. This keeps staged release aligned with the
+        # discriminator/motion-prior route used by r2amp.
+        is_jump = torch.zeros(len(env_ids), dtype=torch.bool, device=self.device)
+        if commands.shape[1] > 7:
+            is_jump = (
+                (commands[:, 4] == 0)
+                & (
+                    (commands[:, 6] >= jump_swing_height_threshold)
+                    | (commands[:, 7] > jump_body_height_threshold)
+                )
+            )
+
+        is_run = torch.abs(commands[:, 0]) > run_velocity_threshold
+        if commands.shape[1] > 3:
+            is_run = is_run | (commands[:, 3] >= run_frequency_threshold)
+        is_run = (~is_jump) & is_run
+
+        if self.staged_disturb_monitor_expert == "jump":
+            return is_jump
+        if self.staged_disturb_monitor_expert == "run":
+            return is_run
+        return ~(is_jump | is_run)
+
     def _record_staged_disturb_episode_stats(self, env_ids):
         if (
             not self.staged_disturb_release
@@ -166,6 +209,8 @@ class R2InterruptRobot(R2Robot):
         monitor_ids = env_ids
         if self.staged_disturb_monitor_noise_only and hasattr(self, "noise_disturb_mode"):
             monitor_ids = monitor_ids[self.noise_disturb_mode[monitor_ids]]
+        if self.staged_disturb_monitor_expert is not None:
+            monitor_ids = monitor_ids[self._staged_disturb_expert_mask(monitor_ids)]
         if len(monitor_ids) == 0:
             return
 

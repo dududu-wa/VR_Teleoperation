@@ -1,5 +1,5 @@
 {
-  "notes": "Second staged-release training experiment after July20: keep staged disturbance release, but bias command sampling into the run expert region. Forward velocity and gait frequency are above the run-routing thresholds, while lateral/yaw commands stay narrow and foot/body-height ranges stay below jump-routing thresholds so this is run-focused rather than jump-focused.",
+  "notes": "Run-focused staged-release training experiment after July21: keep staged disturbance release and bias command sampling into the run expert region. Forward velocity and gait frequency are above the run-routing thresholds, lateral/yaw commands stay narrow, and foot/body-height ranges stay below jump-routing thresholds. Stage advancement also monitors run-routed noise-disturb episodes.",
   "env": {
     "commands": {
       "curriculum": false,
@@ -19,7 +19,8 @@
       "stage_min_episodes": 512,
       "stage_min_task_return": 20.0,
       "stage_max_fall_rate": 0.10,
-      "stage_monitor_noise_only": true
+      "stage_monitor_noise_only": true,
+      "stage_monitor_expert": "run"
     },
     "amp": {
       "motion_experts": {

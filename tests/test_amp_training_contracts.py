@@ -323,7 +323,10 @@ def test_staged_disturb_release_config_and_code_contract():
         )
     )
     assert "staged_release = False" in config_source
+    assert "stage_monitor_expert = None" in config_source
     assert "self.staged_disturb_release" in source
+    assert "self.staged_disturb_monitor_expert" in source
+    assert "_staged_disturb_expert_mask" in source
     assert "_record_staged_disturb_episode_stats" in source
     assert "_maybe_advance_staged_disturb_release" in source
     assert "torch.clamp(self.disturb_rad_curriculum, max=stage_level)" in source
@@ -331,6 +334,7 @@ def test_staged_disturb_release_config_and_code_contract():
     assert payload["env"]["disturb"]["start_by_curriculum"] is False
     assert payload["env"]["disturb"]["staged_release"] is True
     assert payload["env"]["disturb"]["stage_levels"] == [0.0, 0.25, 0.5, 0.75, 1.0]
+    assert payload["env"]["disturb"]["stage_monitor_expert"] == "run"
     assert payload["train"]["runner"]["run_name"] == "command_hold_staged_disturb_release"
 
 
@@ -350,6 +354,7 @@ def test_second_staged_disturb_release_experiment_is_run_focused():
     assert disturb["start_by_curriculum"] is False
     assert disturb["staged_release"] is True
     assert disturb["stage_levels"] == [0.0, 0.25, 0.5, 0.75, 1.0]
+    assert disturb["stage_monitor_expert"] == "run"
     assert ranges["lin_vel_x"][0] > 1.0
     assert ranges["gait_frequency"][0] >= 2.0
     assert abs(ranges["lin_vel_y"][0]) <= 0.2 and abs(ranges["lin_vel_y"][1]) <= 0.2

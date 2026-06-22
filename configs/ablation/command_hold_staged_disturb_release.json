@@ -1,5 +1,5 @@
 {
-  "notes": "Run-focused follow-up after July20: keep the scratch_command_hold command range and multi-expert AMP prior, but decouple disturb release from terrain-command curriculum and cap disturb_rad_curriculum through staged levels. The stage advances only when recent task return and fall rate satisfy the configured gate.",
+  "notes": "Staged-release follow-up after July21: keep the scratch_command_hold command range and multi-expert AMP prior, but decouple disturb release from terrain-command curriculum and cap disturb_rad_curriculum through staged levels. Stage advancement monitors run-routed noise-disturb episodes so aggregate walk/stand success cannot hide the known run failure.",
   "env": {
     "commands": {
       "curriculum": false,
@@ -16,7 +16,8 @@
       "stage_min_episodes": 512,
       "stage_min_task_return": 20.0,
       "stage_max_fall_rate": 0.10,
-      "stage_monitor_noise_only": true
+      "stage_monitor_noise_only": true,
+      "stage_monitor_expert": "run"
     },
     "amp": {
       "motion_experts": {

@@ -124,6 +124,10 @@ class R2InterruptCfg(R2Cfg):
         stage_min_task_return = 20.0
         stage_max_fall_rate = 0.10
         stage_monitor_noise_only = True
+        # Optional expert filter for staged release gates. None keeps the
+        # original all-command window; "run" makes stage advancement wait for
+        # run-routed episodes, matching the July21 run-failure diagnosis.
+        stage_monitor_expert = None
         replace_action = True 
         disturb_rad = 0.2 
         disturb_rad_curriculum = True 
