@@ -362,6 +362,40 @@ def test_second_staged_disturb_release_experiment_is_run_focused():
     assert ranges["body_height"][1] <= 0.02
 
 
+def test_run_recovery_staged_disturb_release_uses_per_stage_gates():
+    source = (ROOT_DIR / "legged_gym/envs/r2/r2interrupt.py").read_text(
+        encoding="utf-8"
+    )
+    payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/command_hold_run_recovery_staged_disturb_release.json"
+        ).read_text(encoding="utf-8")
+    )
+    ranges = payload["env"]["commands"]["ranges"]
+    disturb = payload["env"]["disturb"]
+    stage_levels = disturb["stage_levels"]
+    min_returns = disturb["stage_min_task_return"]
+    max_fall_rates = disturb["stage_max_fall_rate"]
+
+    assert "_expand_staged_disturb_gate_values" in source
+    assert "_current_staged_disturb_gate" in source
+    assert payload["train"]["runner"]["run_name"] == "command_hold_run_recovery_staged_disturb_release"
+    assert payload["train"]["runner"]["max_iterations"] == 8000
+    assert disturb["start_by_curriculum"] is False
+    assert disturb["staged_release"] is True
+    assert disturb["stage_monitor_expert"] == "run"
+    assert len(stage_levels) == len(min_returns) == len(max_fall_rates)
+    assert stage_levels[1] - stage_levels[0] < 0.25
+    assert min_returns[0] < min_returns[-1]
+    assert max_fall_rates[0] > max_fall_rates[-1]
+    assert ranges["lin_vel_x"][0] < 1.0 < ranges["lin_vel_x"][1]
+    assert ranges["gait_frequency"][0] < 2.0 < ranges["gait_frequency"][1]
+    assert abs(ranges["lin_vel_y"][0]) <= 0.2 and abs(ranges["lin_vel_y"][1]) <= 0.2
+    assert ranges["foot_swing_height"][1] < 0.18
+    assert ranges["body_height"][1] < 0.02
+
+
 def test_run_disturb_sweep_helper_contract():
     script = (ROOT_DIR / "scripts/run_run_disturb_sweep.ps1").read_text(
         encoding="utf-8"

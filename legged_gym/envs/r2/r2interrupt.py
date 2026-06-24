@@ -123,8 +123,16 @@ class R2InterruptRobot(R2Robot):
             raise ValueError("cfg.disturb.stage_levels must not be empty")
         self.staged_disturb_stage_idx = 0
         self.staged_disturb_min_episodes = int(getattr(cfg.disturb, "stage_min_episodes", 512))
-        self.staged_disturb_min_task_return = float(getattr(cfg.disturb, "stage_min_task_return", 20.0))
-        self.staged_disturb_max_fall_rate = float(getattr(cfg.disturb, "stage_max_fall_rate", 0.10))
+        self.staged_disturb_min_task_returns = self._expand_staged_disturb_gate_values(
+            getattr(cfg.disturb, "stage_min_task_return", 20.0),
+            "stage_min_task_return",
+        )
+        self.staged_disturb_max_fall_rates = self._expand_staged_disturb_gate_values(
+            getattr(cfg.disturb, "stage_max_fall_rate", 0.10),
+            "stage_max_fall_rate",
+        )
+        self.staged_disturb_min_task_return = self.staged_disturb_min_task_returns[0]
+        self.staged_disturb_max_fall_rate = self.staged_disturb_max_fall_rates[0]
         self.staged_disturb_monitor_noise_only = bool(getattr(cfg.disturb, "stage_monitor_noise_only", True))
         self.staged_disturb_monitor_expert = getattr(cfg.disturb, "stage_monitor_expert", None)
         if self.staged_disturb_monitor_expert == "":
@@ -148,6 +156,22 @@ class R2InterruptRobot(R2Robot):
         self.num_steps = 0
         self.interrupt_in_command = cfg.disturb.interrupt_in_cmd
         self.stand_interrupt_only = cfg.disturb.stand_interrupt_only
+
+    def _expand_staged_disturb_gate_values(self, raw_values, field_name):
+        """Expand scalar staged-release gates or validate per-stage gate lists."""
+        num_stages = int(self.staged_disturb_levels.numel())
+        if isinstance(raw_values, (list, tuple)):
+            if len(raw_values) != num_stages:
+                raise ValueError(f"cfg.disturb.{field_name} list length must match cfg.disturb.stage_levels")
+            return [float(value) for value in raw_values]
+        return [float(raw_values)] * num_stages
+
+    def _current_staged_disturb_gate(self):
+        gate_idx = min(self.staged_disturb_stage_idx, len(self.staged_disturb_min_task_returns) - 1)
+        return (
+            self.staged_disturb_min_task_returns[gate_idx],
+            self.staged_disturb_max_fall_rates[gate_idx],
+        )
 
     def _current_staged_disturb_level(self):
         if not self.staged_disturb_release:
@@ -232,9 +256,10 @@ class R2InterruptRobot(R2Robot):
 
         avg_task_return = self.staged_disturb_return_sum / max(self.staged_disturb_episode_count, 1)
         fall_rate = self.staged_disturb_fall_sum / max(self.staged_disturb_episode_count, 1)
+        min_task_return, max_fall_rate = self._current_staged_disturb_gate()
         can_advance = (
-            avg_task_return >= self.staged_disturb_min_task_return
-            and fall_rate <= self.staged_disturb_max_fall_rate
+            avg_task_return >= min_task_return
+            and fall_rate <= max_fall_rate
             and self.staged_disturb_stage_idx < int(self.staged_disturb_levels.numel()) - 1
         )
         if can_advance:
@@ -441,8 +466,11 @@ class R2InterruptRobot(R2Robot):
         if self.use_disturb and self.cfg.disturb.disturb_rad_curriculum:
             self.extras['episode']['disturb_curriculum']= torch.mean(self.disturb_rad_curriculum[:self.noise_env_nums])
         if getattr(self, "staged_disturb_release", False):
+            min_task_return, max_fall_rate = self._current_staged_disturb_gate()
             self.extras['episode']['staged_disturb_level'] = self._current_staged_disturb_level()
             self.extras['episode']['staged_disturb_stage'] = self.staged_disturb_stage_idx
+            self.extras['episode']['staged_disturb_gate_min_task_return'] = min_task_return
+            self.extras['episode']['staged_disturb_gate_max_fall_rate'] = max_fall_rate
             if self.staged_disturb_episode_count > 0:
                 self.extras['episode']['staged_disturb_window_task_return'] = (
                     self.staged_disturb_return_sum / self.staged_disturb_episode_count

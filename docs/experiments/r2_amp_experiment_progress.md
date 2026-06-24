@@ -1,6 +1,6 @@
 # R2 AMP Experiment Progress
 
-Last updated: 2026-06-22
+Last updated: 2026-06-24
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -476,17 +476,19 @@ Implemented artifacts:
 | `legged_gym/utils/helpers.py` | implemented | Adds `--eval_disturb_ratio` for fixed disturbance-ratio evaluation. |
 | `legged_gym/scripts/evaluate.py` | implemented | Keeps default evaluation disturb-free, but enables fixed-ratio noise disturbance when `--eval_disturb_ratio` is supplied; adds `survival_time_mean_s` to output metrics. |
 | `scripts/run_run_disturb_sweep.ps1` | implemented, not run | Runs `run` preset at `0%, 20%, 40%, 60%, 80%, 100%` disturbance and aggregates fall rate, survival time, lin/yaw RMSE, and task return. |
-| `legged_gym/envs/r2/r2interrupt_config.py` | implemented | Adds default-off `disturb.staged_release`, stage gate parameters, and optional `stage_monitor_expert` filtering. |
-| `legged_gym/envs/r2/r2interrupt.py` | implemented | Clamps `disturb_rad_curriculum` by stage and only advances stage after recent task return and fall-rate gates pass; optional expert filtering uses the same command semantics as AMP hard routing. |
-| `configs/ablation/command_hold_staged_disturb_release.json` | implemented, not trained | Fixed command-range anchor with staged disturbance release `0.0 -> 0.25 -> 0.5 -> 0.75 -> 1.0`; stage gate monitors run-routed noise-disturb episodes. |
-| `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | implemented, not trained | Same staged disturbance release, but command sampling and the stage gate are both biased into the run expert region. |
+| `legged_gym/envs/r2/r2interrupt_config.py` | implemented, updated 2026-06-24 | Adds default-off `disturb.staged_release`, stage gate parameters, optional `stage_monitor_expert` filtering, and scalar-or-list staged gate thresholds. |
+| `legged_gym/envs/r2/r2interrupt.py` | implemented, updated 2026-06-24 | Clamps `disturb_rad_curriculum` by stage and only advances stage after recent task return and fall-rate gates pass; optional expert filtering uses the same command semantics as AMP hard routing; per-stage gate lists let early stages use looser gates before tightening later. |
+| `configs/ablation/command_hold_staged_disturb_release.json` | implemented, trained and evaluated in July23 | Fixed command-range anchor with staged disturbance release `0.0 -> 0.25 -> 0.5 -> 0.75 -> 1.0`; stage gate monitors run-routed noise-disturb episodes. |
+| `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | implemented, trained and evaluated in July23 | Same staged disturbance release, but command sampling and the stage gate are both biased into the run expert region. |
+| `configs/ablation/command_hold_run_recovery_staged_disturb_release.json` | implemented, not trained | July23 follow-up: uses a walk-run transition command band, finer staged levels, and per-stage task-return/fall-rate gates that start permissive and tighten toward the original full-disturb target. |
 
 Training experiment pair:
 
 | experiment | config | controlled factor | status |
 | --- | --- | --- | --- |
-| `command_hold_staged_disturb_release` | `configs/ablation/command_hold_staged_disturb_release.json` | General fixed command range from `scratch_command_hold`; tests whether staged release prevents the full-disturb collapse when stage advancement is gated by run-routed episodes. | not trained |
-| `command_hold_run_focused_staged_disturb_release` | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | Run-focused command range with forward speed `1.1-1.6`, gait frequency `2.6-3.2`, narrow lateral/yaw range, foot/body-height caps below the jump-routing thresholds, and run-routed stage monitoring. | not trained |
+| `command_hold_staged_disturb_release` | `configs/ablation/command_hold_staged_disturb_release.json` | General fixed command range from `scratch_command_hold`; tests whether staged release prevents the full-disturb collapse when stage advancement is gated by run-routed episodes. | evaluated in July23 |
+| `command_hold_run_focused_staged_disturb_release` | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | Run-focused command range with forward speed `1.1-1.6`, gait frequency `2.6-3.2`, narrow lateral/yaw range, foot/body-height caps below the jump-routing thresholds, and run-routed stage monitoring. | evaluated in July23 |
+| `command_hold_run_recovery_staged_disturb_release` | `configs/ablation/command_hold_run_recovery_staged_disturb_release.json` | Softer run-recovery follow-up after July23: command sampling spans the walk-run transition, stage levels are smaller at the start, and per-stage gates allow early progress with high but improving run fall rate before tightening later. | not trained |
 
 Run-only disturb sweep command:
 
@@ -527,7 +529,13 @@ Run-focused staged disturb release training command from scratch:
 CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --cfg_override_json configs/ablation/command_hold_run_focused_staged_disturb_release.json
 ```
 
-Optional focused fine-tuning from the July19 command-hold final checkpoint can use either config, if that checkpoint exists on the remote machine:
+Run-recovery staged disturb release training command from scratch:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --cfg_override_json configs/ablation/command_hold_run_recovery_staged_disturb_release.json
+```
+
+Optional focused fine-tuning from the July19 command-hold final checkpoint can use the staged configs if that checkpoint exists on the remote machine:
 
 ```bash
 CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run July19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_staged_disturb_release.json
@@ -538,9 +546,126 @@ CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym
 Current status:
 
 - `run-only disturb sweep`: pending; no `metrics.csv` has been generated yet.
-- `command_hold_staged_disturb_release`: not trained; no `logs/r2_amp/...command_hold_staged_disturb_release` run directory exists yet.
-- `command_hold_run_focused_staged_disturb_release`: not trained; no `logs/r2_amp/...command_hold_run_focused_staged_disturb_release` run directory exists yet.
-- Follow-up rule: evaluate the sweep first to locate the run failure threshold, then decide whether staged training should start from scratch or resume from `scratch_command_hold` `8000` / best-task checkpoint.
+- `command_hold_staged_disturb_release`: trained and evaluated in July23.
+- `command_hold_run_focused_staged_disturb_release`: trained and evaluated in July23.
+- `command_hold_run_recovery_staged_disturb_release`: not trained; no `logs/r2_amp/...command_hold_run_recovery_staged_disturb_release` run directory exists yet.
+- Follow-up rule: run the sweep to locate the run failure threshold before changing staged-release gates again, because both July23 staged runs still fail the fixed `run` preset.
+
+## July23 Batch
+
+Hypothesis: staged disturbance release should avoid the sudden full-disturb collapse seen in July20/July21, while `stage_monitor_expert="run"` should stop aggregate walk/stand success from hiding the known run failure.
+
+Training root:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_amp\July23
+```
+
+Evaluation outputs:
+
+```text
+E:\codebase\VR_Teleoperation\outputs\eval\July23_command_hold_staged_disturb_release_best
+E:\codebase\VR_Teleoperation\outputs\eval\July23_command_hold_staged_disturb_release_8000
+E:\codebase\VR_Teleoperation\outputs\eval\July23_command_hold_run_focused_staged_disturb_release_best
+E:\codebase\VR_Teleoperation\outputs\eval\July23_command_hold_run_focused_staged_disturb_release_8000
+```
+
+Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.csv` has 7 rows, one row per fixed preset. DTW was not computed because `--compute_dtw` was not passed.
+
+### Training Artifacts
+
+| experiment | config | run directory | top task checkpoint iterations | final train task reward | final disturb curriculum | final staged level / stage | final staged window fall rate | best train task reward | status |
+|---|---|---|---|---:|---:|---|---:|---:|---|
+| `command_hold_staged_disturb_release` | `configs/ablation/command_hold_staged_disturb_release.json` | `logs/r2_amp/July23/Jun23_03-38-06_command_hold_staged_disturb_release` | `1315`, `1331`, `1705` | `7.36` | `0.9944` | `1.0000 / 4` | `0.1174` | `26.76` | evaluated |
+| `command_hold_run_focused_staged_disturb_release` | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | `logs/r2_amp/July23/Jun23_14-58-32_command_hold_run_focused_staged_disturb_release` | `4221`, `4294`, `7112` | `8.14` | `0.0000` | `0.0000 / 0` | `0.6372` | `12.08` | evaluated |
+
+### Aggregate Evaluation
+
+Higher `avg task return` is better. Lower `avg fall rate` is better.
+
+| experiment | checkpoint | avg task return | avg fall rate | avg length steps | survival s | lin rmse | yaw rmse | height viol | roll/pitch viol | style reward | policy logit | disc gap | torque L2 | action-rate L2 | dof-acc L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `command_hold_staged_disturb_release` | `best` | -14.39 | 0.540 | 282.9 | 5.66 | 0.569 | 0.664 | 0.0028 | 0.0007 | 0.0037 | -0.807 | 1.673 | 21912 | 3.113 | 320423 |
+| `command_hold_staged_disturb_release` | `8000` | -41.51 | 0.219 | 411.7 | 8.23 | 0.405 | 0.488 | 0.0005 | 0.0003 | 0.0056 | -0.641 | 1.522 | 35707 | 6.296 | 310039 |
+| `command_hold_run_focused_staged_disturb_release` | `best` | -7.91 | 0.978 | 58.3 | 1.17 | 0.856 | 1.170 | 0.0147 | 0.0038 | 0.0076 | -0.517 | 1.195 | 19599 | 4.700 | 431233 |
+| `command_hold_run_focused_staged_disturb_release` | `8000` | -8.46 | 1.000 | 37.5 | 0.75 | 0.883 | 1.198 | 0.0143 | 0.0031 | 0.0071 | -0.520 | 1.203 | 25466 | 9.140 | 460219 |
+
+### Preset-Level Failure Notes
+
+| experiment | checkpoint | worst-return preset | worst fall preset |
+|---|---:|---|---|
+| `command_hold_staged_disturb_release` | `best` | `turn_left`, task `-23.01`, fall `0.297` | `run`, fall `1.000` |
+| `command_hold_staged_disturb_release` | `8000` | `walk_fast`, task `-50.78`, fall `0.281` | `run`, fall `0.656` |
+| `command_hold_run_focused_staged_disturb_release` | `best` | `walk_fast`, task `-8.68`, fall `0.938` | `stand`, `walk_slow`, `jump`, `turn_left`, `strafe_right`, fall `1.000` |
+| `command_hold_run_focused_staged_disturb_release` | `8000` | `run`, task `-10.10`, fall `1.000` | all seven presets, fall `1.000` |
+
+### Run Preset Diagnostic
+
+| experiment | checkpoint | run task return | run fall rate | run length steps | run survival s | run lin rmse | run yaw rmse |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `command_hold_staged_disturb_release` | `best` | -7.15 | 1.000 | 28.2 | 0.56 | 1.345 | 1.025 |
+| `command_hold_staged_disturb_release` | `8000` | -35.17 | 0.656 | 196.7 | 3.93 | 1.057 | 0.942 |
+| `command_hold_run_focused_staged_disturb_release` | `best` | -8.56 | 0.906 | 101.5 | 2.03 | 1.469 | 1.076 |
+| `command_hold_run_focused_staged_disturb_release` | `8000` | -10.10 | 1.000 | 51.0 | 1.02 | 1.530 | 1.162 |
+
+### Supported Conclusion
+
+The July23 result does not support either staged-release run as a direct continuation policy.
+
+Facts:
+
+- `command_hold_staged_disturb_release` reached full staged disturbance release in training (`staged_disturb_level=1.0000`, `staged_disturb_stage=4`, `disturb_curriculum=0.9944`). The final checkpoint reduced average fall rate relative to best (`0.219` vs `0.540`) and improved average survival (`8.23s` vs `5.66s`), but average task return degraded from `-14.39` to `-41.51`, and the `run` preset still had `fall_rate=0.656`.
+- `command_hold_staged_disturb_release` best checkpoint had a strong average task return (`-14.39`) but failed `run` completely (`fall_rate=1.000`), so the average is not robust enough for continuation.
+- `command_hold_run_focused_staged_disturb_release` did not advance beyond stage 0 in training (`staged_disturb_level=0.0000`, `staged_disturb_stage=0`, `disturb_curriculum=0.0000`) and still failed the fixed-preset evaluation. Its best checkpoint had average fall rate `0.978`; its final checkpoint had `fall_rate=1.000` on all seven presets.
+- The apparently good average task return for the run-focused run (`-7.91` best, `-8.46` final) is misleading because episodes terminate very early: average survival is only `1.17s` and `0.75s`.
+
+Interpretation:
+
+- Staged release is better evidence than full immediate disturbance release because the general staged run can reach full disturbance without complete aggregate collapse. However, it still does not solve run robustness.
+- The run-focused JSON is too unstable as a from-scratch setting under the current gate. It either needs a warm start from a stronger command-hold checkpoint, a less severe run-only curriculum, or a lower initial gate burden before it can test staged disturbance meaningfully.
+- The next useful diagnostic remains the run-only disturbance sweep on the stronger `scratch_command_hold` anchor, followed by a smaller stage/gate adjustment rather than another full run-focused from-scratch training.
+
+## Follow-up Implementation - 2026-06-24
+
+Hypothesis: the July23 run-focused setting was too harsh from scratch because it combined a run-only command band with a strict global staged gate. A softer follow-up should keep run-routed monitoring, but start from a walk-run transition command band and use per-stage gates that tighten as disturbance increases.
+
+Code change:
+
+```text
+legged_gym/envs/r2/r2interrupt_config.py
+legged_gym/envs/r2/r2interrupt.py
+tests/test_amp_training_contracts.py
+```
+
+`stage_min_task_return` and `stage_max_fall_rate` remain backward-compatible scalar config fields. They may now also be lists with the same length as `stage_levels`; `_expand_staged_disturb_gate_values()` validates this contract, and `_current_staged_disturb_gate()` selects the gate for the current stage. The training log now also exposes `staged_disturb_gate_min_task_return` and `staged_disturb_gate_max_fall_rate` in episode extras.
+
+New config:
+
+```text
+configs/ablation/command_hold_run_recovery_staged_disturb_release.json
+```
+
+Key settings:
+
+| field | value | reason |
+|---|---|---|
+| `commands.ranges.lin_vel_x` | `[0.8, 1.35]` | Covers the walk-run transition instead of forcing all commands into the harsher `1.1-1.6` run-only band. |
+| `commands.ranges.gait_frequency` | `[1.8, 2.7]` | Lets some samples remain near the run-routing boundary while still producing run-routed monitor episodes. |
+| `disturb.stage_levels` | `[0.0, 0.15, 0.3, 0.5, 0.75, 1.0]` | Uses smaller early disturbance increments than the July23 `0.25` jump. |
+| `disturb.stage_min_task_return` | `[4.0, 8.0, 12.0, 16.0, 20.0, 20.0]` | Starts below the July23 final run-focused window return and tightens toward the original target. |
+| `disturb.stage_max_fall_rate` | `[0.7, 0.55, 0.4, 0.25, 0.15, 0.1]` | Allows stage 0 to progress despite imperfect run recovery, then progressively requires robustness. |
+| `disturb.stage_monitor_expert` | `run` | Keeps the July21/July23 diagnosis that run-routed episodes must drive the gate. |
+
+Training command:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --cfg_override_json configs/ablation/command_hold_run_recovery_staged_disturb_release.json
+```
+
+Current status:
+
+- `command_hold_run_recovery_staged_disturb_release`: not trained.
+- Required evaluation after training: same WSL CPU fixed-preset protocol as July23, evaluating both `model_best_task.pt` and `model_8000.pt`.
 
 ## Maintenance Rules
 

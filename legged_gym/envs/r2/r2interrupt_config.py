@@ -121,6 +121,11 @@ class R2InterruptCfg(R2Cfg):
         staged_release = False
         stage_levels = [0.0, 0.25, 0.5, 0.75, 1.0]
         stage_min_episodes = 512
+        # Scalars keep the same gate at every stage; ablation JSONs may pass
+        # per-stage lists matching stage_levels. This follows curriculum
+        # learning's easy-to-hard continuation idea (Bengio et al., ICML 2009)
+        # and the game-inspired legged-locomotion curriculum in Rudin et al.,
+        # CoRL 2022.
         stage_min_task_return = 20.0
         stage_max_fall_rate = 0.10
         stage_monitor_noise_only = True

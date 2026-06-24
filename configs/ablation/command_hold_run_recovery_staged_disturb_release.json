@@ -1,0 +1,53 @@
+{
+  "notes": "Run-recovery staged-release experiment after July23: keep staged disturbance release and run-routed monitoring, but train on a walk-run transition command band instead of the harsher run-only band. Per-stage gates start permissive enough to leave stage 0 when the run window is still imperfect, then tighten toward the original 20.0 task-return / 0.10 fall-rate target before full disturbance.",
+  "env": {
+    "commands": {
+      "curriculum": false,
+      "ranges": {
+        "lin_vel_x": [0.8, 1.35],
+        "lin_vel_y": [-0.08, 0.08],
+        "ang_vel_yaw": [-0.15, 0.15],
+        "gait_frequency": [1.8, 2.7],
+        "foot_swing_height": [0.1, 0.16],
+        "body_height": [0.0, 0.015]
+      }
+    },
+    "disturb": {
+      "start_by_curriculum": false,
+      "staged_release": true,
+      "stage_levels": [0.0, 0.15, 0.3, 0.5, 0.75, 1.0],
+      "stage_min_episodes": 768,
+      "stage_min_task_return": [4.0, 8.0, 12.0, 16.0, 20.0, 20.0],
+      "stage_max_fall_rate": [0.7, 0.55, 0.4, 0.25, 0.15, 0.1],
+      "stage_monitor_noise_only": true,
+      "stage_monitor_expert": "run"
+    },
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run",
+        "jump": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/jump"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "command_hold_run_recovery_staged_disturb_release",
+      "save_top_task_checkpoints": 3,
+      "max_iterations": 8000
+    },
+    "amp": {
+      "expert_style_enabled": {
+        "walk": true,
+        "run": true,
+        "jump": true
+      }
+    }
+  }
+}
