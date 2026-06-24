@@ -396,6 +396,57 @@ def test_run_recovery_staged_disturb_release_uses_per_stage_gates():
     assert ranges["body_height"][1] < 0.02
 
 
+def test_eval_manifold_staged_disturb_release_uses_command_profile_mixture():
+    config_source = (ROOT_DIR / "legged_gym/envs/r2/r2_config.py").read_text(
+        encoding="utf-8"
+    )
+    interrupt_source = (ROOT_DIR / "legged_gym/envs/r2/r2interrupt.py").read_text(
+        encoding="utf-8"
+    )
+    payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/command_hold_eval_manifold_staged_disturb_release.json"
+        ).read_text(encoding="utf-8")
+    )
+    ranges = payload["env"]["commands"]["ranges"]
+    profiles = payload["env"]["commands"]["profile_mixture"]
+    disturb = payload["env"]["disturb"]
+    names = {profile["name"] for profile in profiles}
+
+    assert "profile_mixture = None" in config_source
+    assert "_apply_command_profile_mixture" in interrupt_source
+    assert "torch.multinomial" in interrupt_source
+    assert 'profile.get("standing", False)' in interrupt_source
+    assert 'profile.get("name") == "stand"' not in interrupt_source
+    assert payload["train"]["runner"]["run_name"] == "command_hold_eval_manifold_staged_disturb_release"
+    assert payload["train"]["runner"]["max_iterations"] == 8000
+    assert names == {
+        "stand",
+        "walk_slow",
+        "walk_fast",
+        "run",
+        "jump",
+        "turn_left",
+        "strafe_right",
+    }
+    assert abs(sum(float(profile["weight"]) for profile in profiles) - 1.0) < 1e-6
+    assert all(len(profile["command"]) == 10 for profile in profiles)
+    assert all(len(profile["jitter"]) == 10 for profile in profiles)
+    assert ranges["lin_vel_x"][0] <= 0.0 and ranges["lin_vel_x"][1] >= 1.6
+    assert ranges["lin_vel_y"][0] <= -0.3 and ranges["lin_vel_y"][1] >= 0.3
+    assert ranges["ang_vel_yaw"][0] <= -0.6 and ranges["ang_vel_yaw"][1] >= 0.6
+    assert ranges["gait_frequency"][0] <= 1.6 and ranges["gait_frequency"][1] >= 3.0
+    assert ranges["foot_swing_height"][0] <= 0.08 and ranges["foot_swing_height"][1] >= 0.2
+    assert ranges["body_height"][1] >= 0.03
+    assert ranges["body_pitch"][1] >= 0.03
+    assert disturb["start_by_curriculum"] is False
+    assert disturb["staged_release"] is True
+    assert disturb["stage_monitor_expert"] == "run"
+    assert len(disturb["stage_levels"]) == len(disturb["stage_min_task_return"])
+    assert len(disturb["stage_levels"]) == len(disturb["stage_max_fall_rate"])
+
+
 def test_run_disturb_sweep_helper_contract():
     script = (ROOT_DIR / "scripts/run_run_disturb_sweep.ps1").read_text(
         encoding="utf-8"

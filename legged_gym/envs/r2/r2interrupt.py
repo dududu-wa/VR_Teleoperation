@@ -277,6 +277,87 @@ class R2InterruptRobot(R2Robot):
 
     def _non_disturb_values(self, tensor):
         return tensor.index_select(1, self.non_disturb_action_indices)
+
+    def _apply_command_profile_mixture(self, env_ids):
+        """Optionally replace rectangular commands with weighted eval-like profiles."""
+        profiles = getattr(self.cfg.commands, "profile_mixture", None)
+        if not profiles:
+            return False
+        if not isinstance(profiles, (list, tuple)):
+            raise ValueError("cfg.commands.profile_mixture must be a list of profile objects")
+
+        weights = torch.tensor(
+            [float(profile.get("weight", 1.0)) for profile in profiles],
+            dtype=torch.float,
+            device=self.device,
+        )
+        if torch.any(weights < 0) or float(weights.sum().item()) <= 0.0:
+            raise ValueError("cfg.commands.profile_mixture weights must be non-negative and sum to > 0")
+
+        choices = torch.multinomial(weights / weights.sum(), len(env_ids), replacement=True)
+        self.standing_envs_mask[env_ids] = False
+        for profile_idx, profile in enumerate(profiles):
+            selected_env_ids = env_ids[choices == profile_idx]
+            if len(selected_env_ids) == 0:
+                continue
+
+            command = torch.tensor(profile["command"], dtype=self.commands.dtype, device=self.device)
+            jitter = torch.tensor(
+                profile.get("jitter", [0.0] * int(command.numel())),
+                dtype=self.commands.dtype,
+                device=self.device,
+            )
+            if command.numel() != jitter.numel():
+                raise ValueError("cfg.commands.profile_mixture command and jitter lengths must match")
+
+            command_tensor = torch.zeros(self.commands.shape[1], dtype=self.commands.dtype, device=self.device)
+            jitter_tensor = torch.zeros_like(command_tensor)
+            command_dims = min(command_tensor.numel(), command.numel())
+            command_tensor[:command_dims] = command[:command_dims]
+            jitter_tensor[:command_dims] = jitter[:command_dims]
+
+            noise = (2.0 * torch.rand(len(selected_env_ids), self.commands.shape[1], device=self.device) - 1.0)
+            self.commands[selected_env_ids] = command_tensor + noise * jitter_tensor
+            # Fixed-preset evaluation clears standing_envs_mask, so profile
+            # mixture keeps that eval-like default unless a profile opts in.
+            if bool(profile.get("standing", False)):
+                self.standing_envs_mask[selected_env_ids] = True
+
+        # Keep jittered profiles inside the declared command support so the
+        # profile mixture remains compatible with the existing curriculum grid.
+        self.commands[env_ids, 0].clip_(self.command_ranges["lin_vel_x"][0], self.command_ranges["lin_vel_x"][1])
+        self.commands[env_ids, 1].clip_(self.command_ranges["lin_vel_y"][0], self.command_ranges["lin_vel_y"][1])
+        self.commands[env_ids, 2].clip_(self.command_ranges["ang_vel_yaw"][0], self.command_ranges["ang_vel_yaw"][1])
+        if self.cfg.env.observe_gait_commands:
+            self.commands[env_ids, self.command_gait_freq_dim].clip_(
+                self.command_ranges["gait_frequency"][0],
+                self.command_ranges["gait_frequency"][1],
+            )
+            self.commands[env_ids, self.command_swing_heights_dim].clip_(
+                self.command_ranges["foot_swing_height"][0],
+                self.command_ranges["foot_swing_height"][1],
+            )
+        if self.cfg.env.observe_body_height:
+            self.commands[env_ids, self.command_body_height_dim].clip_(
+                self.command_ranges["body_height"][0],
+                self.command_ranges["body_height"][1],
+            )
+        if self.cfg.env.observe_body_pitch:
+            self.commands[env_ids, self.command_body_pitch_dim].clip_(
+                self.command_ranges["body_pitch"][0],
+                self.command_ranges["body_pitch"][1],
+            )
+        if self.cfg.env.observe_waist_roll:
+            self.commands[env_ids, self.command_waist_roll_dim].clip_(
+                self.command_ranges["waist_roll"][0],
+                self.command_ranges["waist_roll"][1],
+            )
+
+        self.velocity_level[env_ids] = torch.clip(
+            torch.norm(self.commands[env_ids, :2], dim=-1) + 0.5 * torch.abs(self.commands[env_ids, 2]),
+            min=1,
+        )
+        return True
         
 
     def _resample_commands(self, env_ids):
@@ -362,6 +443,8 @@ class R2InterruptRobot(R2Robot):
 
         if self.cfg.env.observe_waist_roll:
             self.commands[env_ids, self.command_waist_roll_dim] = torch_rand_float(self.command_ranges["waist_roll"][0], self.command_ranges['waist_roll'][1], (len(env_ids), 1), device=self.device).squeeze(1)
+
+        self._apply_command_profile_mixture(env_ids)
 
         # reset command sums
         for key in self.command_sums.keys():

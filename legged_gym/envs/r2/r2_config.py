@@ -188,6 +188,11 @@ class R2Cfg( LeggedRobotCfg ):
         heading_command = True 
         selected_terrain_type = None
         terrain_kwargs = None
+        # Default-off command-profile mixture for targeted ablations. Anchored
+        # profiles plus jitter are a narrow curriculum/domain-randomization tool
+        # (Bengio et al., 2009; Tobin et al., 2017) and preserve the legacy
+        # rectangular command sampler when left as None.
+        profile_mixture = None
         min_vel = 0.15 
         num_bins_vel_x = 12
         num_bins_vel_yaw = 10 
