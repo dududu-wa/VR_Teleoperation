@@ -419,6 +419,9 @@ def test_eval_manifold_staged_disturb_release_uses_command_profile_mixture():
     assert "torch.multinomial" in interrupt_source
     assert 'profile.get("standing", False)' in interrupt_source
     assert 'profile.get("name") == "stand"' not in interrupt_source
+    assert "command_profile_ids" in interrupt_source
+    assert "stage_monitor_profiles" in interrupt_source
+    assert "staged_disturb_failure_windows" in interrupt_source
     assert payload["train"]["runner"]["run_name"] == "command_hold_eval_manifold_staged_disturb_release"
     assert payload["train"]["runner"]["max_iterations"] == 8000
     assert names == {
@@ -442,9 +445,54 @@ def test_eval_manifold_staged_disturb_release_uses_command_profile_mixture():
     assert ranges["body_pitch"][1] >= 0.03
     assert disturb["start_by_curriculum"] is False
     assert disturb["staged_release"] is True
-    assert disturb["stage_monitor_expert"] == "run"
+    assert disturb["stage_monitor_expert"] in ("", None)
+    assert set(disturb["stage_monitor_profiles"]) == names
+    assert disturb["stage_regress_on_failure"] is True
+    assert disturb["stage_regress_patience"] >= 2
     assert len(disturb["stage_levels"]) == len(disturb["stage_min_task_return"])
     assert len(disturb["stage_levels"]) == len(disturb["stage_max_fall_rate"])
+
+
+def test_eval_manifold_conservative_disturb_release_json_contract():
+    # This adjacent config isolates disturbance pressure from eval-profile coverage.
+    base_payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/command_hold_eval_manifold_staged_disturb_release.json"
+        ).read_text(encoding="utf-8")
+    )
+    payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json"
+        ).read_text(encoding="utf-8")
+    )
+    profiles = payload["env"]["commands"]["profile_mixture"]
+    disturb = payload["env"]["disturb"]
+    names = {profile["name"] for profile in profiles}
+    weights = {profile["name"]: float(profile["weight"]) for profile in profiles}
+
+    assert payload["train"]["runner"]["run_name"] == "command_hold_eval_manifold_conservative_disturb_release"
+    assert payload["train"]["runner"]["max_iterations"] == 8000
+    assert names == {
+        profile["name"]
+        for profile in base_payload["env"]["commands"]["profile_mixture"]
+    }
+    assert abs(sum(weights.values()) - 1.0) < 1e-6
+    assert weights["stand"] >= 0.18
+    assert weights["jump"] >= 0.14
+    assert disturb["start_by_curriculum"] is False
+    assert disturb["staged_release"] is True
+    assert disturb["stage_monitor_expert"] in ("", None)
+    assert set(disturb["stage_monitor_profiles"]) == names
+    assert disturb["stage_regress_on_failure"] is True
+    assert disturb["stage_min_episodes"] > base_payload["env"]["disturb"]["stage_min_episodes"]
+    assert max(disturb["stage_levels"]) <= 0.75
+    assert disturb["stage_levels"][1] - disturb["stage_levels"][0] <= 0.05
+    assert len(disturb["stage_levels"]) == len(disturb["stage_min_task_return"])
+    assert len(disturb["stage_levels"]) == len(disturb["stage_max_fall_rate"])
+    assert disturb["stage_min_task_return"][0] < disturb["stage_min_task_return"][-1]
+    assert disturb["stage_max_fall_rate"][0] > disturb["stage_max_fall_rate"][-1]
 
 
 def test_run_disturb_sweep_helper_contract():
@@ -495,6 +543,14 @@ if __name__ == "__main__":
     test_amp_ppo_routes_by_expert_id()
     test_amp_ppo_resolves_expert_ids_before_collector_mutation()
     test_evaluate_uses_routed_amp_discriminator()
+    test_evaluate_dtw_is_opt_in()
+    test_evaluate_supports_forced_disturbance_sweep_metrics()
     test_expert_hard_gate_ablation_json_and_docs_contract()
     test_interrupt_disturb_release_can_bypass_terrain_curriculum_gate()
+    test_staged_disturb_release_config_and_code_contract()
+    test_second_staged_disturb_release_experiment_is_run_focused()
+    test_run_recovery_staged_disturb_release_uses_per_stage_gates()
+    test_eval_manifold_staged_disturb_release_uses_command_profile_mixture()
+    test_eval_manifold_conservative_disturb_release_json_contract()
+    test_run_disturb_sweep_helper_contract()
     test_next_batch_command_hold_ablation_json_contract()

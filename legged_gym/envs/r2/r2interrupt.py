@@ -139,6 +139,38 @@ class R2InterruptRobot(R2Robot):
             self.staged_disturb_monitor_expert = None
         if self.staged_disturb_monitor_expert not in (None, "walk", "run", "jump"):
             raise ValueError("cfg.disturb.stage_monitor_expert must be one of None, walk, run, or jump")
+        self.command_profile_ids = torch.full(
+            (self.num_envs,), -1, dtype=torch.long, device=self.device, requires_grad=False
+        )
+        profile_mixture = getattr(cfg.commands, "profile_mixture", None)
+        self.command_profile_names = (
+            [str(profile.get("name", idx)) for idx, profile in enumerate(profile_mixture)]
+            if profile_mixture
+            else []
+        )
+        raw_monitor_profiles = getattr(cfg.disturb, "stage_monitor_profiles", None)
+        if raw_monitor_profiles == "":
+            raw_monitor_profiles = None
+        if isinstance(raw_monitor_profiles, str):
+            raw_monitor_profiles = [raw_monitor_profiles]
+        self.staged_disturb_monitor_profiles = raw_monitor_profiles
+        self.staged_disturb_monitor_profile_ids = None
+        if raw_monitor_profiles is not None:
+            profile_to_id = {name: idx for idx, name in enumerate(self.command_profile_names)}
+            missing_profiles = [name for name in raw_monitor_profiles if name not in profile_to_id]
+            if missing_profiles:
+                raise ValueError(
+                    "cfg.disturb.stage_monitor_profiles entries must match cfg.commands.profile_mixture names"
+                )
+            self.staged_disturb_monitor_profile_ids = torch.tensor(
+                [profile_to_id[name] for name in raw_monitor_profiles],
+                dtype=torch.long,
+                device=self.device,
+                requires_grad=False,
+            )
+        self.staged_disturb_regress_on_failure = bool(getattr(cfg.disturb, "stage_regress_on_failure", False))
+        self.staged_disturb_regress_patience = max(1, int(getattr(cfg.disturb, "stage_regress_patience", 2)))
+        self.staged_disturb_failure_windows = 0
         self.staged_disturb_episode_count = 0
         self.staged_disturb_return_sum = 0.0
         self.staged_disturb_fall_sum = 0.0
@@ -235,6 +267,12 @@ class R2InterruptRobot(R2Robot):
             monitor_ids = monitor_ids[self.noise_disturb_mode[monitor_ids]]
         if self.staged_disturb_monitor_expert is not None:
             monitor_ids = monitor_ids[self._staged_disturb_expert_mask(monitor_ids)]
+        if self.staged_disturb_monitor_profile_ids is not None:
+            profile_mask = torch.isin(
+                self.command_profile_ids[monitor_ids],
+                self.staged_disturb_monitor_profile_ids,
+            )
+            monitor_ids = monitor_ids[profile_mask]
         if len(monitor_ids) == 0:
             return
 
@@ -264,6 +302,16 @@ class R2InterruptRobot(R2Robot):
         )
         if can_advance:
             self.staged_disturb_stage_idx += 1
+            self.staged_disturb_failure_windows = 0
+        elif avg_task_return >= min_task_return and fall_rate <= max_fall_rate:
+            self.staged_disturb_failure_windows = 0
+        elif self.staged_disturb_regress_on_failure and self.staged_disturb_stage_idx > 0:
+            self.staged_disturb_failure_windows += 1
+            if self.staged_disturb_failure_windows >= self.staged_disturb_regress_patience:
+                # Adaptive curricula lower difficulty after repeated failure
+                # windows; see Bengio et al. 2009 and OpenAI et al. 2019 ADR.
+                self.staged_disturb_stage_idx -= 1
+                self.staged_disturb_failure_windows = 0
 
         # Use non-overlapping windows so a bad phase cannot be hidden by older,
         # easier data after the stage cap changes.
@@ -296,6 +344,7 @@ class R2InterruptRobot(R2Robot):
 
         choices = torch.multinomial(weights / weights.sum(), len(env_ids), replacement=True)
         self.standing_envs_mask[env_ids] = False
+        self.command_profile_ids[env_ids] = choices.to(dtype=torch.long)
         for profile_idx, profile in enumerate(profiles):
             selected_env_ids = env_ids[choices == profile_idx]
             if len(selected_env_ids) == 0:
@@ -554,6 +603,7 @@ class R2InterruptRobot(R2Robot):
             self.extras['episode']['staged_disturb_stage'] = self.staged_disturb_stage_idx
             self.extras['episode']['staged_disturb_gate_min_task_return'] = min_task_return
             self.extras['episode']['staged_disturb_gate_max_fall_rate'] = max_fall_rate
+            self.extras['episode']['staged_disturb_failure_windows'] = self.staged_disturb_failure_windows
             if self.staged_disturb_episode_count > 0:
                 self.extras['episode']['staged_disturb_window_task_return'] = (
                     self.staged_disturb_return_sum / self.staged_disturb_episode_count

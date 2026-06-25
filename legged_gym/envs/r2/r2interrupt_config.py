@@ -133,6 +133,16 @@ class R2InterruptCfg(R2Cfg):
         # original all-command window; "run" makes stage advancement wait for
         # run-routed episodes, matching the July21 run-failure diagnosis.
         stage_monitor_expert = None
+        # Optional profile filter for commands.profile_mixture ablations. It
+        # lets staged release monitor named eval-like profiles instead of only
+        # broad AMP experts, so weak stand/jump profiles cannot be hidden by
+        # stronger run windows.
+        stage_monitor_profiles = None
+        # Adaptive staged curricula can back off when the current difficulty no
+        # longer meets the gate, consistent with automatic curriculum methods
+        # that adjust task difficulty to demonstrated competence.
+        stage_regress_on_failure = False
+        stage_regress_patience = 2
         replace_action = True 
         disturb_rad = 0.2 
         disturb_rad_curriculum = True 

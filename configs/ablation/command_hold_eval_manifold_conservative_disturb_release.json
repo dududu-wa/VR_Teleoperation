@@ -1,5 +1,5 @@
 {
-  "notes": "June25 follow-up after evaluating Jun24_16-51-59_command_hold_eval_manifold_staged_disturb_release: eval-manifold sampling improved run/walk coverage, but fixed-preset eval still failed stand and jump while the final checkpoint regressed after the best checkpoint. This config keeps eval-like profile sampling, switches the staged gate from run-only to profile-aware monitoring across all seven eval presets, and enables adaptive stage regression after repeated failed gate windows. The design follows curriculum learning / domain randomization evidence: Bengio et al. 2009 Curriculum Learning, Tobin et al. 2017 Domain Randomization, and OpenAI et al. 2019 Automatic Domain Randomization.",
+  "notes": "June25 adjacent follow-up to command_hold_eval_manifold_staged_disturb_release: the first eval-manifold run improved run robustness but still failed stand/jump and regressed late after reaching full disturbance. This config keeps the same eval-like command profiles and profile-aware staged gate, but makes disturbance release more conservative by using a longer stage window, finer early stages, and a maximum staged level of 0.75. It tests whether stand/jump collapse and late regression are caused by full disturbance pressure rather than only by profile coverage. The design follows curriculum learning and domain randomization evidence: Bengio et al. 2009 Curriculum Learning, Tobin et al. 2017 Domain Randomization, and OpenAI et al. 2019 Automatic Domain Randomization.",
   "env": {
     "commands": {
       "curriculum": false,
@@ -60,10 +60,10 @@
     "disturb": {
       "start_by_curriculum": false,
       "staged_release": true,
-      "stage_levels": [0.0, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0],
-      "stage_min_episodes": 1024,
-      "stage_min_task_return": [4.0, 8.0, 12.0, 16.0, 20.0, 20.0, 20.0],
-      "stage_max_fall_rate": [0.65, 0.5, 0.38, 0.28, 0.2, 0.14, 0.1],
+      "stage_levels": [0.0, 0.05, 0.1, 0.18, 0.28, 0.42, 0.6, 0.75],
+      "stage_min_episodes": 2048,
+      "stage_min_task_return": [4.0, 8.0, 12.0, 16.0, 20.0, 22.0, 22.0, 22.0],
+      "stage_max_fall_rate": [0.6, 0.45, 0.32, 0.24, 0.18, 0.14, 0.1, 0.08],
       "stage_monitor_noise_only": true,
       "stage_monitor_expert": null,
       "stage_monitor_profiles": [
@@ -94,7 +94,7 @@
   },
   "train": {
     "runner": {
-      "run_name": "command_hold_eval_manifold_staged_disturb_release",
+      "run_name": "command_hold_eval_manifold_conservative_disturb_release",
       "save_top_task_checkpoints": 3,
       "max_iterations": 8000
     },
