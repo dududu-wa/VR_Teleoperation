@@ -1273,6 +1273,42 @@ Interpretation:
 - The finite headless play check does prove that conservative `8000` can be loaded and driven through the demo command sequence, including the jump phase. It is weaker than visual inspection and should not replace quantitative `evaluate.py` metrics.
 - If a real viewer is needed before training, run the same `play.py --play_seconds 10.5 --record_seconds 10.5` command on a machine with a working Isaac Gym viewer stack. Locally, the next useful non-training step remains headless reward/state diagnostics or a small warm-start config design, not more attempts to record through Xvfb.
 
+### Checkpoint Evaluation Coverage Audit - 2026-06-30
+
+Hypothesis: before starting another evaluation or training branch, verify from the filesystem that there are no recent model-bearing R2 AMP runs silently missing evaluation.
+
+Local audit outputs:
+
+```text
+outputs/eval/June30_r2_amp_checkpoint_eval_coverage/summary.json
+outputs/eval/June30_r2_amp_checkpoint_eval_coverage/checkpoint_eval_coverage.csv
+outputs/eval/June30_r2_amp_checkpoint_eval_coverage/checkpoint_eval_coverage.json
+outputs/eval/June30_r2_amp_checkpoint_eval_coverage/transient_log_dirs.csv
+```
+
+Coverage summary:
+
+| item | count | interpretation |
+|---|---:|---|
+| model-bearing `logs/r2_amp` run directories | 25 | Direct checkpoint directories found under the local E-checkout. |
+| covered current Jun19-Jun25 runs | 16 | Current main ablation line has fixed-preset or focused diagnostic evidence in `outputs/eval`. |
+| legacy Jun17 runs with combined eval | 3 | Evaluated through older `June17_manual_eval` / `June17_multi_expert_eval` combined outputs. |
+| legacy runs needing manual checkpoint normalization | 6 | Pre-Jun17/Jun15/Jun10/Apr17 archive runs use non-current checkpoint naming or older task assumptions. |
+| transient Jun29-Jun30 log dirs without checkpoints | 44 | These contain only `train.log`; they are local failed/smoke invocations and have no `.pt` to evaluate. |
+| missing evidence paths for current mapped runs | 0 | Every mapped current evidence path exists on disk. |
+
+Facts:
+
+- The recent top-level `Jun29_*` and `Jun30_*` directories are not un-evaluated trained policies: each inspected directory contains `train.log` only and no `.pt` checkpoint.
+- The current Jun19-Jun25 model-bearing experiment line is covered through the documented fixed-preset outputs and the later focused diagnostics. This includes Jun25_0 conservative/staged best and final checkpoints.
+- The only remaining model-bearing directories outside that covered line are archival runs: `Apr17_15-18-11_r2v2_amp_version4`, `eval_style0_jun10_30000`, `Jun10`, `Jun10/sw1`, `Jun15/sw05`, and `Jun15/sw1`.
+- Those archive runs are not ready for the current `evaluate.py --checkpoint` path as-is because several checkpoint filenames are non-standard for `get_load_path()`, for example `model_best_task(3).pt`, `model_30000(6).pt`, `mixed_30000.pt`, and `style0_30000.pt`.
+
+Interpretation:
+
+- For the current Jun25_0 decision, there is no hidden recent checkpoint left to evaluate locally. The next model-development decision should be based on conservative `8000` diagnostics, not on unevaluated Jun29/Jun30 transient logs.
+- If "all evaluations" is extended to archival pre-Jun17 runs, the next step is a separate compatibility/normalization task: map each non-standard checkpoint filename to an explicit load path or create a temporary normalized copy/symlink, then run the current fixed-preset CPU protocol. That is separate from the Jun25_0 continuation decision.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
