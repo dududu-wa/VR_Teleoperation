@@ -1,5 +1,6 @@
 param(
-    [string]$LoadRun = "July19/Jun19_16-09-11_scratch_command_hold",
+    # Keep this default aligned with the local logs/r2_amp subtree so the helper can run without path overrides.
+    [string]$LoadRun = "Jun19/Jun19_16-09-11_scratch_command_hold",
     [string]$CfgOverrideJson = "configs/ablation/scratch_command_hold.json",
     [string]$Checkpoint = "8000",
     [int]$NumEpisodes = 64,

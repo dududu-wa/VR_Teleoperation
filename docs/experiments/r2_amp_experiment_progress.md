@@ -200,10 +200,10 @@ Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.c
 
 | experiment | config | run directory | top task checkpoint iterations | status |
 |---|---|---|---|---|
-| `scratch_amp_slow_lowcap` | `configs/ablation/scratch_amp_slow_lowcap.json` | `logs/r2_amp/June19/Jun19_16-08-42_scratch_amp_slow_lowcap` | `1214`, `1227`, `1806` | evaluated |
-| `scratch_command_hold` | `configs/ablation/scratch_command_hold.json` | `logs/r2_amp/June19/Jun19_16-09-11_scratch_command_hold` | `7120`, `7219`, `7966` | evaluated |
-| `scratch_no_push` | `configs/ablation/scratch_no_push.json` | `logs/r2_amp/June19/Jun19_16-12-37_scratch_no_push` | `1676`, `1685`, `1881` | evaluated |
-| `scratch_slow_penalty_ramp` | `configs/ablation/scratch_slow_penalty_ramp.json` | `logs/r2_amp/June19/Jun20_04-58-31_scratch_slow_penalty_ramp` | `1163`, `1219`, `1222` | evaluated |
+| `scratch_amp_slow_lowcap` | `configs/ablation/scratch_amp_slow_lowcap.json` | `logs/r2_amp/Jun19/Jun19_16-08-42_scratch_amp_slow_lowcap` | `1214`, `1227`, `1806` | evaluated |
+| `scratch_command_hold` | `configs/ablation/scratch_command_hold.json` | `logs/r2_amp/Jun19/Jun19_16-09-11_scratch_command_hold` | `7120`, `7219`, `7966` | evaluated |
+| `scratch_no_push` | `configs/ablation/scratch_no_push.json` | `logs/r2_amp/Jun19/Jun19_16-12-37_scratch_no_push` | `1676`, `1685`, `1881` | evaluated |
+| `scratch_slow_penalty_ramp` | `configs/ablation/scratch_slow_penalty_ramp.json` | `logs/r2_amp/Jun19/Jun20_04-58-31_scratch_slow_penalty_ramp` | `1163`, `1219`, `1222` | evaluated |
 
 ### Aggregate Evaluation
 
@@ -475,7 +475,7 @@ Implemented artifacts:
 | --- | --- | --- |
 | `legged_gym/utils/helpers.py` | implemented | Adds `--eval_disturb_ratio` for fixed disturbance-ratio evaluation. |
 | `legged_gym/scripts/evaluate.py` | implemented, updated 2026-06-29 | Keeps default evaluation disturb-free, but enables fixed-ratio noise disturbance when `--eval_disturb_ratio` is supplied; adds `survival_time_mean_s` to output metrics. With `--record_reward_terms`, it now writes per-preset `reward_terms.csv/json` diagnostics without changing the default `metrics.csv/json` schema. |
-| `scripts/run_run_disturb_sweep.ps1` | implemented, not run | Runs `run` preset at `0%, 20%, 40%, 60%, 80%, 100%` disturbance and aggregates fall rate, survival time, lin/yaw RMSE, and task return. |
+| `scripts/run_run_disturb_sweep.ps1` | implemented, run 2026-06-30 | Runs `run` preset at `0%, 20%, 40%, 60%, 80%, 100%` disturbance and aggregates fall rate, survival time, lin/yaw RMSE, and task return. |
 | `legged_gym/envs/r2/r2interrupt_config.py` | implemented, updated 2026-06-25 | Adds default-off `disturb.staged_release`, stage gate parameters, optional `stage_monitor_expert` / `stage_monitor_profiles` filtering, scalar-or-list staged gate thresholds, and optional adaptive stage regression after repeated failed windows. |
 | `legged_gym/envs/r2/r2_config.py` | implemented, updated 2026-06-25 | Adds default-off `commands.profile_mixture=None` so targeted JSONs can opt into profile-based command sampling without changing legacy rectangular command sampling. |
 | `legged_gym/envs/r2/r2interrupt.py` | implemented, updated 2026-06-25 | Clamps `disturb_rad_curriculum` by stage and only advances stage after recent task return and fall-rate gates pass; optional expert filtering uses the same command semantics as AMP hard routing; per-stage gate lists let early stages use looser gates before tightening later; `commands.profile_mixture` can replace rectangular commands with weighted jittered eval-like profiles and now records profile ids so staged gates can monitor named profiles; optional adaptive regression lowers one stage after repeated failed gate windows. |
@@ -516,6 +516,23 @@ outputs/eval/run_disturb_sweep_command_hold_8000/run_disturb_sweep.png
 
 The plot is best-effort; if matplotlib is missing in WSL, the CSV remains the authoritative artifact.
 
+Run-only disturb sweep result from `scratch_command_hold` `model_8000.pt`, 64 episodes per row:
+
+| disturb ratio | task return | fall rate | survival s | lin rmse | yaw rmse |
+|---:|---:|---:|---:|---:|---:|
+| 0.0 | -8.18 | 0.922 | 3.28 | 1.166 | 1.153 |
+| 0.2 | -6.63 | 0.391 | 7.67 | 0.946 | 1.241 |
+| 0.4 | -11.49 | 0.688 | 5.47 | 1.252 | 1.358 |
+| 0.6 | -5.44 | 0.422 | 7.19 | 1.012 | 1.222 |
+| 0.8 | -17.55 | 0.828 | 5.12 | 1.231 | 1.481 |
+| 1.0 | -11.51 | 1.000 | 1.30 | 1.275 | 1.325 |
+
+Facts:
+
+- The pending sweep has now been generated at `outputs/eval/run_disturb_sweep_command_hold_8000`; each ratio directory contains one `run` row in `metrics.csv`, and the helper also wrote `run_disturb_sweep_summary.csv` plus `run_disturb_sweep.png`.
+- The zero-disturb row is much worse than the earlier full seven-preset June19 aggregate suggested for `run`, with `fall_rate=0.922` and survival `3.28s` in this fresh fixed-ratio run-only protocol. This means the old command-hold final checkpoint should not be used as a reliable run warm-start anchor without rechecking seed/protocol sensitivity.
+- Full disturbance still fails completely (`fall_rate=1.000`, survival `1.30s`), while mid ratios are noisy rather than monotonic. The useful conclusion is not a precise threshold but that `scratch_command_hold` `8000` does not have robust run recovery under the corrected fixed-ratio evaluator.
+
 Training is intended to run on the remote Linux machine, not on this Windows host. Use the remote repo path and Conda environment shown in the training example:
 
 ```bash
@@ -555,14 +572,14 @@ CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym
 Optional focused fine-tuning from the June19 command-hold final checkpoint can use the staged configs if that checkpoint exists on the remote machine:
 
 ```bash
-CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run June19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_staged_disturb_release.json
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run Jun19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_staged_disturb_release.json
 
-CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run June19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_run_focused_staged_disturb_release.json
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run Jun19/Jun19_16-09-11_scratch_command_hold --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_run_focused_staged_disturb_release.json
 ```
 
 Current status:
 
-- `run-only disturb sweep`: pending; no `metrics.csv` has been generated yet.
+- `run-only disturb sweep`: completed on 2026-06-30 at `outputs/eval/run_disturb_sweep_command_hold_8000`; `scratch_command_hold` `8000` is not a robust run warm-start anchor under this protocol.
 - `command_hold_staged_disturb_release`: trained and evaluated in June23.
 - `command_hold_run_focused_staged_disturb_release`: trained and evaluated in June23.
 - `command_hold_run_recovery_staged_disturb_release`: trained and evaluated in June24.
@@ -642,7 +659,7 @@ Interpretation:
 
 - Staged release is better evidence than full immediate disturbance release because the general staged run can reach full disturbance without complete aggregate collapse. However, it still does not solve run robustness.
 - The run-focused JSON is too unstable as a from-scratch setting under the current gate. It either needs a warm start from a stronger command-hold checkpoint, a less severe run-only curriculum, or a lower initial gate burden before it can test staged disturbance meaningfully.
-- The next useful diagnostic remains the run-only disturbance sweep on the stronger `scratch_command_hold` anchor, followed by a smaller stage/gate adjustment rather than another full run-focused from-scratch training.
+- The later run-only disturbance sweep shows that `scratch_command_hold` `8000` is not a reliable run warm-start anchor under fixed-ratio evaluation. Do not use it as the next continuation target without additional seed/protocol checks.
 
 ## Follow-up Implementation - 2026-06-24
 
@@ -749,7 +766,7 @@ Interpretation:
 
 - The softer walk-run band and permissive early gates helped training pass the first two staged levels, so this change diagnosed that the previous run-only setting was too harsh.
 - It did not solve robustness. The policy still collapses under fixed-preset evaluation, including non-run presets that were not supposed to be the primary target.
-- The next step should not be another from-scratch run-focused staged variant. A more defensible next diagnostic is either the pending run-only disturb sweep on a stronger command-hold anchor, or warm-starting a softer staged run from the stronger June19 command-hold checkpoint before touching the gate thresholds again.
+- The next step should not be another from-scratch run-focused staged variant. The now-completed command-hold run-only disturb sweep weakens the case for warm-starting from `scratch_command_hold` `8000`; later conservative `8000` diagnostics are the stronger local anchor.
 
 ## Follow-up Implementation - 2026-06-25
 

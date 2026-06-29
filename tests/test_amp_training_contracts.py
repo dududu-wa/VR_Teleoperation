@@ -585,6 +585,8 @@ def test_run_disturb_sweep_helper_contract():
     script = (ROOT_DIR / "scripts/run_run_disturb_sweep.ps1").read_text(
         encoding="utf-8"
     )
+    assert 'Jun19/Jun19_16-09-11_scratch_command_hold' in script
+    assert 'July19/Jun19_16-09-11_scratch_command_hold' not in script
     assert "--preset run" in script
     assert "--eval_disturb_ratio" in script
     for token in ("0.0", "0.2", "0.4", "0.6", "0.8", "1.0"):
