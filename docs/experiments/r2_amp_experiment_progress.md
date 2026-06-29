@@ -1386,6 +1386,71 @@ Interpretation:
 - These archive results do not change the current development decision. The best available evidence still points to continuing from `Jun25_0` conservative `8000`, with a warm-start, narrow robustness run focused on jump/run base-contact and roll/pitch stability.
 - The next non-training local diagnostic, if needed before warm-starting, should be a narrow jump/run reward or state-trace probe around base height, roll/pitch, and contact timing; more broad archival evaluation is unlikely to improve the decision.
 
+### Jun25_0 Top-Task Checkpoint Evaluation - 2026-06-30
+
+Hypothesis: before treating conservative `8000` as the best Jun25_0 checkpoint, evaluate the saved `model_top_task_*` files because `model_best_task.pt` covers only one top-k slot and the other top-k files may contain a better fixed-preset policy.
+
+Compatibility setup:
+
+- Temporary hard-link load directories were created under ignored local output state:
+
+```text
+logs/r2_amp/_topk_eval_compat/Jun25_0/conservative_top_2637
+logs/r2_amp/_topk_eval_compat/Jun25_0/conservative_top_2646
+logs/r2_amp/_topk_eval_compat/Jun25_0/conservative_top_2677
+logs/r2_amp/_topk_eval_compat/Jun25_0/staged_top_268
+logs/r2_amp/_topk_eval_compat/Jun25_0/staged_top_277
+logs/r2_amp/_topk_eval_compat/Jun25_0/staged_top_280
+```
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun25_0_conservative_top_task_2637_corrected
+outputs/eval/June30_Jun25_0_conservative_top_task_2646_corrected
+outputs/eval/June30_Jun25_0_conservative_top_task_2677_corrected
+outputs/eval/June30_Jun25_0_staged_top_task_268
+outputs/eval/June30_Jun25_0_staged_top_task_277
+outputs/eval/June30_Jun25_0_staged_top_task_280
+outputs/eval/June30_Jun25_0_top_task_eval_summary/top_task_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Conservative top-k used `configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json`; staged top-k used `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json`.
+
+Aggregate comparison:
+
+| eval | checkpoint | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `conservative_8000_corrected` | `8000` | 7 | 30.02 | 0.167 | 8.86 | 0.317 | 0.413 | 0.00425 | -0.760 | 1.657 | `jump` | 20.86 | `jump` | 0.391 |
+| `conservative_top_2677` | `2677` | 7 | 4.78 | 0.812 | 3.67 | 0.531 | 0.767 | 0.00508 | -0.734 | 1.621 | `turn_left` | -1.66 | `strafe_right` | 1.000 |
+| `staged_top_280` | `280` | 7 | 2.89 | 0.728 | 4.14 | 0.549 | 0.858 | 0.00360 | -0.821 | 1.590 | `jump` | -3.71 | `turn_left` | 1.000 |
+| `staged_top_277` | `277` | 7 | 2.80 | 0.743 | 3.95 | 0.549 | 0.869 | 0.00358 | -0.822 | 1.586 | `jump` | -3.78 | `strafe_right` | 1.000 |
+| `conservative_top_2637` | `2637` | 7 | 1.94 | 0.886 | 3.12 | 0.578 | 0.814 | 0.00491 | -0.747 | 1.632 | `jump` | -1.87 | `strafe_right` | 1.000 |
+| `conservative_best_corrected` | `best` | 7 | 1.94 | 0.886 | 3.12 | 0.578 | 0.814 | 0.00491 | -0.747 | 1.632 | `jump` | -1.87 | `strafe_right` | 1.000 |
+| `staged_top_268` | `268` | 7 | 1.83 | 0.739 | 3.72 | 0.567 | 0.904 | 0.00361 | -0.817 | 1.579 | `jump` | -3.81 | `strafe_right` | 1.000 |
+| `conservative_top_2646` | `2646` | 7 | 1.00 | 0.915 | 2.80 | 0.610 | 0.827 | 0.00487 | -0.746 | 1.629 | `run` | -6.69 | `jump` | 1.000 |
+| `staged_best` | `best` | 7 | -6.75 | 0.737 | 4.08 | 0.605 | 0.859 | 0.00354 | -0.823 | 1.587 | `strafe_right` | -9.08 | `strafe_right` | 1.000 |
+| `staged_8000` | `8000` | 7 | -993.79 | 1.000 | 0.06 | 1.761 | 3.201 | 0.00652 | -0.159 | 1.059 | `walk_fast` | -1089.95 | `jump` | 1.000 |
+
+Facts:
+
+- Every Jun25_0 top-k output has 7 preset rows in `metrics.csv`.
+- Conservative `model_top_task_2637.pt` and the corrected `model_best_task.pt` produce identical fixed-preset metrics, even though their checkpoint file hashes differ. The likely policy weights are behaviorally equivalent under this protocol.
+- The strongest top-k row is conservative `model_top_task_2677.pt`, but it is far below conservative `model_8000.pt`: avg task return `4.78` vs `30.02`, avg fall rate `0.812` vs `0.167`.
+- Staged top-k checkpoints are better than the staged `8000` collapse, but all remain weak: avg task return `1.83` to `2.89`, and at least one preset has `fall_rate=1.000` in each row.
+- A secondary filesystem audit found root-level `logs/r2_amp/model_*.pt` files. Most are duplicate hashes of `logs/r2_amp/Jun24_16-51-59_command_hold_eval_manifold_staged_disturb_release/*`; root-level `logs/r2_amp/model_top_task_1518.pt` is not a valid torch checkpoint (`invalid load key, '#'`) and is not an evaluation target.
+
+Interpretation:
+
+- The Jun25_0 top-k gap is now closed. No saved top-k checkpoint improves on conservative `8000`.
+- The current checkpoint choice is still conservative `model_8000.pt`.
+- The next useful local evaluation should target the proposed warm-start mechanism itself, not more checkpoint fishing: for example a short smoke once the warm-start config exists, then fixed-preset / jump-run disturbance diagnostics on its resulting checkpoint.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
