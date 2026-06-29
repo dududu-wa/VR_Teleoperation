@@ -1105,6 +1105,54 @@ Interpretation:
 - The next code/config change should be smaller than a new full training recipe: either add a jump-focused evaluation/play diagnostic with visual rollout capture, or warm-start conservative `8000` with a narrow jump-stability objective and disturbance capped below `1.0`.
 - A defensible warm-start candidate would keep eval-manifold sampling, cap disturbance at `0.75` or lower initially, and specifically reduce `jump` termination / clearance / hopping-symmetry failures before attempting full disturbance again.
 
+### Termination-Reason Diagnostic - 2026-06-29
+
+Hypothesis: the `jump` and full-disturb failures should be traceable to concrete termination buffers, not only aggregate fall rate.
+
+Code change:
+
+```text
+legged_gym/scripts/evaluate.py
+legged_gym/utils/helpers.py
+tests/test_amp_training_contracts.py
+```
+
+`evaluate.py` now supports the default-off flag `--record_termination_reasons`. When enabled, completed episodes are classified as `timeout`, `contact`, `orientation`, `base_height`, or `unknown`; contact terminations also record the contact body in `termination_detail`. The evaluator writes `termination_reasons.csv` and `termination_reasons.json` next to the normal metrics. This is a diagnostic export only and does not change the default `metrics.csv/json` schema.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June29_Jun25_0_conservative_8000_termination_reasons_corrected
+outputs/eval/June29_Jun25_0_conservative_8000_termination_reasons_disturb100
+```
+
+Both runs used `model_8000.pt`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`, and presets `jump` plus `run`. The `disturb100` run additionally used `--eval_disturb_ratio=1.0`.
+
+Termination facts:
+
+| protocol | preset | task return | fall rate | survival s | termination reason | detail | count | rate | mean survival s |
+|---|---|---:|---:|---:|---|---|---:|---:|---:|
+| corrected no-disturb | `jump` | 15.75 | 0.578 | 6.50 | contact | `base_link` | 37 | 0.578 | 3.94 |
+| corrected no-disturb | `jump` | 15.75 | 0.578 | 6.50 | timeout | - | 27 | 0.422 | 10.02 |
+| corrected no-disturb | `run` | 24.28 | 0.094 | 9.14 | contact | `base_link` | 6 | 0.094 | 0.59 |
+| corrected no-disturb | `run` | 24.28 | 0.094 | 9.14 | timeout | - | 58 | 0.906 | 10.02 |
+| full disturb ratio 1.0 | `jump` | -8.39 | 1.000 | 2.49 | contact | `base_link` | 51 | 0.797 | 2.95 |
+| full disturb ratio 1.0 | `jump` | -8.39 | 1.000 | 2.49 | orientation | `roll_pitch` | 13 | 0.203 | 0.70 |
+| full disturb ratio 1.0 | `run` | -11.74 | 1.000 | 1.51 | contact | `base_link` | 42 | 0.656 | 1.66 |
+| full disturb ratio 1.0 | `run` | -11.74 | 1.000 | 1.51 | orientation | `roll_pitch` | 22 | 0.344 | 1.23 |
+
+Facts:
+
+- Corrected no-disturb `jump` failures are entirely `base_link` contact terminations in this 64-episode run; the successful episodes time out at the 10s horizon.
+- Corrected no-disturb `run` is mostly stable in this run (`timeout` rate `0.906`), but the small failure set is also `base_link` contact.
+- Under full disturbance, both `jump` and `run` fail every episode. `base_link` contact remains the dominant failure mode, with secondary roll/pitch orientation failure.
+- This supports the reward-term diagnosis: `jump` does not primarily need more tracking reward; it needs base-contact / body-stability improvement before full disturbance pressure is meaningful.
+
+Interpretation:
+
+- The next local step should be a targeted visual/play check or a headless state trace around base height, roll/pitch, and contact timing for `jump`; changing AMP weight or discriminator capacity is not the first lever suggested by these data.
+- If starting a warm-start training follow-up, constrain it to conservative `8000`, keep disturbance below full ratio initially, and target base-link contact reduction plus roll/pitch stability for `jump` before attempting full-disturb release.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:

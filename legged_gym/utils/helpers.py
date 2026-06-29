@@ -230,6 +230,7 @@ def get_args():
         {"name": "--compute_dtw", "action": "store_true", "default": False, "help": "Reserve DTW imitation metrics in evaluate.py."},
         {"name": "--eval_disturb_ratio", "type": float, "help": "Force a fixed disturb curriculum ratio during evaluate.py, e.g. 0.0 to 1.0 for run-only disturb sweeps."},
         {"name": "--record_reward_terms", "action": "store_true", "default": False, "help": "Write per-preset reward term diagnostics in evaluate.py."},
+        {"name": "--record_termination_reasons", "action": "store_true", "default": False, "help": "Write per-preset termination reason diagnostics in evaluate.py."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(

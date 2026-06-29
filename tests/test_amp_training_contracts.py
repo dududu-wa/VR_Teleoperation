@@ -261,6 +261,25 @@ def test_evaluate_dtw_is_opt_in():
     assert "if compute_dtw:" in source
 
 
+def test_evaluate_can_record_termination_reason_diagnostics():
+    evaluate_source = (ROOT_DIR / "legged_gym/scripts/evaluate.py").read_text(
+        encoding="utf-8"
+    )
+    helpers_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--record_termination_reasons" in helpers_source
+    assert "TERMINATION_REASON_FIELDS" in evaluate_source
+    assert "_detect_termination_reason" in evaluate_source
+    assert "_summarize_termination_reasons" in evaluate_source
+    assert "termination_reason" in evaluate_source
+    assert "termination_detail" in evaluate_source
+    assert 'getattr(env, "body_names", [])' in evaluate_source
+    assert "termination_reasons.csv" in evaluate_source
+    assert "termination_reasons.json" in evaluate_source
+
+
 def test_evaluate_supports_forced_disturbance_sweep_metrics():
     helper_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
         encoding="utf-8"
@@ -583,6 +602,7 @@ if __name__ == "__main__":
     test_amp_ppo_resolves_expert_ids_before_collector_mutation()
     test_evaluate_uses_routed_amp_discriminator()
     test_evaluate_dtw_is_opt_in()
+    test_evaluate_can_record_termination_reason_diagnostics()
     test_evaluate_supports_forced_disturbance_sweep_metrics()
     test_expert_hard_gate_ablation_json_and_docs_contract()
     test_interrupt_disturb_release_can_bypass_terrain_curriculum_gate()

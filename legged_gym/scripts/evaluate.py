@@ -81,6 +81,24 @@ REWARD_TERM_FIELDS = [
 ]
 
 
+TERMINATION_REASON_FIELDS = [
+    "run_id",
+    "task_name",
+    "ablation_name",
+    "seed",
+    "checkpoint",
+    "preset_name",
+    "termination_reason",
+    "termination_detail",
+    "num_episodes",
+    "episode_seconds",
+    "count",
+    "rate",
+    "mean_survival_time_s",
+    "notes",
+]
+
+
 def _build_command_tensor(env, command_values):
     command_tensor = torch.zeros(env.commands.shape[1], device=env.device, dtype=env.commands.dtype)
     values = torch.tensor(command_values, device=env.device, dtype=env.commands.dtype)
@@ -339,6 +357,41 @@ def _init_traj_bufs(num_envs):
     }
 
 
+def _detect_termination_reason(env, infos, env_id):
+    """Classify a completed episode using the same buffers as check_termination()."""
+    idx = int(env_id.item()) if torch.is_tensor(env_id) else int(env_id)
+    time_outs = infos.get(
+        "time_outs",
+        torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
+    )
+    if bool(time_outs[idx].item()):
+        return "timeout", ""
+
+    if hasattr(env, "termination_contact_indices") and len(env.termination_contact_indices) > 0:
+        contact_norm = torch.norm(
+            env.contact_forces[idx, env.termination_contact_indices, :],
+            dim=-1,
+        )
+        if bool(torch.any(contact_norm > 1.0).item()):
+            max_contact = int(torch.argmax(contact_norm).item())
+            body_index = int(env.termination_contact_indices[max_contact].item())
+            body_names = getattr(env, "body_names", [])
+            body_name = body_names[body_index] if body_index < len(body_names) else str(body_index)
+            return "contact", body_name
+
+    if hasattr(env, "large_ori_buf") and bool(env.large_ori_buf[idx].item()):
+        return "orientation", "roll_pitch"
+
+    base_height_target = getattr(getattr(env.cfg, "rewards", None), "base_height_target", None)
+    if base_height_target is not None:
+        # Height is currently diagnostic only: check_termination() does not
+        # reset on this threshold, but it helps explain near-fall rollouts.
+        if float(env.root_states[idx, 2].item()) < float(base_height_target) - 0.20:
+            return "base_height", ""
+
+    return "unknown", ""
+
+
 # ---------------------------------------------------------------------------
 # DTW helpers
 # ---------------------------------------------------------------------------
@@ -570,7 +623,7 @@ def _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values
             disc_ref_values.extend(ref_logit.detach().cpu().numpy().tolist())
 
 
-def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute_dtw, reward_acc=None):
+def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute_dtw, reward_acc=None, record_termination_reasons=False):
     done_ids = dones.nonzero(as_tuple=False).flatten()
     if len(done_ids) == 0:
         return done_ids
@@ -595,6 +648,11 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute
                 name: float(values[idx].item())
                 for name, values in reward_acc.items()
             }
+        termination_reason, termination_detail = (
+            _detect_termination_reason(env, infos, env_id)
+            if record_termination_reasons
+            else (None, None)
+        )
 
         episode_rows.append(
             {
@@ -614,6 +672,8 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute
                 "joint_dtw": joint_dtw,
                 "key_body_dtw": kb_dtw,
                 "reward_terms": reward_terms,
+                "termination_reason": termination_reason,
+                "termination_detail": termination_detail,
             }
         )
     _reset_accumulators(acc, done_ids)
@@ -711,7 +771,52 @@ def _summarize_reward_terms(args, train_cfg, preset_name, episode_rows):
     return rows
 
 
-def _write_outputs(rows, output_dir, reward_term_rows=None):
+def _summarize_termination_reasons(args, train_cfg, preset_name, episode_rows):
+    override_name = "none"
+    if args.cfg_override_json:
+        override_name = Path(args.cfg_override_json).stem
+    total = max(len(episode_rows), 1)
+    reasons = sorted(
+        {
+            (
+                row.get("termination_reason", "unknown") or "unknown",
+                row.get("termination_detail", "") or "",
+            )
+            for row in episode_rows
+        }
+    )
+    rows = []
+    for reason, detail in reasons:
+        matching = [
+            row
+            for row in episode_rows
+            if (row.get("termination_reason", "unknown") or "unknown") == reason
+            and (row.get("termination_detail", "") or "") == detail
+        ]
+        rows.append(
+            {
+                "run_id": f"{args.task}_{override_name}_{preset_name}_{reason}_{detail or 'none'}",
+                "task_name": args.task,
+                "ablation_name": override_name,
+                "seed": getattr(train_cfg, "seed", None),
+                "checkpoint": args.checkpoint,
+                "preset_name": preset_name,
+                "termination_reason": reason,
+                "termination_detail": detail,
+                "num_episodes": len(episode_rows),
+                "episode_seconds": args.episode_seconds,
+                "count": len(matching),
+                "rate": float(len(matching)) / float(total),
+                "mean_survival_time_s": _mean_or_none(
+                    [row["survival_time_s"] for row in matching]
+                ),
+                "notes": "",
+            }
+        )
+    return rows
+
+
+def _write_outputs(rows, output_dir, reward_term_rows=None, termination_reason_rows=None):
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "metrics.json", "w", encoding="utf-8") as f:
@@ -728,6 +833,14 @@ def _write_outputs(rows, output_dir, reward_term_rows=None):
             writer = csv.DictWriter(f, fieldnames=REWARD_TERM_FIELDS)
             writer.writeheader()
             for row in reward_term_rows:
+                writer.writerow(row)
+    if termination_reason_rows is not None:
+        with open(out_dir / "termination_reasons.json", "w", encoding="utf-8") as f:
+            json.dump(termination_reason_rows, f, indent=2)
+        with open(out_dir / "termination_reasons.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=TERMINATION_REASON_FIELDS)
+            writer.writeheader()
+            for row in termination_reason_rows:
                 writer.writerow(row)
 
 
@@ -749,6 +862,7 @@ def evaluate(args):
 
     rows = []
     reward_term_rows = []
+    termination_reason_rows = []
     for preset_name in _selected_presets(args):
         start_time = time.time()
         with torch.inference_mode():
@@ -788,6 +902,7 @@ def evaluate(args):
                     traj_bufs,
                     args.compute_dtw,
                     reward_acc,
+                    args.record_termination_reasons,
                 )
                 _apply_preset(env, preset_name, done_ids)
                 _apply_eval_disturbance(env, args, done_ids)
@@ -815,11 +930,21 @@ def evaluate(args):
             reward_term_rows.extend(
                 _summarize_reward_terms(args, train_cfg, preset_name, preset_episode_rows)
             )
+        if args.record_termination_reasons:
+            termination_reason_rows.extend(
+                _summarize_termination_reasons(
+                    args,
+                    train_cfg,
+                    preset_name,
+                    preset_episode_rows,
+                )
+            )
 
     _write_outputs(
         rows,
         args.output_dir,
         reward_term_rows if args.record_reward_terms else None,
+        termination_reason_rows if args.record_termination_reasons else None,
     )
     print(f"Saved evaluation metrics to {os.path.abspath(args.output_dir)}")
 
