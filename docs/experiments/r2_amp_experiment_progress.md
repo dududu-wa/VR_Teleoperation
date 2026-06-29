@@ -954,9 +954,9 @@ Interpretation:
 Recommended next work:
 
 1. Use `command_hold_eval_manifold_conservative_disturb_release` `model_8000.pt` as the corrected local diagnostic anchor, not `model_best_task.pt`.
-2. Run a corrected reward-term or short rollout diagnostic for `jump` to separate termination, gait/clearance, and tracking failure under the now-correct task-return semantics.
-3. Run a focused robustness sweep from `model_8000.pt` with `--eval_disturb_ratio` on `jump` and `run`, because the corrected no-disturb evaluation is good enough to justify testing disturbance sensitivity.
-4. If another training run is needed, warm-start from conservative `8000` only after corrected jump/robustness diagnostics and visual/play checks; do not start another all-profile staged run from scratch with the current gate.
+2. Completed on 2026-06-29: corrected `jump` reward-term diagnostic separated termination, gait/clearance, smoothness, and tracking contributions under the corrected task-return semantics.
+3. Completed on 2026-06-29: focused robustness sweep from `model_8000.pt` with `--eval_disturb_ratio` on `jump` and `run`.
+4. If another training run is needed, warm-start from conservative `8000` only after visual/play checks; do not start another all-profile staged run from scratch with the current gate.
 
 ### Follow-up Diagnostic Implementation - 2026-06-29
 
@@ -1023,6 +1023,87 @@ Code conclusion:
 - This keeps rollout disturbance-free while preserving `R2InterruptRobot`'s training reward contract for interrupt arm joints.
 - The corrected evaluator writes interrupt buffers under `torch.inference_mode()` because `env.reset()` runs in inference mode and may make `disturb_actions` an inference tensor.
 - Completed next step: full seven-preset conservative `8000` and `best` evaluations were rerun in `outputs/eval/June29_Jun25_0_eval_manifold_conservative_8000_corrected` and `outputs/eval/June29_Jun25_0_eval_manifold_conservative_best_corrected`; the aggregate tables above now use those rows for the corrected interpretation.
+
+### Jump Reward-Term and Disturbance Sweep - 2026-06-29
+
+Hypothesis: the conservative `model_8000.pt` checkpoint is mostly command-capable under corrected no-disturb evaluation, but its remaining `jump` weakness is a stability / jump-shape problem that should become worse under fixed disturbance ratios.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June29_Jun25_0_conservative_8000_jump_reward_terms_corrected
+outputs/eval/June29_Jun25_0_conservative_8000_disturb_sweep
+outputs/eval/June29_Jun25_0_conservative_8000_disturb_sweep/summary_metrics.csv
+```
+
+The `jump_reward_terms_corrected` directory contains `metrics.csv`, `metrics.json`, `reward_terms.csv`, and `reward_terms.json`. Each disturbance-sweep subdirectory contains `metrics.csv`, `metrics.json`, and the preserved `eval.log`.
+
+Reward-term facts for corrected no-disturb `jump`, 64 episodes:
+
+| metric | value |
+|---|---:|
+| task return | 15.75 |
+| fall rate | 0.578 |
+| survival s | 6.50 |
+| lin rmse | 0.305 |
+| yaw rmse | 0.429 |
+| style reward | 0.00540 |
+| policy logit | -0.653 |
+| disc gap | 1.534 |
+| torque L2 | 31322 |
+| action-rate L2 | 3.284 |
+| dof-acc L2 | 240472 |
+
+Largest negative `jump` reward terms by mean episode return:
+
+| reward term | return contribution |
+|---|---:|
+| `hopping_symmetry` | -2.379 |
+| `termination` | -2.312 |
+| `feet_clearance_cmd_linear` | -2.167 |
+| `torques` | -1.001 |
+| `tracking_contacts_shaped_vel` | -0.730 |
+| `stand_still` | -0.711 |
+| `waist_control` | -0.698 |
+| `ang_vel_xy` | -0.569 |
+| `base_height` | -0.552 |
+
+Largest positive `jump` reward terms:
+
+| reward term | return contribution |
+|---|---:|
+| `tracking_ang_vel` | 16.073 |
+| `tracking_lin_vel` | 10.834 |
+| `alive` | 1.300 |
+
+Focused disturbance sweep from conservative `8000`, 64 episodes per row:
+
+| preset | disturb ratio | task return | fall rate | survival s | lin rmse | yaw rmse | style reward | disc gap | torque L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | 0.00 | 20.03 | 0.406 | 7.42 | 0.279 | 0.396 | 0.00558 | 1.535 | 31025 |
+| `jump` | 0.25 | 17.74 | 0.375 | 7.61 | 0.389 | 0.446 | 0.00527 | 1.562 | 30203 |
+| `jump` | 0.50 | 13.77 | 0.469 | 7.22 | 0.440 | 0.502 | 0.00511 | 1.569 | 29662 |
+| `jump` | 0.75 | 13.99 | 0.484 | 6.94 | 0.448 | 0.530 | 0.00499 | 1.573 | 28571 |
+| `jump` | 1.00 | -8.39 | 1.000 | 2.49 | 0.722 | 1.221 | 0.00485 | 1.585 | 26665 |
+| `run` | 0.00 | 20.23 | 0.234 | 7.79 | 0.602 | 0.682 | 0.00313 | 1.718 | 38004 |
+| `run` | 0.25 | 23.04 | 0.172 | 8.67 | 0.701 | 0.643 | 0.00334 | 1.715 | 37445 |
+| `run` | 0.50 | 18.39 | 0.266 | 7.94 | 0.825 | 0.749 | 0.00301 | 1.725 | 35978 |
+| `run` | 0.75 | 22.65 | 0.188 | 8.41 | 0.735 | 0.605 | 0.00332 | 1.712 | 36515 |
+| `run` | 1.00 | -2.11 | 0.750 | 3.50 | 1.487 | 1.425 | 0.00280 | 1.719 | 30393 |
+
+Facts:
+
+- `jump` remains weak even without applied disturbance in this 64-episode diagnostic: fall rate is `0.578` in the reward-term run and `0.406` in the separate sweep baseline. The two runs differ by random rollout sampling, but both identify `jump` as the weakest preset.
+- `jump` failure is not primarily a failure to receive tracking reward. `tracking_ang_vel` and `tracking_lin_vel` are the largest positive terms, while the main negative terms are `hopping_symmetry`, `termination`, `feet_clearance_cmd_linear`, torque, contact velocity shaping, and posture/control penalties.
+- Fixed disturbance confirms a threshold effect. `jump` degrades gradually through ratios `0.25` to `0.75`, then collapses at `1.00` with `fall_rate=1.000` and survival `2.49s`.
+- `run` is more tolerant than `jump` through ratio `0.75`, but also collapses under full disturbance: fall rate rises to `0.750`, survival drops to `3.50s`, and lin/yaw RMSE roughly doubles.
+- AMP discriminator metrics do not explain the collapse by themselves. `disc_gap` changes only mildly across the sweep; the sharper signal is task robustness and termination under disturbance.
+
+Interpretation:
+
+- Do not start another broad from-scratch staged-release run yet. The current evidence says the model needs a profile-specific stability fix, especially for jump shape/termination, before full disturbance pressure is meaningful.
+- The next code/config change should be smaller than a new full training recipe: either add a jump-focused evaluation/play diagnostic with visual rollout capture, or warm-start conservative `8000` with a narrow jump-stability objective and disturbance capped below `1.0`.
+- A defensible warm-start candidate would keep eval-manifold sampling, cap disturbance at `0.75` or lower initially, and specifically reduce `jump` termination / clearance / hopping-symmetry failures before attempting full disturbance again.
 
 ## Maintenance Rules
 
