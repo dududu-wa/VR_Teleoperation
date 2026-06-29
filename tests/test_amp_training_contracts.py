@@ -272,9 +272,22 @@ def test_evaluate_supports_forced_disturbance_sweep_metrics():
     assert "survival_time_mean_s" in eval_source
     assert "_apply_eval_disturbance(env, args, done_ids)" in eval_source
     assert "_disable_eval_disturbance(env, env_ids)" in eval_source
+    tree = ast.parse(eval_source)
+    disable_fn = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_disable_eval_disturbance"
+    )
+    assert any(
+        isinstance(node, ast.With)
+        and "torch.inference_mode" in ast.get_source_segment(eval_source, node)
+        for node in ast.walk(disable_fn)
+    )
     assert "env.disturb_masks[env_ids] = False" in eval_source
     assert "env.interrupt_mask[env_ids] = False" in eval_source
-    assert "env.use_disturb = bool(getattr(cfg_disturb" in eval_source
+    assert "env.use_disturb = bool(" in eval_source
+    assert 'getattr(cfg_disturb, "use_disturb"' in eval_source
     assert "env.disturb_rad_curriculum[env_ids] = float(args.eval_disturb_ratio)" in eval_source
 
 

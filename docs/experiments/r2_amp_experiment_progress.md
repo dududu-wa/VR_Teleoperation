@@ -893,11 +893,13 @@ Evaluation outputs generated on 2026-06-29:
 ```text
 E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_conservative_best
 E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_conservative_8000
+E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_conservative_best_corrected
+E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_conservative_8000_corrected
 E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_staged_best
 E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_staged_8000
 ```
 
-Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.csv` has 7 rows, one row per fixed preset. DTW was not computed because `--compute_dtw` was not passed.
+Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.csv` has 7 rows, one row per fixed preset. DTW was not computed because `--compute_dtw` was not passed. The `*_corrected` conservative outputs use the fixed default evaluator that clears applied interrupt masks but preserves `R2InterruptRobot` reward masking semantics.
 
 ### Training Artifacts
 
@@ -914,6 +916,8 @@ Higher `avg task return` is better. Lower `avg fall rate` is better.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | `command_hold_eval_manifold_conservative_disturb_release` | `best` | -8.50 | 0.888 | 159.0 | 3.18 | 0.672 | 0.874 | 0.0050 | -0.741 | 1.626 | 25276 | 3.559 | 391820 |
 | `command_hold_eval_manifold_conservative_disturb_release` | `8000` | -45.43 | 0.143 | 451.5 | 9.03 | 0.314 | 0.405 | 0.0043 | -0.758 | 1.654 | 32340 | 2.614 | 231309 |
+| `command_hold_eval_manifold_conservative_disturb_release` | `best_corrected` | 1.94 | 0.886 | 155.9 | 3.12 | 0.578 | 0.814 | 0.0049 | -0.747 | 1.632 | 25717 | 3.611 | 384494 |
+| `command_hold_eval_manifold_conservative_disturb_release` | `8000_corrected` | 30.02 | 0.167 | 443.0 | 8.86 | 0.317 | 0.413 | 0.0043 | -0.760 | 1.657 | 32088 | 2.634 | 240126 |
 | `command_hold_eval_manifold_staged_disturb_release` | `best` | -6.75 | 0.737 | 203.9 | 4.08 | 0.605 | 0.859 | 0.0035 | -0.823 | 1.587 | 12236 | 1.387 | 245486 |
 | `command_hold_eval_manifold_staged_disturb_release` | `8000` | -993.79 | 1.000 | 3.1 | 0.06 | 1.761 | 3.201 | 0.0065 | -0.159 | 1.059 | 224595 | 3482843 | 7026349 |
 
@@ -923,31 +927,36 @@ Higher `avg task return` is better. Lower `avg fall rate` is better.
 |---|---:|---|---|
 | `command_hold_eval_manifold_conservative_disturb_release` | `best` | `run`, task `-11.07`, fall `1.000`, survival `1.31s` | `stand`, `run`, `jump`, `turn_left`, and `strafe_right`, fall `1.000` |
 | `command_hold_eval_manifold_conservative_disturb_release` | `8000` | `jump`, task `-49.98`, fall `0.406`, survival `7.61s` | `jump`, fall `0.406`; `stand`, fall `0.281` |
+| `command_hold_eval_manifold_conservative_disturb_release` | `best_corrected` | `jump`, task `-1.87`, fall `1.000`, survival `2.20s` | `stand`, `walk_slow`, `jump`, `turn_left`, and `strafe_right`, fall `1.000` |
+| `command_hold_eval_manifold_conservative_disturb_release` | `8000_corrected` | `jump`, task `20.86`, fall `0.391`, survival `7.99s` | `jump`, fall `0.391`; `stand`, fall `0.219`; `run`, fall `0.203` |
 | `command_hold_eval_manifold_staged_disturb_release` | `best` | `strafe_right`, task `-9.08`, fall `1.000`, survival `3.00s` | `stand`, `walk_slow`, `jump`, `turn_left`, and `strafe_right`, fall `1.000` |
 | `command_hold_eval_manifold_staged_disturb_release` | `8000` | `walk_fast`, task `-1089.95`, fall `1.000`, survival `0.04s` | all seven presets, fall `1.000` |
 
 ### Supported Conclusion
 
-The Jun25_0 results do not support either run as a direct continuation policy.
+The corrected Jun25_0 results change the conservative-run interpretation: `model_8000.pt` is the only useful continuation candidate in this batch, but it is not a final policy because `jump` still has high fall rate. The staged rerun remains a failure.
 
 Facts:
 
-- The conservative run reached the intended disturbance cap (`staged_disturb_level=0.7500`) and had a healthy-looking training tail (`task reward=21.04`, `episode length=932.12`, staged-window fall rate `0.0731`). However, fixed-preset evaluation shows a tradeoff rather than a clean solution: `model_best_task.pt` has relatively high task return (`-8.50`) but average fall rate `0.888`, while `model_8000.pt` reduces average fall rate to `0.143` and survival rises to `9.03s` but task return collapses to `-45.43`.
+- The conservative run reached the intended disturbance cap (`staged_disturb_level=0.7500`) and had a healthy-looking training tail (`task reward=21.04`, `episode length=932.12`, staged-window fall rate `0.0731`). Under the corrected evaluator, `model_8000.pt` has avg task return `30.02`, avg fall rate `0.167`, and survival `8.86s`; the old `-45.43` task return was a reward-semantics artifact.
+- `model_best_task.pt` remains unusable after correction: avg task return is only `1.94`, avg fall rate is `0.886`, and five presets still have `fall_rate=1.000`.
+- `model_8000.pt` is still not solved. Its worst preset is `jump`, with task `20.86`, fall `0.391`, and survival `7.99s`; `stand` and `run` also remain above a `0.20` fall rate in this corrected 64-episode run.
 - The staged rerun is a clear failure. It briefly reached stage 1 around training iteration `604`, regressed back to stage 0 around iteration `642`, and ended with `episode length=2.00`, `task reward=-2183.01`, and fixed-preset `fall_rate=1.000` for all seven presets.
 - The first eval-manifold run remains the best evidence that matching the evaluation command manifold helps run/walk survival, but the Jun25_0 rerun shows that all-profile staged monitoring plus adaptive regression is not stable enough from scratch.
 
 Interpretation:
 
 - Keep eval-manifold sampling as a useful diagnostic idea, but do not treat the current staged-gate implementation as solved.
-- Superseded by the local reward-semantics diagnostic below: the conservative `8000` negative task return was largely caused by default evaluation switching off `R2InterruptRobot` reward masking semantics, not by locomotion tracking alone.
-- The next useful step is not another broader from-scratch staged-release JSON. First isolate whether the fixed-preset low return comes from reward scale/termination semantics for `stand` and `jump`, from profile sampling weights/jitter, or from disturbance pressure.
+- Treat conservative `8000` as the current best Jun25_0 checkpoint for local diagnostics. It is much stronger than the old table implied, but the remaining failure is robustness, especially `jump`, not a broad negative-return objective collapse.
+- Do not continue `model_best_task.pt`; the training best-task checkpoint is not the fixed-preset best policy here.
+- The next useful step is not another broader from-scratch staged-release JSON. First run local corrected-policy diagnostics around `jump` stability and no-disturb-to-disturb robustness.
 
 Recommended next work:
 
-1. Regenerate the Jun25_0 aggregate fixed-preset evaluations with the corrected default evaluator before drawing new policy conclusions from task return.
-2. Treat the reward-component diagnostic as completed: the old low return was dominated by interrupt-arm `dof_pos_limits`, not by the leg tracking terms.
-3. Do not reduce `stand` / `jump` sampling weights based on the old negative return. First compare all seven presets under the corrected no-disturb evaluation semantics.
-4. If another training run is needed, warm-start from the stronger June19 `scratch_command_hold_8000` or from conservative `8000` only after corrected all-preset eval and visual/play checks; do not start another all-profile staged run from scratch with the current gate.
+1. Use `command_hold_eval_manifold_conservative_disturb_release` `model_8000.pt` as the corrected local diagnostic anchor, not `model_best_task.pt`.
+2. Run a corrected reward-term or short rollout diagnostic for `jump` to separate termination, gait/clearance, and tracking failure under the now-correct task-return semantics.
+3. Run a focused robustness sweep from `model_8000.pt` with `--eval_disturb_ratio` on `jump` and `run`, because the corrected no-disturb evaluation is good enough to justify testing disturbance sensitivity.
+4. If another training run is needed, warm-start from conservative `8000` only after corrected jump/robustness diagnostics and visual/play checks; do not start another all-profile staged run from scratch with the current gate.
 
 ### Follow-up Diagnostic Implementation - 2026-06-29
 
@@ -1012,7 +1021,8 @@ Code conclusion:
 
 - `evaluate.py` default no-disturb evaluation now clears `disturb_masks` / `interrupt_mask` and sets disturbance strength to zero, but no longer flips `env.use_disturb=False`.
 - This keeps rollout disturbance-free while preserving `R2InterruptRobot`'s training reward contract for interrupt arm joints.
-- Next local step: rerun the full seven-preset conservative `8000` and `best` evaluations with the corrected default evaluator, then update the aggregate tables before making any new training recommendation.
+- The corrected evaluator writes interrupt buffers under `torch.inference_mode()` because `env.reset()` runs in inference mode and may make `disturb_actions` an inference tensor.
+- Completed next step: full seven-preset conservative `8000` and `best` evaluations were rerun in `outputs/eval/June29_Jun25_0_eval_manifold_conservative_8000_corrected` and `outputs/eval/June29_Jun25_0_eval_manifold_conservative_best_corrected`; the aggregate tables above now use those rows for the corrected interpretation.
 
 ## Maintenance Rules
 

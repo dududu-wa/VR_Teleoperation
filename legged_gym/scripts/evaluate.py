@@ -136,19 +136,25 @@ def _validate_eval_disturb_ratio(args):
 def _disable_eval_disturbance(env, env_ids):
     """Clear applied interrupts while preserving the training reward contract."""
     cfg_disturb = getattr(getattr(env, "cfg", None), "disturb", None)
-    env.use_disturb = bool(getattr(cfg_disturb, "use_disturb", getattr(env, "use_disturb", False)))
-    if hasattr(env, "noise_disturb_mode"):
-        env.noise_disturb_mode[env_ids] = False
-    if hasattr(env, "disturb_isnoise"):
-        env.disturb_isnoise[env_ids] = False
-    if hasattr(env, "disturb_rad_curriculum"):
-        env.disturb_rad_curriculum[env_ids] = 0.0
-    if hasattr(env, "disturb_masks"):
-        env.disturb_masks[env_ids] = False
-    if hasattr(env, "interrupt_mask"):
-        env.interrupt_mask[env_ids] = False
-    if hasattr(env, "disturb_actions"):
-        env.disturb_actions[env_ids] = 0.0
+    env.use_disturb = bool(
+        getattr(cfg_disturb, "use_disturb", getattr(env, "use_disturb", False))
+    )
+    # env.reset() runs under inference_mode in evaluate.py, so interrupt
+    # buffers touched during reset may be inference tensors. Mutate them under
+    # the same mode while keeping the rollout disturbance-free.
+    with torch.inference_mode():
+        if hasattr(env, "noise_disturb_mode"):
+            env.noise_disturb_mode[env_ids] = False
+        if hasattr(env, "disturb_isnoise"):
+            env.disturb_isnoise[env_ids] = False
+        if hasattr(env, "disturb_rad_curriculum"):
+            env.disturb_rad_curriculum[env_ids] = 0.0
+        if hasattr(env, "disturb_masks"):
+            env.disturb_masks[env_ids] = False
+        if hasattr(env, "interrupt_mask"):
+            env.interrupt_mask[env_ids] = False
+        if hasattr(env, "disturb_actions"):
+            env.disturb_actions[env_ids] = 0.0
 
 
 def _apply_eval_disturbance(env, args, env_ids=None):
@@ -174,32 +180,37 @@ def _apply_eval_disturbance(env, args, env_ids=None):
         return
 
     env.use_disturb = True
-    if hasattr(env, "noise_disturb_mode"):
-        env.noise_disturb_mode[env_ids] = True
-    if hasattr(env, "disturb_isnoise"):
-        env.disturb_isnoise[env_ids] = True
-    if hasattr(env, "disturb_rad_curriculum"):
-        env.disturb_rad_curriculum[env_ids] = float(args.eval_disturb_ratio)
-    if hasattr(env, "disturb_masks"):
-        env.disturb_masks[env_ids] = float(args.eval_disturb_ratio) > 0.0
-    if hasattr(env, "interrupt_mask"):
-        if getattr(env, "disturb_replace_action", False):
-            env.interrupt_mask[env_ids] = env.disturb_masks[env_ids]
-        else:
-            env.interrupt_mask[env_ids] = (
-                env.disturb_masks[env_ids] * (~env.disturb_isnoise[env_ids])
-            )
-    if float(args.eval_disturb_ratio) > 0.0 and hasattr(env, "disturb_actions"):
-        if getattr(env, "disturb_uniform", False) and hasattr(env, "Uniform_disturb_resample"):
-            sampled_disturb = env.Uniform_disturb_resample()
-        elif hasattr(env, "Gaussian_disturb_resample"):
-            sampled_disturb = env.Gaussian_disturb_resample()
-        else:
-            sampled_disturb = None
-        if sampled_disturb is not None:
-            # Only refresh reset environments so a robustness sweep does not
-            # change the disturbance target of episodes that are still active.
-            env.disturb_actions[env_ids] = sampled_disturb[env_ids] / env.cfg.control.action_scale
+    with torch.inference_mode():
+        if hasattr(env, "noise_disturb_mode"):
+            env.noise_disturb_mode[env_ids] = True
+        if hasattr(env, "disturb_isnoise"):
+            env.disturb_isnoise[env_ids] = True
+        if hasattr(env, "disturb_rad_curriculum"):
+            env.disturb_rad_curriculum[env_ids] = float(args.eval_disturb_ratio)
+        if hasattr(env, "disturb_masks"):
+            env.disturb_masks[env_ids] = float(args.eval_disturb_ratio) > 0.0
+        if hasattr(env, "interrupt_mask"):
+            if getattr(env, "disturb_replace_action", False):
+                env.interrupt_mask[env_ids] = env.disturb_masks[env_ids]
+            else:
+                env.interrupt_mask[env_ids] = (
+                    env.disturb_masks[env_ids] * (~env.disturb_isnoise[env_ids])
+                )
+        if float(args.eval_disturb_ratio) > 0.0 and hasattr(env, "disturb_actions"):
+            if getattr(env, "disturb_uniform", False) and hasattr(
+                env, "Uniform_disturb_resample"
+            ):
+                sampled_disturb = env.Uniform_disturb_resample()
+            elif hasattr(env, "Gaussian_disturb_resample"):
+                sampled_disturb = env.Gaussian_disturb_resample()
+            else:
+                sampled_disturb = None
+            if sampled_disturb is not None:
+                # Only refresh reset environments so a robustness sweep does
+                # not change active episodes' disturbance targets.
+                env.disturb_actions[env_ids] = (
+                    sampled_disturb[env_ids] / env.cfg.control.action_scale
+                )
 
 
 def _selected_presets(args):
