@@ -461,6 +461,10 @@ class R2Robot(BaseTask):
             adds each terms to the episode sums and to the total reward
         """
         self.rew_buf[:] = 0.
+        if self.record_reward_terms:
+            # Evaluation diagnostics read this before resets clear episode_sums;
+            # leave it disabled in training to avoid per-step tensor clones.
+            self.last_reward_terms = {}
         if not self.cfg.rewards.penalize_curriculum:
             self.curriculum_scale = 1
         for i in range(len(self.reward_functions)):
@@ -470,6 +474,11 @@ class R2Robot(BaseTask):
                 rew *= self.curriculum_scale 
             self.rew_buf += rew
             self.episode_sums[name] += rew
+            if self.record_reward_terms:
+                self.last_reward_terms[name] = (
+                    rew.detach().clone() if torch.is_tensor(rew)
+                    else torch.full_like(self.rew_buf, float(rew))
+                )
             if name in self.command_sums.keys():
                 if name in ['tracking_contacts_shaped_force', 'tracking_contacts_shaped_vel']:
                     self.command_sums[name] += self.reward_scales[name] + rew
@@ -483,6 +492,11 @@ class R2Robot(BaseTask):
             rew = self._reward_termination() * self.reward_scales["termination"]
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
+            if self.record_reward_terms:
+                self.last_reward_terms["termination"] = (
+                    rew.detach().clone() if torch.is_tensor(rew)
+                    else torch.full_like(self.rew_buf, float(rew))
+                )
     
     def _update_terrain_curriculum(self, env_ids):
         """ Implements the game-inspired curriculum.
@@ -1181,6 +1195,8 @@ class R2Robot(BaseTask):
         # initialize some data used later on
         self.common_step_counter = 0
         self.extras = {}
+        self.record_reward_terms = False
+        self.last_reward_terms = {}
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))

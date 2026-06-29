@@ -256,7 +256,8 @@ def test_evaluate_dtw_is_opt_in():
         encoding="utf-8"
     )
     assert "compute_dtw" in source
-    assert "_finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, args.compute_dtw)" in source
+    assert "args.compute_dtw," in source
+    assert "reward_acc," in source
     assert "if compute_dtw:" in source
 
 
@@ -271,6 +272,27 @@ def test_evaluate_supports_forced_disturbance_sweep_metrics():
     assert "survival_time_mean_s" in eval_source
     assert "_apply_eval_disturbance(env, args, done_ids)" in eval_source
     assert "env.disturb_rad_curriculum[env_ids] = float(args.eval_disturb_ratio)" in eval_source
+
+
+def test_evaluate_can_record_reward_term_diagnostics():
+    helper_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
+        encoding="utf-8"
+    )
+    eval_source = (ROOT_DIR / "legged_gym/scripts/evaluate.py").read_text(
+        encoding="utf-8"
+    )
+    env_source = (ROOT_DIR / "legged_gym/envs/r2/r2.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--record_reward_terms" in helper_source
+    assert "reward_terms.csv" in eval_source
+    assert "reward_terms.json" in eval_source
+    assert "_collect_reward_terms" in eval_source
+    assert "_summarize_reward_terms" in eval_source
+    assert "env.record_reward_terms = bool(args.record_reward_terms)" in eval_source
+    assert "self.record_reward_terms" in env_source
+    assert "self.last_reward_terms" in env_source
 
 
 def test_expert_hard_gate_ablation_json_and_docs_contract():

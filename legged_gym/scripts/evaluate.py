@@ -64,6 +64,23 @@ METRIC_FIELDS = [
 ]
 
 
+REWARD_TERM_FIELDS = [
+    "run_id",
+    "task_name",
+    "ablation_name",
+    "seed",
+    "checkpoint",
+    "preset_name",
+    "reward_term",
+    "num_episodes",
+    "episode_seconds",
+    "reward_return_mean",
+    "reward_per_step_mean",
+    "reward_per_second_mean",
+    "notes",
+]
+
+
 def _build_command_tensor(env, command_values):
     command_tensor = torch.zeros(env.commands.shape[1], device=env.device, dtype=env.commands.dtype)
     values = torch.tensor(command_values, device=env.device, dtype=env.commands.dtype)
@@ -207,6 +224,31 @@ def _init_accumulators(num_envs, device):
 
 def _reset_accumulators(acc, env_ids):
     for value in acc.values():
+        value[env_ids] = 0.0
+
+
+def _init_reward_term_accumulators(env):
+    if not getattr(env, "record_reward_terms", False):
+        return None
+    zeros = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    reward_names = sorted(getattr(env, "reward_scales", {}).keys())
+    return {name: zeros.clone() for name in reward_names}
+
+
+def _collect_reward_terms(env, reward_acc):
+    if reward_acc is None:
+        return
+    for name, values in getattr(env, "last_reward_terms", {}).items():
+        values = values.view(-1)
+        if name not in reward_acc:
+            reward_acc[name] = torch.zeros_like(values)
+        reward_acc[name] += values
+
+
+def _reset_reward_term_accumulators(reward_acc, env_ids):
+    if reward_acc is None:
+        return
+    for value in reward_acc.values():
         value[env_ids] = 0.0
 
 
@@ -495,7 +537,7 @@ def _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values
             disc_ref_values.extend(ref_logit.detach().cpu().numpy().tolist())
 
 
-def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute_dtw):
+def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute_dtw, reward_acc=None):
     done_ids = dones.nonzero(as_tuple=False).flatten()
     if len(done_ids) == 0:
         return done_ids
@@ -514,6 +556,12 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute
             )
         else:
             joint_dtw, kb_dtw = None, None
+        reward_terms = {}
+        if reward_acc is not None:
+            reward_terms = {
+                name: float(values[idx].item())
+                for name, values in reward_acc.items()
+            }
 
         episode_rows.append(
             {
@@ -532,9 +580,11 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute
                 "survival_time_s": steps * float(env.dt),
                 "joint_dtw": joint_dtw,
                 "key_body_dtw": kb_dtw,
+                "reward_terms": reward_terms,
             }
         )
     _reset_accumulators(acc, done_ids)
+    _reset_reward_term_accumulators(reward_acc, done_ids)
     _reset_traj_bufs(traj_bufs, done_ids)
     return done_ids
 
@@ -583,7 +633,52 @@ def _summarize_preset(args, train_cfg, preset_name, episode_rows, disc_agent_val
     }
 
 
-def _write_outputs(rows, output_dir):
+def _summarize_reward_terms(args, train_cfg, preset_name, episode_rows):
+    override_name = "none"
+    if args.cfg_override_json:
+        override_name = Path(args.cfg_override_json).stem
+    reward_terms = sorted(
+        {
+            name
+            for row in episode_rows
+            for name in row.get("reward_terms", {}).keys()
+        }
+    )
+    rows = []
+    for reward_term in reward_terms:
+        returns = [
+            row.get("reward_terms", {}).get(reward_term, 0.0)
+            for row in episode_rows
+        ]
+        per_step = [
+            value / max(float(row["episode_length_steps"]), 1.0)
+            for value, row in zip(returns, episode_rows)
+        ]
+        per_second = [
+            value / max(float(args.episode_seconds), 1e-6)
+            for value in returns
+        ]
+        rows.append(
+            {
+                "run_id": f"{args.task}_{override_name}_{preset_name}_{reward_term}",
+                "task_name": args.task,
+                "ablation_name": override_name,
+                "seed": getattr(train_cfg, "seed", None),
+                "checkpoint": args.checkpoint,
+                "preset_name": preset_name,
+                "reward_term": reward_term,
+                "num_episodes": len(episode_rows),
+                "episode_seconds": args.episode_seconds,
+                "reward_return_mean": _mean_or_none(returns),
+                "reward_per_step_mean": _mean_or_none(per_step),
+                "reward_per_second_mean": _mean_or_none(per_second),
+                "notes": "",
+            }
+        )
+    return rows
+
+
+def _write_outputs(rows, output_dir, reward_term_rows=None):
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "metrics.json", "w", encoding="utf-8") as f:
@@ -593,6 +688,14 @@ def _write_outputs(rows, output_dir):
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+    if reward_term_rows is not None:
+        with open(out_dir / "reward_terms.json", "w", encoding="utf-8") as f:
+            json.dump(reward_term_rows, f, indent=2)
+        with open(out_dir / "reward_terms.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=REWARD_TERM_FIELDS)
+            writer.writeheader()
+            for row in reward_term_rows:
+                writer.writerow(row)
 
 
 def evaluate(args):
@@ -606,11 +709,13 @@ def evaluate(args):
     _configure_eval_cfg(env_cfg, args)
 
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+    env.record_reward_terms = bool(args.record_reward_terms)
     train_cfg.runner.resume = True
     runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = runner.get_inference_policy(device=env.device)
 
     rows = []
+    reward_term_rows = []
     for preset_name in _selected_presets(args):
         start_time = time.time()
         with torch.inference_mode():
@@ -621,6 +726,7 @@ def evaluate(args):
             env.standing_envs_mask[:] = False
 
         acc = _init_accumulators(env.num_envs, env.device)
+        reward_acc = _init_reward_term_accumulators(env)
         traj_bufs = _init_traj_bufs(env.num_envs)
         episode_rows = []
         disc_agent_values = []
@@ -637,9 +743,19 @@ def evaluate(args):
                 obs, critic_obs, rewards, dones, infos = env.step(actions)
                 amp_eval_rewards = _compute_amp_eval_rewards(env, runner, infos)
                 _collect_step_metrics(env, rewards, infos, actions, last_actions, prev_dof_vel, acc, amp_eval_rewards)
+                _collect_reward_terms(env, reward_acc)
                 _collect_step_trajectories(env, traj_bufs)
                 _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values)
-                done_ids = _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, args.compute_dtw)
+                done_ids = _finalize_done_envs(
+                    env,
+                    dones,
+                    infos,
+                    acc,
+                    episode_rows,
+                    traj_bufs,
+                    args.compute_dtw,
+                    reward_acc,
+                )
                 _apply_preset(env, preset_name, done_ids)
                 _apply_eval_disturbance(env, args, done_ids)
                 if len(done_ids) > 0:
@@ -650,19 +766,28 @@ def evaluate(args):
                 if len(done_ids) > 0:
                     last_actions[done_ids] = 0.0
 
+        preset_episode_rows = episode_rows[: args.num_episodes]
         rows.append(
             _summarize_preset(
                 args,
                 train_cfg,
                 preset_name,
-                episode_rows[: args.num_episodes],
+                preset_episode_rows,
                 disc_agent_values,
                 disc_ref_values,
                 time.time() - start_time,
             )
         )
+        if args.record_reward_terms:
+            reward_term_rows.extend(
+                _summarize_reward_terms(args, train_cfg, preset_name, preset_episode_rows)
+            )
 
-    _write_outputs(rows, args.output_dir)
+    _write_outputs(
+        rows,
+        args.output_dir,
+        reward_term_rows if args.record_reward_terms else None,
+    )
     print(f"Saved evaluation metrics to {os.path.abspath(args.output_dir)}")
 
 

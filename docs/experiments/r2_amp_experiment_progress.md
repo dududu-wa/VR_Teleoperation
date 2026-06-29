@@ -1,6 +1,6 @@
 ﻿# R2 AMP Experiment Progress
 
-Last updated: 2026-06-25
+Last updated: 2026-06-29
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -474,7 +474,7 @@ Implemented artifacts:
 | artifact | status | purpose |
 | --- | --- | --- |
 | `legged_gym/utils/helpers.py` | implemented | Adds `--eval_disturb_ratio` for fixed disturbance-ratio evaluation. |
-| `legged_gym/scripts/evaluate.py` | implemented | Keeps default evaluation disturb-free, but enables fixed-ratio noise disturbance when `--eval_disturb_ratio` is supplied; adds `survival_time_mean_s` to output metrics. |
+| `legged_gym/scripts/evaluate.py` | implemented, updated 2026-06-29 | Keeps default evaluation disturb-free, but enables fixed-ratio noise disturbance when `--eval_disturb_ratio` is supplied; adds `survival_time_mean_s` to output metrics. With `--record_reward_terms`, it now writes per-preset `reward_terms.csv/json` diagnostics without changing the default `metrics.csv/json` schema. |
 | `scripts/run_run_disturb_sweep.ps1` | implemented, not run | Runs `run` preset at `0%, 20%, 40%, 60%, 80%, 100%` disturbance and aggregates fall rate, survival time, lin/yaw RMSE, and task return. |
 | `legged_gym/envs/r2/r2interrupt_config.py` | implemented, updated 2026-06-25 | Adds default-off `disturb.staged_release`, stage gate parameters, optional `stage_monitor_expert` / `stage_monitor_profiles` filtering, scalar-or-list staged gate thresholds, and optional adaptive stage regression after repeated failed windows. |
 | `legged_gym/envs/r2/r2_config.py` | implemented, updated 2026-06-25 | Adds default-off `commands.profile_mixture=None` so targeted JSONs can opt into profile-based command sampling without changing legacy rectangular command sampling. |
@@ -482,8 +482,8 @@ Implemented artifacts:
 | `configs/ablation/command_hold_staged_disturb_release.json` | implemented, trained and evaluated in June23 | Fixed command-range anchor with staged disturbance release `0.0 -> 0.25 -> 0.5 -> 0.75 -> 1.0`; stage gate monitors run-routed noise-disturb episodes. |
 | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | implemented, trained and evaluated in June23 | Same staged disturbance release, but command sampling and the stage gate are both biased into the run expert region. |
 | `configs/ablation/command_hold_run_recovery_staged_disturb_release.json` | implemented, trained and evaluated in June24 | June23 follow-up: uses a walk-run transition command band, finer staged levels, and per-stage task-return/fall-rate gates that start permissive and tighten toward the original full-disturb target. |
-| `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json` | trained/evaluated once, updated for next run | June25 follow-up: samples weighted jittered anchors matching the seven fixed `evaluate.py` presets. After the first eval-manifold run improved run but failed stand/jump, the next version monitors all seven named profiles and enables adaptive stage regression. |
-| `configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json` | implemented, not trained | Adjacent June25 diagnostic: keeps the same eval-manifold profile mixture and all-profile staged monitoring, but caps staged disturbance at `0.75`, uses finer early stages, and lengthens the stage window to test whether full disturbance pressure caused stand/jump collapse and late regression. |
+| `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json` | trained/evaluated twice; Jun25_0 rerun failed | June25 follow-up: samples weighted jittered anchors matching the seven fixed `evaluate.py` presets. After the first eval-manifold run improved run but failed stand/jump, the next version monitored all seven named profiles and enabled adaptive stage regression; the Jun25_0 rerun collapsed late and is not a continuation policy. |
+| `configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json` | trained and evaluated in Jun25_0 | Adjacent June25 diagnostic: keeps the same eval-manifold profile mixture and all-profile staged monitoring, but caps staged disturbance at `0.75`, uses finer early stages, and lengthens the stage window to test whether full disturbance pressure caused stand/jump collapse and late regression. |
 
 Training experiment pair:
 
@@ -492,8 +492,8 @@ Training experiment pair:
 | `command_hold_staged_disturb_release` | `configs/ablation/command_hold_staged_disturb_release.json` | General fixed command range from `scratch_command_hold`; tests whether staged release prevents the full-disturb collapse when stage advancement is gated by run-routed episodes. | evaluated in June23 |
 | `command_hold_run_focused_staged_disturb_release` | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | Run-focused command range with forward speed `1.1-1.6`, gait frequency `2.6-3.2`, narrow lateral/yaw range, foot/body-height caps below the jump-routing thresholds, and run-routed stage monitoring. | evaluated in June23 |
 | `command_hold_run_recovery_staged_disturb_release` | `configs/ablation/command_hold_run_recovery_staged_disturb_release.json` | Softer run-recovery follow-up after June23: command sampling spans the walk-run transition, stage levels are smaller at the start, and per-stage gates allow early progress with high but improving run fall rate before tightening later. | evaluated in June24 |
-| `command_hold_eval_manifold_staged_disturb_release` | `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json` | Weighted jittered command profiles around `stand`, `walk_slow`, `walk_fast`, `run`, `jump`, `turn_left`, and `strafe_right`; first run used a run-routed staged gate, next run uses all-profile staged monitoring plus adaptive regression. | evaluated once in June25; config updated for rerun |
-| `command_hold_eval_manifold_conservative_disturb_release` | `configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json` | Same eval-like profiles and profile-aware gate as the updated eval-manifold config, but conservative staged release `0.0 -> 0.05 -> 0.1 -> 0.18 -> 0.28 -> 0.42 -> 0.6 -> 0.75` with `stage_min_episodes=2048`. | implemented, not trained |
+| `command_hold_eval_manifold_staged_disturb_release` | `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json` | Weighted jittered command profiles around `stand`, `walk_slow`, `walk_fast`, `run`, `jump`, `turn_left`, and `strafe_right`; first run used a run-routed staged gate, rerun used all-profile staged monitoring plus adaptive regression. | evaluated in first June25 run and Jun25_0 rerun; Jun25_0 rerun failed |
+| `command_hold_eval_manifold_conservative_disturb_release` | `configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json` | Same eval-like profiles and profile-aware gate as the updated eval-manifold config, but conservative staged release `0.0 -> 0.05 -> 0.1 -> 0.18 -> 0.28 -> 0.42 -> 0.6 -> 0.75` with `stage_min_episodes=2048`. | trained and evaluated in Jun25_0 |
 
 Run-only disturb sweep command:
 
@@ -566,9 +566,9 @@ Current status:
 - `command_hold_staged_disturb_release`: trained and evaluated in June23.
 - `command_hold_run_focused_staged_disturb_release`: trained and evaluated in June23.
 - `command_hold_run_recovery_staged_disturb_release`: trained and evaluated in June24.
-- `command_hold_eval_manifold_staged_disturb_release`: trained and evaluated in June25; the config has been updated for a profile-aware rerun.
-- `command_hold_eval_manifold_conservative_disturb_release`: implemented in June25, not trained; no training log or evaluation output exists yet.
-- Follow-up rule: rerun the updated eval-manifold config as the primary next run; the conservative variant is an adjacent diagnostic if the next run still reaches high staged disturbance and collapses stand/jump. The first eval-manifold result shows command coverage helps run/walk, but run-only stage monitoring still misses stand and jump failures.
+- `command_hold_eval_manifold_staged_disturb_release`: trained and evaluated in the first June25 run and again in Jun25_0; the Jun25_0 rerun collapsed late and is not a continuation policy.
+- `command_hold_eval_manifold_conservative_disturb_release`: trained and evaluated in Jun25_0; it improves final fixed-preset fall rate but produces poor task return and remains diagnostic rather than a final policy.
+- Follow-up rule: stop adding from-scratch staged-gate variants until the train/eval objective mismatch is isolated. The evidence now points to two separate problems: all-profile staged monitoring can still destabilize training from scratch, while conservative staged disturbance can produce survival without useful task performance. The next code-level diagnostic is implemented through `evaluate.py --record_reward_terms`.
 
 ## June23 Batch
 
@@ -808,11 +808,11 @@ CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym
 
 Current status:
 
-- `command_hold_eval_manifold_staged_disturb_release`: trained once and evaluated; config updated for next rerun.
-- `command_hold_eval_manifold_conservative_disturb_release`: implemented, not trained.
-- Training root: `logs/r2_amp/Jun24_16-51-59_command_hold_eval_manifold_staged_disturb_release`.
-- Completed evaluation outputs: `outputs/eval/June25_command_hold_eval_manifold_staged_disturb_release_best` and `outputs/eval/June25_command_hold_eval_manifold_staged_disturb_release_8000`.
-- Next required training: rerun the updated config from scratch or warm-start it, then evaluate both `model_best_task.pt` and `model_8000.pt` with the same fixed-preset WSL CPU protocol.
+- `command_hold_eval_manifold_staged_disturb_release`: first run trained/evaluated from `logs/r2_amp/Jun24_16-51-59_command_hold_eval_manifold_staged_disturb_release`; Jun25_0 rerun trained/evaluated from `logs/r2_amp/Jun25_0/Jun25_05-00-11_command_hold_eval_manifold_staged_disturb_release`.
+- `command_hold_eval_manifold_conservative_disturb_release`: Jun25_0 run trained/evaluated from `logs/r2_amp/Jun25_0/Jun25_04-43-45_command_hold_eval_manifold_conservative_disturb_release`.
+- First-run evaluation outputs: `outputs/eval/June25_command_hold_eval_manifold_staged_disturb_release_best` and `outputs/eval/June25_command_hold_eval_manifold_staged_disturb_release_8000`.
+- Jun25_0 evaluation outputs: `outputs/eval/June29_Jun25_0_eval_manifold_conservative_best`, `outputs/eval/June29_Jun25_0_eval_manifold_conservative_8000`, `outputs/eval/June29_Jun25_0_eval_manifold_staged_best`, and `outputs/eval/June29_Jun25_0_eval_manifold_staged_8000`.
+- Next required work: do not continue either Jun25_0 checkpoint as a policy. Use the Jun25_0 result to design a smaller diagnostic around reward/termination and profile sampling rather than another broad staged-release rerun.
 
 ## June25 Eval-Manifold Batch
 
@@ -877,6 +877,105 @@ Interpretation:
 - Keep eval-manifold sampling; it improved the exact failure that motivated it, especially run robustness and survival.
 - Do not continue the first eval-manifold checkpoint as the final policy because stand/jump are unusable and late training regresses.
 - The next version should monitor all named eval profiles, not only the run expert, and should allow staged disturbance to back off after repeated failed windows. This is now implemented in `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json`, `legged_gym/envs/r2/r2interrupt_config.py`, and `legged_gym/envs/r2/r2interrupt.py`.
+
+## Jun25_0 Eval-Manifold Rerun Batch
+
+Hypothesis: profile-aware staged monitoring plus adaptive stage regression should stop non-run profiles from being hidden by the stage gate, while the conservative variant should test whether capping disturbance at `0.75` avoids the first eval-manifold run's stand/jump collapse and late regression.
+
+Training root:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_amp\Jun25_0
+```
+
+Evaluation outputs generated on 2026-06-29:
+
+```text
+E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_conservative_best
+E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_conservative_8000
+E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_staged_best
+E:\codebase\VR_Teleoperation\outputs\eval\June29_Jun25_0_eval_manifold_staged_8000
+```
+
+Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.csv` has 7 rows, one row per fixed preset. DTW was not computed because `--compute_dtw` was not passed.
+
+### Training Artifacts
+
+| experiment | config | run directory | top task checkpoint iterations | final train task reward | final episode length | final disturb curriculum | final staged level / stage | final staged window task return | final staged window fall rate | best train task reward | status |
+|---|---|---|---|---:|---:|---:|---|---:|---:|---:|---|
+| `command_hold_eval_manifold_conservative_disturb_release` | `configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json` | `logs/r2_amp/Jun25_0/Jun25_04-43-45_command_hold_eval_manifold_conservative_disturb_release` | `2637`, `2646`, `2677` | `21.04` | `932.12` | `0.3736` | `0.7500 / 7` | `25.2394` | `0.0731` | `31.20` | evaluated |
+| `command_hold_eval_manifold_staged_disturb_release` | `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json` | `logs/r2_amp/Jun25_0/Jun25_05-00-11_command_hold_eval_manifold_staged_disturb_release` | `268`, `277`, `280` | `-2183.01` | `2.00` | `0.0000` | `0.0000 / 0` | `-1621.1836` | `0.9999` | `6.45` | evaluated; collapsed |
+
+### Aggregate Evaluation
+
+Higher `avg task return` is better. Lower `avg fall rate` is better.
+
+| experiment | checkpoint | avg task return | avg fall rate | avg length steps | survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | torque L2 | action-rate L2 | dof-acc L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `command_hold_eval_manifold_conservative_disturb_release` | `best` | -8.50 | 0.888 | 159.0 | 3.18 | 0.672 | 0.874 | 0.0050 | -0.741 | 1.626 | 25276 | 3.559 | 391820 |
+| `command_hold_eval_manifold_conservative_disturb_release` | `8000` | -45.43 | 0.143 | 451.5 | 9.03 | 0.314 | 0.405 | 0.0043 | -0.758 | 1.654 | 32340 | 2.614 | 231309 |
+| `command_hold_eval_manifold_staged_disturb_release` | `best` | -6.75 | 0.737 | 203.9 | 4.08 | 0.605 | 0.859 | 0.0035 | -0.823 | 1.587 | 12236 | 1.387 | 245486 |
+| `command_hold_eval_manifold_staged_disturb_release` | `8000` | -993.79 | 1.000 | 3.1 | 0.06 | 1.761 | 3.201 | 0.0065 | -0.159 | 1.059 | 224595 | 3482843 | 7026349 |
+
+### Preset-Level Failure Notes
+
+| experiment | checkpoint | worst-return preset | worst fall preset |
+|---|---:|---|---|
+| `command_hold_eval_manifold_conservative_disturb_release` | `best` | `run`, task `-11.07`, fall `1.000`, survival `1.31s` | `stand`, `run`, `jump`, `turn_left`, and `strafe_right`, fall `1.000` |
+| `command_hold_eval_manifold_conservative_disturb_release` | `8000` | `jump`, task `-49.98`, fall `0.406`, survival `7.61s` | `jump`, fall `0.406`; `stand`, fall `0.281` |
+| `command_hold_eval_manifold_staged_disturb_release` | `best` | `strafe_right`, task `-9.08`, fall `1.000`, survival `3.00s` | `stand`, `walk_slow`, `jump`, `turn_left`, and `strafe_right`, fall `1.000` |
+| `command_hold_eval_manifold_staged_disturb_release` | `8000` | `walk_fast`, task `-1089.95`, fall `1.000`, survival `0.04s` | all seven presets, fall `1.000` |
+
+### Supported Conclusion
+
+The Jun25_0 results do not support either run as a direct continuation policy.
+
+Facts:
+
+- The conservative run reached the intended disturbance cap (`staged_disturb_level=0.7500`) and had a healthy-looking training tail (`task reward=21.04`, `episode length=932.12`, staged-window fall rate `0.0731`). However, fixed-preset evaluation shows a tradeoff rather than a clean solution: `model_best_task.pt` has relatively high task return (`-8.50`) but average fall rate `0.888`, while `model_8000.pt` reduces average fall rate to `0.143` and survival rises to `9.03s` but task return collapses to `-45.43`.
+- The staged rerun is a clear failure. It briefly reached stage 1 around training iteration `604`, regressed back to stage 0 around iteration `642`, and ended with `episode length=2.00`, `task reward=-2183.01`, and fixed-preset `fall_rate=1.000` for all seven presets.
+- The first eval-manifold run remains the best evidence that matching the evaluation command manifold helps run/walk survival, but the Jun25_0 rerun shows that all-profile staged monitoring plus adaptive regression is not stable enough from scratch.
+
+Interpretation:
+
+- Keep eval-manifold sampling as a useful diagnostic idea, but do not treat the current staged-gate implementation as solved.
+- The conservative cap did reduce final falls, but the negative task return indicates an objective mismatch: the policy can survive by moving poorly rather than satisfying the command/reward semantics.
+- The next useful step is not another broader from-scratch staged-release JSON. First isolate whether the fixed-preset low return comes from reward scale/termination semantics for `stand` and `jump`, from profile sampling weights/jitter, or from disturbance pressure.
+
+Recommended next work:
+
+1. Do not prioritize the run-only disturbance sweep yet. The 2026-06-29 default fixed-preset evaluation was disturb-free, so the poor conservative `8000` task return already points at policy/reward semantics rather than forced evaluation disturbance.
+2. Inspect per-preset reward terms for conservative `8000`, especially `stand`, `jump`, and `run`, using the new `evaluate.py --record_reward_terms` diagnostic. The current aggregate table shows survival without useful task return, but it does not identify which reward component dominates.
+3. Prefer a smaller config diagnostic before retraining: reduce `stand` and `jump` sampling weights or split them into a separate profile batch, then verify whether the stage gate is being driven by incompatible preset objectives.
+4. If another training run is needed, warm-start from the stronger June19 `scratch_command_hold_8000` or from conservative `8000` only after the reward-component diagnostic is understood; do not start another all-profile staged run from scratch with the current gate.
+
+### Follow-up Diagnostic Implementation - 2026-06-29
+
+Code change:
+
+```text
+legged_gym/envs/r2/r2.py
+legged_gym/scripts/evaluate.py
+legged_gym/utils/helpers.py
+tests/test_amp_training_contracts.py
+```
+
+`--record_reward_terms` is now a default-off evaluation flag. When enabled, `evaluate.py` sets `env.record_reward_terms=True`; `R2Robot.compute_reward()` then caches the current step's scaled reward terms in `last_reward_terms` before reset handling can clear `episode_sums`. The evaluator accumulates those terms per completed episode and writes `reward_terms.csv` plus `reward_terms.json` next to the normal `metrics.csv/json`.
+
+The default fixed-preset output schema is unchanged unless the flag is passed.
+
+Recommended first diagnostic command:
+
+```powershell
+wsl.exe -d Ubuntu-22.04 --cd /mnt/e/codebase/VR_Teleoperation -- env PATH=/opt/miniconda3/envs/r2gym/bin:/opt/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin PYTHONPATH=/mnt/e/codebase/VR_Teleoperation:/mnt/e/codebase/VR_Teleoperation/rsl_rl LD_LIBRARY_PATH=/opt/miniconda3/envs/r2gym/lib:/mnt/e/wsl/isaacgym/isaacgym/python/isaacgym/_bindings/linux-x86_64 /opt/miniconda3/envs/r2gym/bin/python legged_gym/scripts/evaluate.py --task=r2amp --headless --sim_device=cpu --rl_device=cpu --num_envs=64 --load_run Jun25_0/Jun25_04-43-45_command_hold_eval_manifold_conservative_disturb_release --checkpoint=8000 --cfg_override_json configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json --num_episodes=64 --episode_seconds=10 --preset stand --preset jump --preset run --record_reward_terms --output_dir outputs/eval/June29_Jun25_0_conservative_8000_reward_terms
+```
+
+Expected additional outputs:
+
+```text
+outputs/eval/June29_Jun25_0_conservative_8000_reward_terms/reward_terms.csv
+outputs/eval/June29_Jun25_0_conservative_8000_reward_terms/reward_terms.json
+```
 
 ## Maintenance Rules
 
