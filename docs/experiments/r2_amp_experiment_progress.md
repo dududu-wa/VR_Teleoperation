@@ -1451,6 +1451,75 @@ Interpretation:
 - The current checkpoint choice is still conservative `model_8000.pt`.
 - The next useful local evaluation should target the proposed warm-start mechanism itself, not more checkpoint fishing: for example a short smoke once the warm-start config exists, then fixed-preset / jump-run disturbance diagnostics on its resulting checkpoint.
 
+### Jun17 Current-Protocol Fixed-Preset Evaluation - 2026-06-30
+
+Hypothesis: the Jun17 archive runs were previously covered only by older combined eval outputs with `num_episodes=8`, so they should be rerun with the current 64-episode fixed-preset protocol before declaring historical evaluation coverage complete.
+
+Existing older outputs:
+
+```text
+outputs/eval/June17_manual_eval/combined_metrics.csv
+outputs/eval/June17_multi_expert_eval/combined_metrics.csv
+```
+
+Those combined outputs contain 42 rows each, but each row uses `num_episodes=8`. They remain useful as old smoke evidence, not as the current main comparison protocol.
+
+Compatibility facts:
+
+- The six evaluated Jun17 checkpoints all load with the current 26-action actor shape: `std.shape=(26,)`, first actor layer `(256, 131)`.
+- The `model_best_task.pt` internal iterations are:
+  - `sw1_dt_warmup`: `1549`
+  - `expert_hard_gate_no_style_warmup`: `2126`
+  - `expert_hard_gate_selective_walk`: `4000`
+- The final checkpoint for `expert_hard_gate_selective_walk` is stored as `model_30000.pt` but has internal `iter=26000`; it is still the final model file present for that run.
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun17_fixed_sw1_dt_warmup_best
+outputs/eval/June30_Jun17_fixed_sw1_dt_warmup_final
+outputs/eval/June30_Jun17_fixed_no_style_best
+outputs/eval/June30_Jun17_fixed_no_style_final
+outputs/eval/June30_Jun17_fixed_selective_walk_best
+outputs/eval/June30_Jun17_fixed_selective_walk_final
+outputs/eval/June30_Jun17_fixed_eval_summary/jun17_fixed_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides:
+  - `configs/ablation/sw1_dt_warmup.json`
+  - `configs/ablation/expert_hard_gate_no_style_warmup.json`
+  - `configs/ablation/expert_hard_gate_selective_walk.json`
+
+Aggregate evaluation:
+
+| eval | config | checkpoint | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `selective_walk_best` | `expert_hard_gate_selective_walk` | `best` | 7 | 29.79 | 0.036 | 9.78 | 0.311 | 0.453 | 0.00040 | -0.806 | 1.698 | `run` | 20.03 | `stand` | 0.141 |
+| `no_style_best` | `expert_hard_gate_no_style_warmup` | `best` | 7 | 24.27 | 0.094 | 9.28 | 0.352 | 0.537 | 0.00556 | -0.666 | 1.539 | `run` | 6.91 | `run` | 0.234 |
+| `sw1_dt_warmup_best` | `sw1_dt_warmup` | `best` | 7 | 20.93 | 0.250 | 7.99 | 0.407 | 0.569 | 0.00413 | -0.793 | 1.656 | `run` | -0.50 | `jump` | 0.922 |
+| `selective_walk_final` | `expert_hard_gate_selective_walk` | `30000` | 7 | -2.56 | 0.804 | 2.55 | 0.865 | 2.670 | 0.00098 | -0.589 | 1.479 | `jump` | -13.80 | `turn_left` | 1.000 |
+| `no_style_final` | `expert_hard_gate_no_style_warmup` | `30000` | 7 | -3.62 | 0.846 | 2.30 | 0.754 | 1.849 | 0.00595 | -0.654 | 1.528 | `turn_left` | -14.25 | `turn_left` | 1.000 |
+| `sw1_dt_warmup_final` | `sw1_dt_warmup` | `30000` | 7 | -9.94 | 1.000 | 0.46 | 0.725 | 2.676 | 0.00405 | -0.595 | 1.472 | `jump` | -11.73 | `jump` | 1.000 |
+
+Selected per-preset facts:
+
+- `selective_walk_best` is strong across all seven presets in this no-disturb fixed-preset protocol. Its worst task row is `run` with task return `20.03` and fall rate `0.031`; `jump` has task return `30.82` and fall rate `0.031`.
+- `no_style_best` is also usable but weaker on `run`: task return `6.91`, fall rate `0.234`.
+- `sw1_dt_warmup_best` is weaker because `jump` has fall rate `0.922` and `run` task return is slightly negative.
+- All three final checkpoints show late collapse relative to their best checkpoint. This supports the broader pattern seen in later runs: early/best checkpoints can be useful, while final checkpoints often regress.
+
+Interpretation:
+
+- The Jun17 current-protocol gap for best/final checkpoints is now closed.
+- `expert_hard_gate_selective_walk` best is now a strong historical reference: it nearly matches Jun25_0 conservative `8000` on avg task return (`29.79` vs `30.02`) and has lower no-disturb fixed-preset fall rate (`0.036` vs `0.167`).
+- It should not automatically replace Jun25_0 conservative `8000` as the warm-start source, because it has not yet received the same corrected disturbance sweep, termination-reason, state-trace, and play diagnostics. It is, however, now the most important historical control to compare against.
+- The next non-training evaluation step should be a focused robustness diagnostic for `expert_hard_gate_selective_walk` best using the same jump/run disturbance and termination/state-trace tools already applied to Jun25_0 conservative `8000`.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
