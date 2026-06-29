@@ -133,8 +133,26 @@ def _validate_eval_disturb_ratio(args):
         raise ValueError("--eval_disturb_ratio must be between 0.0 and 1.0")
 
 
+def _disable_eval_disturbance(env, env_ids):
+    """Clear applied interrupts while preserving the training reward contract."""
+    cfg_disturb = getattr(getattr(env, "cfg", None), "disturb", None)
+    env.use_disturb = bool(getattr(cfg_disturb, "use_disturb", getattr(env, "use_disturb", False)))
+    if hasattr(env, "noise_disturb_mode"):
+        env.noise_disturb_mode[env_ids] = False
+    if hasattr(env, "disturb_isnoise"):
+        env.disturb_isnoise[env_ids] = False
+    if hasattr(env, "disturb_rad_curriculum"):
+        env.disturb_rad_curriculum[env_ids] = 0.0
+    if hasattr(env, "disturb_masks"):
+        env.disturb_masks[env_ids] = False
+    if hasattr(env, "interrupt_mask"):
+        env.interrupt_mask[env_ids] = False
+    if hasattr(env, "disturb_actions"):
+        env.disturb_actions[env_ids] = 0.0
+
+
 def _apply_eval_disturbance(env, args, env_ids=None):
-    """Force a fixed disturbance curriculum ratio for run-only robustness sweeps."""
+    """Disable applied interrupts by default or force a fixed robustness ratio."""
     if not hasattr(env, "use_disturb"):
         return
 
@@ -148,7 +166,11 @@ def _apply_eval_disturbance(env, args, env_ids=None):
         return
 
     if args.eval_disturb_ratio is None:
-        env.use_disturb = False
+        # Default evaluation should remove the applied perturbation, not switch
+        # R2InterruptRobot to R2Robot reward semantics. The interrupt reward
+        # masks are part of the training objective, so task returns stay
+        # comparable to train.log while disturb_masks/interrupt_mask stay off.
+        _disable_eval_disturbance(env, env_ids)
         return
 
     env.use_disturb = True

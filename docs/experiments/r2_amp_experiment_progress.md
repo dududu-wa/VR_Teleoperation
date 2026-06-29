@@ -939,15 +939,15 @@ Facts:
 Interpretation:
 
 - Keep eval-manifold sampling as a useful diagnostic idea, but do not treat the current staged-gate implementation as solved.
-- The conservative cap did reduce final falls, but the negative task return indicates an objective mismatch: the policy can survive by moving poorly rather than satisfying the command/reward semantics.
+- Superseded by the local reward-semantics diagnostic below: the conservative `8000` negative task return was largely caused by default evaluation switching off `R2InterruptRobot` reward masking semantics, not by locomotion tracking alone.
 - The next useful step is not another broader from-scratch staged-release JSON. First isolate whether the fixed-preset low return comes from reward scale/termination semantics for `stand` and `jump`, from profile sampling weights/jitter, or from disturbance pressure.
 
 Recommended next work:
 
-1. Do not prioritize the run-only disturbance sweep yet. The 2026-06-29 default fixed-preset evaluation was disturb-free, so the poor conservative `8000` task return already points at policy/reward semantics rather than forced evaluation disturbance.
-2. Inspect per-preset reward terms for conservative `8000`, especially `stand`, `jump`, and `run`, using the new `evaluate.py --record_reward_terms` diagnostic. The current aggregate table shows survival without useful task return, but it does not identify which reward component dominates.
-3. Prefer a smaller config diagnostic before retraining: reduce `stand` and `jump` sampling weights or split them into a separate profile batch, then verify whether the stage gate is being driven by incompatible preset objectives.
-4. If another training run is needed, warm-start from the stronger June19 `scratch_command_hold_8000` or from conservative `8000` only after the reward-component diagnostic is understood; do not start another all-profile staged run from scratch with the current gate.
+1. Regenerate the Jun25_0 aggregate fixed-preset evaluations with the corrected default evaluator before drawing new policy conclusions from task return.
+2. Treat the reward-component diagnostic as completed: the old low return was dominated by interrupt-arm `dof_pos_limits`, not by the leg tracking terms.
+3. Do not reduce `stand` / `jump` sampling weights based on the old negative return. First compare all seven presets under the corrected no-disturb evaluation semantics.
+4. If another training run is needed, warm-start from the stronger June19 `scratch_command_hold_8000` or from conservative `8000` only after corrected all-preset eval and visual/play checks; do not start another all-profile staged run from scratch with the current gate.
 
 ### Follow-up Diagnostic Implementation - 2026-06-29
 
@@ -976,6 +976,43 @@ Expected additional outputs:
 outputs/eval/June29_Jun25_0_conservative_8000_reward_terms/reward_terms.csv
 outputs/eval/June29_Jun25_0_conservative_8000_reward_terms/reward_terms.json
 ```
+
+### Local Reward-Semantics Diagnostic - 2026-06-29
+
+Hypothesis: the conservative `8000` checkpoint's negative fixed-preset task return is an evaluation reward-semantics artifact: default `evaluate.py` disabled `env.use_disturb`, which also disabled `R2InterruptRobot`'s training-time reward masking for interrupt arm joints.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June29_Jun25_0_conservative_8000_reward_terms
+outputs/eval/June29_Jun25_0_conservative_8000_joint_limit_probe
+outputs/eval/June29_Jun25_0_conservative_8000_reward_terms_evaldisturb0
+```
+
+Facts:
+
+| protocol | preset | task return | fall rate | survival s | dof_pos_limits | dof_vel_limits | tracking lin | tracking yaw |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| old default no-disturb semantics | `stand` | -45.14 | 0.281 | 8.31 | -63.73 | -9.21 | 13.04 | 20.84 |
+| old default no-disturb semantics | `jump` | -51.47 | 0.453 | 7.65 | -62.12 | -8.77 | 12.71 | 19.26 |
+| old default no-disturb semantics | `run` | -46.03 | 0.047 | 9.58 | -63.22 | -12.94 | 15.97 | 21.99 |
+| `--eval_disturb_ratio=0.0` | `stand` | 33.27 | 0.141 | 9.00 | -0.19 | -0.06 | 14.71 | 23.24 |
+| `--eval_disturb_ratio=0.0` | `jump` | 21.78 | 0.328 | 8.18 | -0.20 | -0.15 | 13.38 | 20.55 |
+| `--eval_disturb_ratio=0.0` | `run` | 25.47 | 0.172 | 8.41 | -0.28 | -0.14 | 14.09 | 19.16 |
+
+The joint-limit probe shows the old default `dof_pos_limits` penalty came almost entirely from interrupt arm joints:
+
+| preset | top soft-limit contributors |
+|---|---|
+| `stand` | `right_shoulder_pitch_joint` share `0.363`, `right_arm_yaw_joint` `0.257`, `right_shoulder_roll_joint` `0.154`, `left_shoulder_roll_joint` `0.125`, `left_arm_pitch_joint` `0.097` |
+| `jump` | `right_shoulder_pitch_joint` share `0.325`, `right_arm_yaw_joint` `0.236`, `left_arm_pitch_joint` `0.162`, `right_shoulder_roll_joint` `0.143`, `left_shoulder_roll_joint` `0.131` |
+| `run` | `right_shoulder_pitch_joint` share `0.405`, `right_arm_yaw_joint` `0.289`, `right_shoulder_roll_joint` `0.174`, `left_arm_pitch_joint` `0.074`, `left_shoulder_roll_joint` `0.055` |
+
+Code conclusion:
+
+- `evaluate.py` default no-disturb evaluation now clears `disturb_masks` / `interrupt_mask` and sets disturbance strength to zero, but no longer flips `env.use_disturb=False`.
+- This keeps rollout disturbance-free while preserving `R2InterruptRobot`'s training reward contract for interrupt arm joints.
+- Next local step: rerun the full seven-preset conservative `8000` and `best` evaluations with the corrected default evaluator, then update the aggregate tables before making any new training recommendation.
 
 ## Maintenance Rules
 

@@ -271,6 +271,10 @@ def test_evaluate_supports_forced_disturbance_sweep_metrics():
     assert "--eval_disturb_ratio" in helper_source
     assert "survival_time_mean_s" in eval_source
     assert "_apply_eval_disturbance(env, args, done_ids)" in eval_source
+    assert "_disable_eval_disturbance(env, env_ids)" in eval_source
+    assert "env.disturb_masks[env_ids] = False" in eval_source
+    assert "env.interrupt_mask[env_ids] = False" in eval_source
+    assert "env.use_disturb = bool(getattr(cfg_disturb" in eval_source
     assert "env.disturb_rad_curriculum[env_ids] = float(args.eval_disturb_ratio)" in eval_source
 
 
