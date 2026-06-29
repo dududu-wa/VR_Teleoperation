@@ -447,7 +447,7 @@ reward 约定：
   - `-2` `model_best_task.pt`
   - `-3` `model_best_mixed.pt`
 - `update_cfg_from_args`：用 CLI 参数覆盖 env/train cfg。
-- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick`、`--cfg_override_json`，以及评估入口使用的 `--num_episodes`、`--output_dir`、`--episode_seconds`、`--preset`、`--compute_dtw`、`--eval_disturb_ratio`、`--record_reward_terms`、`--record_termination_reasons`、`--record_state_trace`、`--state_trace_window_steps` 等参数；`--eval_disturb_ratio` 只用于 `evaluate.py`，用于把 disturb curriculum 固定到 0.0-1.0 的指定强度；`--record_reward_terms` 默认关闭，只在诊断 run 中额外记录 reward 分项；`--record_termination_reasons` 默认关闭，只在诊断 run 中额外记录每个 preset 的终止原因和 contact body；`--record_state_trace` 默认关闭，只在诊断 run 中额外记录完成 episode 的末尾状态窗口。
+- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick`、`--cfg_override_json`，以及评估入口使用的 `--num_episodes`、`--output_dir`、`--episode_seconds`、`--preset`、`--compute_dtw`、`--eval_disturb_ratio`、`--record_reward_terms`、`--record_termination_reasons`、`--record_state_trace`、`--state_trace_window_steps`、`--play_seconds`、`--record_seconds` 等参数；`--eval_disturb_ratio` 只用于 `evaluate.py`，用于把 disturb curriculum 固定到 0.0-1.0 的指定强度；`--record_reward_terms` 默认关闭，只在诊断 run 中额外记录 reward 分项；`--record_termination_reasons` 默认关闭，只在诊断 run 中额外记录每个 preset 的终止原因和 contact body；`--record_state_trace` 默认关闭，只在诊断 run 中额外记录完成 episode 的末尾状态窗口；`--play_seconds` / `--record_seconds` 只用于 `play.py` 的短时诊断回放，未传时保持旧的长时 viewer 行为。
 
 #### `task_registry.py`
 
@@ -649,6 +649,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_run_disturb_sweep.ps1 -Chec
   以及 `configs/ablation/motion_run.json` 的 run 类 AMP prior 语义对齐。
 - 用 `policy.act_inference()` 输出动作均值。
 - 可通过 Isaac Gym viewer 截帧，并用 ffmpeg/imageio-ffmpeg 导出 mp4。
+- 显式传 `--play_seconds` 时，`play.py` 会把 demo episode 缩短到指定秒数，便于在 WSL/CI 风格环境中做可终止的 playback 诊断；显式传 `--record_seconds` 时只改变 viewer 录制窗口，未传则沿用 `RECORD_DURATION_S=30.0`。
 
 关键函数：
 
@@ -657,7 +658,7 @@ powershell -ExecutionPolicy Bypass -File scripts\run_run_disturb_sweep.ps1 -Chec
 - `_update_camera`
 - `_apply_deterministic_reset_pose`
 - `_init_recording/_capture_record_frame/_finalize_recording`
-- `play(args)`
+- `play(args)`：读取 `--play_seconds` / `--record_seconds` 后设置单环境 demo 时长、录制时长、deterministic reset、命令序列切换和 checkpoint playback。
 
 #### `retarget_motion.py`
 

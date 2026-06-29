@@ -233,6 +233,8 @@ def get_args():
         {"name": "--record_termination_reasons", "action": "store_true", "default": False, "help": "Write per-preset termination reason diagnostics in evaluate.py."},
         {"name": "--record_state_trace", "action": "store_true", "default": False, "help": "Write per-episode tail state traces in evaluate.py."},
         {"name": "--state_trace_window_steps", "type": int, "default": 50, "help": "Tail window length, in simulation steps, for --record_state_trace."},
+        {"name": "--play_seconds", "type": float, "help": "Finite demo duration for play.py diagnostics; omitted keeps the legacy long-running viewer."},
+        {"name": "--record_seconds", "type": float, "help": "Viewer recording duration for play.py diagnostics; omitted uses the script default."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(

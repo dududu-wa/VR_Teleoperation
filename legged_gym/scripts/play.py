@@ -138,7 +138,7 @@ def _resolve_record_output_root(train_cfg):
     return os.path.join(os.getcwd(), VIDEO_OUTPUT_DIR)
 
 
-def _init_recording(args, env, output_root):
+def _init_recording(args, env, output_root, record_duration_s):
     if env.viewer is None:
         print("[record] viewer unavailable, skip mp4 recording")
         return None
@@ -163,14 +163,14 @@ def _init_recording(args, env, output_root):
         "frame_dir": frame_dir,
         "video_path": os.path.abspath(os.path.join(output_root, f"{clip_name}.mp4")),
         "fps": max(int(round(1.0 / env.dt)), 1),
-        "record_steps": max(int(np.ceil(RECORD_DURATION_S / env.dt)), 1),
+        "record_steps": max(int(np.ceil(record_duration_s / env.dt)), 1),
         "next_frame_idx": 0,
         "captured_frames": 0,
         "disabled": False,
     }
 
     print(
-        f"[record] capture first {RECORD_DURATION_S:.1f}s "
+        f"[record] capture first {record_duration_s:.1f}s "
         f"({record_state['record_steps']} frames @ {record_state['fps']} fps) "
         f"to {record_state['video_path']}"
     )
@@ -269,7 +269,14 @@ def play(args):
     
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 1)
-    env_cfg.env.episode_length_s = 100000
+    play_seconds = 100000.0 if args.play_seconds is None else float(args.play_seconds)
+    record_duration_s = RECORD_DURATION_S if args.record_seconds is None else float(args.record_seconds)
+    if play_seconds <= 0.0:
+        raise ValueError("--play_seconds must be positive when provided")
+    if record_duration_s <= 0.0:
+        raise ValueError("--record_seconds must be positive when provided")
+    # Keep legacy viewer behavior unless --play_seconds is explicitly passed.
+    env_cfg.env.episode_length_s = play_seconds
 
     env_cfg.terrain.curriculum = False
     env_cfg.noise.add_noise = False
@@ -300,7 +307,7 @@ def play(args):
         env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = ppo_runner.get_inference_policy(device=env.device)
     record_output_root = _resolve_record_output_root(train_cfg)
-    record_state = _init_recording(args, env, record_output_root)
+    record_state = _init_recording(args, env, record_output_root, record_duration_s)
     print(f"[demo] sequence: {' -> '.join(DEMO_SEQUENCE_NAMES)}")
 
     track_index = 0

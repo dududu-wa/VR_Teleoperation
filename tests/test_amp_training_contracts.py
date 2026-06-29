@@ -308,6 +308,22 @@ def test_evaluate_can_record_state_trace_diagnostics():
     assert "_cache_eval_pre_reset_state" in r2_source
 
 
+def test_play_supports_finite_recorded_diagnostic_runs():
+    helpers_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
+        encoding="utf-8"
+    )
+    play_source = (ROOT_DIR / "legged_gym/scripts/play.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--play_seconds" in helpers_source
+    assert "--record_seconds" in helpers_source
+    assert "args.play_seconds" in play_source
+    assert "args.record_seconds" in play_source
+    assert "record_duration_s" in play_source
+    assert "env_cfg.env.episode_length_s = play_seconds" in play_source
+
+
 def test_evaluate_supports_forced_disturbance_sweep_metrics():
     helper_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
         encoding="utf-8"
@@ -634,6 +650,7 @@ if __name__ == "__main__":
     test_evaluate_dtw_is_opt_in()
     test_evaluate_can_record_termination_reason_diagnostics()
     test_evaluate_can_record_state_trace_diagnostics()
+    test_play_supports_finite_recorded_diagnostic_runs()
     test_evaluate_supports_forced_disturbance_sweep_metrics()
     test_expert_hard_gate_ablation_json_and_docs_contract()
     test_interrupt_disturb_release_can_bypass_terrain_curriculum_gate()

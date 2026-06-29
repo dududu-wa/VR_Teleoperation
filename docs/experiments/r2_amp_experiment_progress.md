@@ -1230,6 +1230,49 @@ Interpretation:
 - The warm-start should initially cap disturbance below full ratio, keep eval-manifold profile sampling, and focus on base height / roll-pitch stability under `jump` and `run` before reopening full disturbance.
 - For no-disturb `jump`, the sudden `base_link` contact suggests checking jump clearance/body-height/contact-threshold behavior with visual play or a small jump-focused reward/config probe before changing AMP style weight or discriminator capacity.
 
+### Short Play Diagnostic - 2026-06-30
+
+Hypothesis: before any warm-start training, the conservative `8000` checkpoint should at least be replayable through the `walk -> jump -> run` demo sequence, and the local machine should report whether true visual MP4 capture is available.
+
+Code change:
+
+```text
+legged_gym/scripts/play.py
+legged_gym/utils/helpers.py
+tests/test_amp_training_contracts.py
+```
+
+`play.py` now supports default-off diagnostic parameters `--play_seconds` and `--record_seconds`. If omitted, it keeps the legacy long-running viewer behavior; if supplied, it exits after the requested demo duration and limits the recording window. This makes local play checks reproducible without relying on an external timeout to kill the process.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June30_Jun25_0_conservative_8000_play_diagnostic/headless_play.log
+outputs/eval/June30_Jun25_0_conservative_8000_play_diagnostic/xvfb_record_attempt.log
+```
+
+Commands used the conservative `model_8000.pt` checkpoint:
+
+```text
+--load_run Jun25_0/Jun25_04-43-45_command_hold_eval_manifold_conservative_disturb_release
+--checkpoint 8000
+--cfg_override_json configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json
+--play_seconds 10.5
+```
+
+Facts:
+
+- True MP4 capture is not available on this local WSL/Xvfb path. The `xvfb_record_attempt.log` run reaches Isaac Gym initialization with PhysX CPU and disabled GPU pipeline, then exits with `Segmentation fault (core dumped)` before policy loading. No `.mp4` was produced.
+- Headless play succeeds with the same checkpoint and finite duration. It loads `model_8000.pt`, reports `viewer unavailable, skip mp4 recording`, and executes the sequence `walk -> jump -> run`.
+- The deterministic reset check in `headless_play.log` reports `base_z=0.8000m`, `left_foot_z=0.0530m`, and `right_foot_z=0.0530m`.
+- The jump segment is reached: at step `400`, phase is `jump`, command is `[0. 0. 0.]`, base linear velocity is approximately `[0.0357, 0.0226, -0.0651]`, and action norm is `25.869`.
+
+Interpretation:
+
+- This local machine cannot currently provide the requested visual MP4 evidence through Isaac Gym viewer recording; this is a graphics/runtime limitation, not evidence that the policy failed to load.
+- The finite headless play check does prove that conservative `8000` can be loaded and driven through the demo command sequence, including the jump phase. It is weaker than visual inspection and should not replace quantitative `evaluate.py` metrics.
+- If a real viewer is needed before training, run the same `play.py --play_seconds 10.5 --record_seconds 10.5` command on a machine with a working Isaac Gym viewer stack. Locally, the next useful non-training step remains headless reward/state diagnostics or a small warm-start config design, not more attempts to record through Xvfb.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
