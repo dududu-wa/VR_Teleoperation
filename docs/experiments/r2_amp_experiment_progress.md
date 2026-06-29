@@ -1,6 +1,6 @@
 ﻿# R2 AMP Experiment Progress
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -1152,6 +1152,66 @@ Interpretation:
 
 - The next local step should be a targeted visual/play check or a headless state trace around base height, roll/pitch, and contact timing for `jump`; changing AMP weight or discriminator capacity is not the first lever suggested by these data.
 - If starting a warm-start training follow-up, constrain it to conservative `8000`, keep disturbance below full ratio initially, and target base-link contact reduction plus roll/pitch stability for `jump` before attempting full-disturb release.
+
+### Pre-Reset State-Trace Diagnostic - 2026-06-30
+
+Hypothesis: aggregate termination reasons identify `base_link` contact and roll/pitch failure, but the next decision needs to know whether the terminal contact is a sudden reset-step event or a multi-step loss of height/attitude before termination.
+
+Code change:
+
+```text
+legged_gym/envs/r2/r2.py
+legged_gym/scripts/evaluate.py
+legged_gym/utils/helpers.py
+tests/test_amp_training_contracts.py
+```
+
+`evaluate.py` now supports the default-off flag `--record_state_trace`. When enabled, `R2Robot.post_physics_step()` caches a pre-reset terminal snapshot before `reset_idx()`, because `evaluate.py` reads diagnostics after `env.step()` returns and done environments have already been reset. The evaluator then writes `state_trace.csv` and `state_trace.json` with a fixed tail window per completed episode. This export records base height, roll/pitch/yaw, base linear/yaw velocity, command tracking error, max termination contact force/body, and `steps_until_done`; it does not change default `metrics.csv/json` behavior.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June30_Jun25_0_conservative_8000_state_trace_corrected
+outputs/eval/June30_Jun25_0_conservative_8000_state_trace_disturb100
+outputs/eval/June30_Jun25_0_conservative_8000_state_trace_summary.csv
+```
+
+Both runs used `model_8000.pt`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`, presets `jump` plus `run`, `--record_termination_reasons`, `--record_state_trace`, and `--state_trace_window_steps=50`. The `disturb100` run additionally used `--eval_disturb_ratio=1.0`. An earlier post-step trace attempt was discarded because terminal rows showed reset-state `base_z=0.800`; the committed diagnostic uses the pre-reset snapshot instead.
+
+State-trace facts:
+
+| protocol | preset | reason | detail | n | final z | min z | max abs roll | max abs pitch | final lin err | final yaw err | max contact | contact lead mean | contact lead max |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| corrected no-disturb | `jump` | contact | `base_link` | 37 | 0.722 | 0.694 | 0.171 | 0.185 | 0.637 | 0.872 | 451.8 | 0.0 | 0 |
+| corrected no-disturb | `jump` | timeout | - | 27 | 0.720 | 0.698 | 0.024 | 0.041 | 0.651 | 0.379 | 0.0 | - | - |
+| corrected no-disturb | `run` | contact | `base_link` | 6 | 0.786 | 0.763 | 0.143 | 0.405 | 1.651 | 1.086 | 839.2 | 0.0 | 0 |
+| corrected no-disturb | `run` | timeout | - | 58 | 0.759 | 0.751 | 0.032 | 0.057 | 0.808 | 0.605 | 0.0 | - | - |
+| full disturb ratio 1.0 | `jump` | contact | `base_link` | 51 | 0.565 | 0.564 | 0.735 | 0.750 | 1.687 | 1.666 | 1302.8 | 24.0 | 49 |
+| full disturb ratio 1.0 | `jump` | orientation | `roll_pitch` | 13 | 0.663 | 0.659 | 0.323 | 0.951 | 1.409 | 2.885 | 218.9 | 19.2 | 29 |
+| full disturb ratio 1.0 | `run` | contact | `base_link` | 42 | 0.487 | 0.479 | 0.541 | 0.949 | 1.605 | 1.651 | 1887.8 | 19.5 | 49 |
+| full disturb ratio 1.0 | `run` | orientation | `roll_pitch` | 22 | 0.511 | 0.501 | 0.629 | 0.978 | 2.379 | 1.713 | 1550.1 | 22.7 | 45 |
+
+Metrics for the same traced runs:
+
+| protocol | preset | task return | fall rate | survival s | lin rmse | yaw rmse |
+|---|---|---:|---:|---:|---:|---:|
+| corrected no-disturb | `jump` | 15.75 | 0.578 | 6.50 | 0.305 | 0.429 |
+| corrected no-disturb | `run` | 24.28 | 0.094 | 9.14 | 0.441 | 0.582 |
+| full disturb ratio 1.0 | `jump` | -8.39 | 1.000 | 2.49 | 0.722 | 1.221 |
+| full disturb ratio 1.0 | `run` | -11.74 | 1.000 | 1.51 | 1.323 | 1.506 |
+
+Facts:
+
+- Corrected no-disturb `jump` contact failures do not show a long pre-terminal contact build-up in the 50-step tail window: `contact_lead_mean=0.0`, and roll/pitch remain modest. The terminal base height is lower than the timeout set but not a progressive full-body collapse.
+- Corrected no-disturb `run` mostly times out; its small failure set has higher final speed/yaw error and one larger pitch excursion, but also no multi-step contact lead.
+- Full disturbance changes the failure shape. Contact appears roughly 19-24 steps before termination on average, base height drops much lower, and roll/pitch approaches the same thresholds used by `check_termination()`.
+- The dominant full-disturb failure is not an AMP discriminator issue in this diagnostic; it is an applied-disturbance robustness problem that manifests as base-link contact plus roll/pitch loss.
+
+Interpretation:
+
+- The next training change should not be another broad from-scratch staged recipe. The local evidence supports a warm-start, narrow robustness run from conservative `8000`.
+- The warm-start should initially cap disturbance below full ratio, keep eval-manifold profile sampling, and focus on base height / roll-pitch stability under `jump` and `run` before reopening full disturbance.
+- For no-disturb `jump`, the sudden `base_link` contact suggests checking jump clearance/body-height/contact-threshold behavior with visual play or a small jump-focused reward/config probe before changing AMP style weight or discriminator capacity.
 
 ## Maintenance Rules
 

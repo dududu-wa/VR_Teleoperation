@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 sys.path.append(os.getcwd())
@@ -95,6 +96,40 @@ TERMINATION_REASON_FIELDS = [
     "count",
     "rate",
     "mean_survival_time_s",
+    "notes",
+]
+
+
+STATE_TRACE_FIELDS = [
+    "run_id",
+    "task_name",
+    "ablation_name",
+    "seed",
+    "checkpoint",
+    "preset_name",
+    "episode_index",
+    "env_id",
+    "episode_step",
+    "steps_until_done",
+    "time_s",
+    "termination_reason",
+    "termination_detail",
+    "base_z",
+    "roll",
+    "pitch",
+    "yaw",
+    "base_lin_x",
+    "base_lin_y",
+    "base_lin_z",
+    "base_ang_yaw",
+    "cmd_lin_x",
+    "cmd_lin_y",
+    "cmd_yaw",
+    "lin_vel_error",
+    "yaw_vel_error",
+    "contact_force_max",
+    "contact_body",
+    "base_height_target",
     "notes",
 ]
 
@@ -357,39 +392,172 @@ def _init_traj_bufs(num_envs):
     }
 
 
+def _init_state_trace_buffers(num_envs, window_steps):
+    window_steps = max(int(window_steps), 1)
+    return {
+        "buffers": [deque(maxlen=window_steps) for _ in range(num_envs)],
+        "steps": [0 for _ in range(num_envs)],
+    }
+
+
+def _contact_trace_detail(env, env_index, pre_reset_state=None):
+    if not hasattr(env, "termination_contact_indices") or len(env.termination_contact_indices) == 0:
+        return 0.0, ""
+    contact_forces = (
+        pre_reset_state.get("contact_forces", env.contact_forces)
+        if pre_reset_state is not None
+        else env.contact_forces
+    )
+    contact_norm = torch.norm(
+        contact_forces[env_index, env.termination_contact_indices, :],
+        dim=-1,
+    )
+    max_contact = int(torch.argmax(contact_norm).item())
+    force = float(contact_norm[max_contact].item())
+    body_index = int(env.termination_contact_indices[max_contact].item())
+    body_names = getattr(env, "body_names", [])
+    body_name = body_names[body_index] if body_index < len(body_names) else str(body_index)
+    return force, body_name
+
+
 def _detect_termination_reason(env, infos, env_id):
     """Classify a completed episode using the same buffers as check_termination()."""
     idx = int(env_id.item()) if torch.is_tensor(env_id) else int(env_id)
+    pre_reset_state = getattr(env, "eval_pre_reset_state", None)
     time_outs = infos.get(
         "time_outs",
         torch.zeros(env.num_envs, dtype=torch.bool, device=env.device),
     )
+    if pre_reset_state is not None and "time_out_buf" in pre_reset_state:
+        time_outs = pre_reset_state["time_out_buf"]
     if bool(time_outs[idx].item()):
         return "timeout", ""
 
-    if hasattr(env, "termination_contact_indices") and len(env.termination_contact_indices) > 0:
-        contact_norm = torch.norm(
-            env.contact_forces[idx, env.termination_contact_indices, :],
-            dim=-1,
-        )
-        if bool(torch.any(contact_norm > 1.0).item()):
-            max_contact = int(torch.argmax(contact_norm).item())
-            body_index = int(env.termination_contact_indices[max_contact].item())
-            body_names = getattr(env, "body_names", [])
-            body_name = body_names[body_index] if body_index < len(body_names) else str(body_index)
-            return "contact", body_name
+    contact_force, contact_body = _contact_trace_detail(env, idx, pre_reset_state)
+    if contact_force > 1.0:
+        return "contact", contact_body
 
-    if hasattr(env, "large_ori_buf") and bool(env.large_ori_buf[idx].item()):
+    rpy = (
+        pre_reset_state.get("rpy", env.rpy)
+        if pre_reset_state is not None
+        else env.rpy
+    )
+    large_orientation = (torch.abs(rpy[idx, 1]) > 1.0) | (torch.abs(rpy[idx, 0]) > 0.8)
+    if bool(large_orientation.item()):
         return "orientation", "roll_pitch"
 
     base_height_target = getattr(getattr(env.cfg, "rewards", None), "base_height_target", None)
     if base_height_target is not None:
         # Height is currently diagnostic only: check_termination() does not
         # reset on this threshold, but it helps explain near-fall rollouts.
-        if float(env.root_states[idx, 2].item()) < float(base_height_target) - 0.20:
+        root_states = (
+            pre_reset_state.get("root_states", env.root_states)
+            if pre_reset_state is not None
+            else env.root_states
+        )
+        if float(root_states[idx, 2].item()) < float(base_height_target) - 0.20:
             return "base_height", ""
 
     return "unknown", ""
+
+
+def _append_state_trace(env, state_trace, preset_name, dones=None):
+    if state_trace is None:
+        return
+    base_height_target = float(getattr(env.cfg.rewards, "base_height_target", 0.0))
+    pre_reset_state = getattr(env, "eval_pre_reset_state", None)
+    for env_index in range(env.num_envs):
+        use_pre_reset = (
+            dones is not None
+            and bool(dones[env_index].item())
+            and pre_reset_state is not None
+        )
+        root_states = pre_reset_state["root_states"] if use_pre_reset else env.root_states
+        rpy = pre_reset_state["rpy"] if use_pre_reset else env.rpy
+        base_lin_vel = pre_reset_state["base_lin_vel"] if use_pre_reset else env.base_lin_vel
+        base_ang_vel = pre_reset_state["base_ang_vel"] if use_pre_reset else env.base_ang_vel
+        commands = pre_reset_state["commands"] if use_pre_reset else env.commands
+        state_trace["steps"][env_index] += 1
+        cmd = commands[env_index, :3]
+        base_lin = base_lin_vel[env_index]
+        lin_error = torch.norm(base_lin[:2] - cmd[:2])
+        yaw_error = base_ang_vel[env_index, 2] - cmd[2]
+        contact_force, contact_body = _contact_trace_detail(
+            env,
+            env_index,
+            pre_reset_state if use_pre_reset else None,
+        )
+        state_trace["buffers"][env_index].append(
+            {
+                "preset_name": preset_name,
+                "env_id": env_index,
+                "episode_step": int(state_trace["steps"][env_index]),
+                "time_s": float(state_trace["steps"][env_index] * env.dt),
+                "base_z": float(root_states[env_index, 2].item()),
+                "roll": float(rpy[env_index, 0].item()),
+                "pitch": float(rpy[env_index, 1].item()),
+                "yaw": float(rpy[env_index, 2].item()),
+                "base_lin_x": float(base_lin[0].item()),
+                "base_lin_y": float(base_lin[1].item()),
+                "base_lin_z": float(base_lin[2].item()),
+                "base_ang_yaw": float(base_ang_vel[env_index, 2].item()),
+                "cmd_lin_x": float(cmd[0].item()),
+                "cmd_lin_y": float(cmd[1].item()),
+                "cmd_yaw": float(cmd[2].item()),
+                "lin_vel_error": float(lin_error.item()),
+                "yaw_vel_error": float(yaw_error.item()),
+                "contact_force_max": contact_force,
+                "contact_body": contact_body,
+                "base_height_target": base_height_target,
+                "notes": "",
+            }
+        )
+
+
+def _flush_state_trace_episode(
+    args,
+    train_cfg,
+    preset_name,
+    episode_index,
+    env_id,
+    termination_reason,
+    termination_detail,
+    state_trace,
+    state_trace_rows,
+):
+    if state_trace is None or state_trace_rows is None:
+        return
+    idx = int(env_id.item()) if torch.is_tensor(env_id) else int(env_id)
+    samples = list(state_trace["buffers"][idx])
+    if not samples:
+        return
+    done_step = samples[-1]["episode_step"]
+    override_name = "none"
+    if args.cfg_override_json:
+        override_name = Path(args.cfg_override_json).stem
+    for sample in samples:
+        row = {
+            "run_id": f"{args.task}_{override_name}_{preset_name}_state_trace",
+            "task_name": args.task,
+            "ablation_name": override_name,
+            "seed": getattr(train_cfg, "seed", None),
+            "checkpoint": args.checkpoint,
+            "episode_index": episode_index,
+            "steps_until_done": int(done_step - sample["episode_step"]),
+            "termination_reason": termination_reason,
+            "termination_detail": termination_detail or "",
+        }
+        row.update(sample)
+        state_trace_rows.append(row)
+
+
+def _reset_state_trace_buffers(state_trace, env_ids):
+    if state_trace is None:
+        return
+    for idx in env_ids:
+        env_index = int(idx.item()) if torch.is_tensor(idx) else int(idx)
+        state_trace["buffers"][env_index].clear()
+        state_trace["steps"][env_index] = 0
 
 
 # ---------------------------------------------------------------------------
@@ -623,12 +791,31 @@ def _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values
             disc_ref_values.extend(ref_logit.detach().cpu().numpy().tolist())
 
 
-def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute_dtw, reward_acc=None, record_termination_reasons=False):
+def _finalize_done_envs(
+    env,
+    dones,
+    infos,
+    acc,
+    episode_rows,
+    traj_bufs,
+    compute_dtw,
+    reward_acc=None,
+    record_termination_reasons=False,
+    state_trace=None,
+    state_trace_rows=None,
+    args=None,
+    train_cfg=None,
+    preset_name=None,
+    max_episodes=None,
+):
     done_ids = dones.nonzero(as_tuple=False).flatten()
     if len(done_ids) == 0:
         return done_ids
     time_outs = infos.get("time_outs", torch.zeros_like(dones, dtype=torch.bool))
     for env_id in done_ids:
+        should_record_episode = max_episodes is None or len(episode_rows) < max_episodes
+        if not should_record_episode:
+            continue
         idx = int(env_id.item())
         steps = max(float(acc["steps"][idx].item()), 1.0)
 
@@ -648,10 +835,23 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute
                 name: float(values[idx].item())
                 for name, values in reward_acc.items()
             }
+        should_record_reason = record_termination_reasons or state_trace is not None
         termination_reason, termination_detail = (
             _detect_termination_reason(env, infos, env_id)
-            if record_termination_reasons
+            if should_record_reason
             else (None, None)
+        )
+        episode_index = len(episode_rows)
+        _flush_state_trace_episode(
+            args,
+            train_cfg,
+            preset_name,
+            episode_index,
+            env_id,
+            termination_reason,
+            termination_detail,
+            state_trace,
+            state_trace_rows,
         )
 
         episode_rows.append(
@@ -679,6 +879,7 @@ def _finalize_done_envs(env, dones, infos, acc, episode_rows, traj_bufs, compute
     _reset_accumulators(acc, done_ids)
     _reset_reward_term_accumulators(reward_acc, done_ids)
     _reset_traj_bufs(traj_bufs, done_ids)
+    _reset_state_trace_buffers(state_trace, done_ids)
     return done_ids
 
 
@@ -816,7 +1017,13 @@ def _summarize_termination_reasons(args, train_cfg, preset_name, episode_rows):
     return rows
 
 
-def _write_outputs(rows, output_dir, reward_term_rows=None, termination_reason_rows=None):
+def _write_outputs(
+    rows,
+    output_dir,
+    reward_term_rows=None,
+    termination_reason_rows=None,
+    state_trace_rows=None,
+):
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / "metrics.json", "w", encoding="utf-8") as f:
@@ -842,6 +1049,14 @@ def _write_outputs(rows, output_dir, reward_term_rows=None, termination_reason_r
             writer.writeheader()
             for row in termination_reason_rows:
                 writer.writerow(row)
+    if state_trace_rows is not None:
+        with open(out_dir / "state_trace.json", "w", encoding="utf-8") as f:
+            json.dump(state_trace_rows, f, indent=2)
+        with open(out_dir / "state_trace.csv", "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=STATE_TRACE_FIELDS)
+            writer.writeheader()
+            for row in state_trace_rows:
+                writer.writerow(row)
 
 
 def evaluate(args):
@@ -856,6 +1071,7 @@ def evaluate(args):
 
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
     env.record_reward_terms = bool(args.record_reward_terms)
+    env.record_eval_pre_reset_state = bool(args.record_state_trace)
     train_cfg.runner.resume = True
     runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
     policy = runner.get_inference_policy(device=env.device)
@@ -863,6 +1079,7 @@ def evaluate(args):
     rows = []
     reward_term_rows = []
     termination_reason_rows = []
+    state_trace_rows = []
     for preset_name in _selected_presets(args):
         start_time = time.time()
         with torch.inference_mode():
@@ -875,6 +1092,11 @@ def evaluate(args):
         acc = _init_accumulators(env.num_envs, env.device)
         reward_acc = _init_reward_term_accumulators(env)
         traj_bufs = _init_traj_bufs(env.num_envs)
+        state_trace = (
+            _init_state_trace_buffers(env.num_envs, args.state_trace_window_steps)
+            if args.record_state_trace
+            else None
+        )
         episode_rows = []
         disc_agent_values = []
         disc_ref_values = []
@@ -892,6 +1114,7 @@ def evaluate(args):
                 _collect_step_metrics(env, rewards, infos, actions, last_actions, prev_dof_vel, acc, amp_eval_rewards)
                 _collect_reward_terms(env, reward_acc)
                 _collect_step_trajectories(env, traj_bufs)
+                _append_state_trace(env, state_trace, preset_name, dones)
                 _collect_disc_metrics(env, runner, infos, disc_agent_values, disc_ref_values)
                 done_ids = _finalize_done_envs(
                     env,
@@ -903,6 +1126,12 @@ def evaluate(args):
                     args.compute_dtw,
                     reward_acc,
                     args.record_termination_reasons,
+                    state_trace,
+                    state_trace_rows,
+                    args,
+                    train_cfg,
+                    preset_name,
+                    args.num_episodes,
                 )
                 _apply_preset(env, preset_name, done_ids)
                 _apply_eval_disturbance(env, args, done_ids)
@@ -945,6 +1174,7 @@ def evaluate(args):
         args.output_dir,
         reward_term_rows if args.record_reward_terms else None,
         termination_reason_rows if args.record_termination_reasons else None,
+        state_trace_rows if args.record_state_trace else None,
     )
     print(f"Saved evaluation metrics to {os.path.abspath(args.output_dir)}")
 

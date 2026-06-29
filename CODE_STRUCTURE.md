@@ -14,7 +14,7 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
 - `configs/ablation/*.json`：AMP 消融配置覆盖文件。通过 `--cfg_override_json` 参数覆盖 `r2amp` 的 env/train 配置，不再为每个消融单独注册 task。
-- `legged_gym/scripts/evaluate.py`：AMP/普通 PPO checkpoint 的参数化评估入口。复用现有 task registry 和 runner 加载路径，按固定 command preset 导出 `metrics.json` / `metrics.csv`；默认评估会清空 interrupt/disturb mask 以保持无扰动 rollout，但保留 `R2InterruptRobot` 训练时的 reward masking 语义；显式加 `--record_reward_terms` 时额外导出 `reward_terms.json` / `reward_terms.csv`，用于逐 preset 诊断 reward 分项；显式加 `--record_termination_reasons` 时额外导出 `termination_reasons.json` / `termination_reasons.csv`，用于区分 timeout、contact、orientation 等终止来源以及 contact body。
+- `legged_gym/scripts/evaluate.py`：AMP/普通 PPO checkpoint 的参数化评估入口。复用现有 task registry 和 runner 加载路径，按固定 command preset 导出 `metrics.json` / `metrics.csv`；默认评估会清空 interrupt/disturb mask 以保持无扰动 rollout，但保留 `R2InterruptRobot` 训练时的 reward masking 语义；显式加 `--record_reward_terms` 时额外导出 `reward_terms.json` / `reward_terms.csv`，用于逐 preset 诊断 reward 分项；显式加 `--record_termination_reasons` 时额外导出 `termination_reasons.json` / `termination_reasons.csv`，用于区分 timeout、contact、orientation 等终止来源以及 contact body；显式加 `--record_state_trace` 时额外导出 episode 末尾状态窗口，用于 headless 诊断接触前高度、姿态和速度误差。
 - `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
 - `scripts/convert_lafan1_to_amp.py`：把 LaFAN1 风格 R2V2 `.npz` 转成当前项目 AMP motion 格式，保留 `base_link`、左右 `arm_yaw_link`、左右 `ankle_roll_link` 等 AMP key body。
 - `legged_gym/scripts/train.py`：启动 AMP 训练的入口，典型命令是 `python legged_gym/scripts/train.py --task=r2amp --headless`。
@@ -386,7 +386,7 @@ AMP 配置层。
 - `_create_envs`：加载 URDF，设置 asset options，创建多环境 actor，收集 body/dof 名字、feet/contact/base 索引。
 - `_init_buffers`：wrap Isaac Gym GPU tensor，初始化动作、命令、PD gains、randomization buffer、gait clock、reward sums、AMP 数据结构；AMP 多专家打开时会为 `motion_experts` 下每个专家建立独立 `MotionLoader`，并记录 `amp_expert_names/default_amp_expert_id`。
 - `step`：处理 action，按控制 decimation 循环计算 torque、simulate，最后调用 `post_physics_step()`。
-- `post_physics_step`：刷新状态，计算 base/foot/contact 状态，更新命令和地形高度，检查终止，计算奖励，reset 结束环境，重新计算观测。
+- `post_physics_step`：刷新状态，计算 base/foot/contact 状态，更新命令和地形高度，检查终止，计算奖励，reset 结束环境，重新计算观测；当评估脚本打开 `record_eval_pre_reset_state` 时，它会在 `reset_idx()` 前调用 `_cache_eval_pre_reset_state()` 保存终止前 root/rpy/velocity/contact/command 快照，避免 `evaluate.py` 在 `env.step()` 返回后只能看到 reset 后的初始姿态。
 - `reset_idx`：更新课程、重置 DOF/root、重采样命令、应用随机化、清 episode 统计。
 - `compute_observations/_preprocess_obs`：拼接 proprioception、command、clock、privileged info、terrain height；可加 latency/noise/history stack。
 - `_compute_torques`：PD 控制，支持 randomized gains、motor strength、motor offset，并按 torque limit 裁剪。
@@ -395,6 +395,7 @@ AMP 配置层。
 - `_update_terrain_curriculum`：根据移动距离、tracking reward、姿态失败情况升降 terrain level。
 - `compute_amp_observations/_bootstrap_amp_buffer/collect_reference_motions`：AMP 观测和参考 motion 采样；`collect_reference_motions(expert_ids=...)` 按样本路由到对应专家 loader，保证 discriminator 真样本和策略样本使用同一专家语义。
 - `get_amp_expert_ids`：读取当前 command 中的目标速度、gait frequency、foot swing height 和 body height，用 hard gate 生成每个环境的 AMP 专家 id；结果随 `infos["amp_expert_id"]` 传给 `AMPPPO` 和 `evaluate.py`。
+- `_cache_eval_pre_reset_state`：默认不运行，只服务于 `evaluate.py --record_state_trace`。它在 reset 前 clone 当前 `root_states`、`rpy`、`base_lin_vel`、`base_ang_vel`、`commands`、`contact_forces`、`reset_buf` 和 `time_out_buf`，让无头评估可以记录真实终止前状态，而不是 reset 后的 nominal base pose。
 
 reward 约定：
 
@@ -446,7 +447,7 @@ reward 约定：
   - `-2` `model_best_task.pt`
   - `-3` `model_best_mixed.pt`
 - `update_cfg_from_args`：用 CLI 参数覆盖 env/train cfg。
-- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick`、`--cfg_override_json`，以及评估入口使用的 `--num_episodes`、`--output_dir`、`--episode_seconds`、`--preset`、`--compute_dtw`、`--eval_disturb_ratio`、`--record_reward_terms`、`--record_termination_reasons` 等参数；`--eval_disturb_ratio` 只用于 `evaluate.py`，用于把 disturb curriculum 固定到 0.0-1.0 的指定强度；`--record_reward_terms` 默认关闭，只在诊断 run 中额外记录 reward 分项；`--record_termination_reasons` 默认关闭，只在诊断 run 中额外记录每个 preset 的终止原因和 contact body。
+- `get_args`：封装 Isaac Gym 参数解析，增加 `--task`、`--resume`、`--checkpoint`、`--num_envs`、`--sim_joystick`、`--cfg_override_json`，以及评估入口使用的 `--num_episodes`、`--output_dir`、`--episode_seconds`、`--preset`、`--compute_dtw`、`--eval_disturb_ratio`、`--record_reward_terms`、`--record_termination_reasons`、`--record_state_trace`、`--state_trace_window_steps` 等参数；`--eval_disturb_ratio` 只用于 `evaluate.py`，用于把 disturb curriculum 固定到 0.0-1.0 的指定强度；`--record_reward_terms` 默认关闭，只在诊断 run 中额外记录 reward 分项；`--record_termination_reasons` 默认关闭，只在诊断 run 中额外记录每个 preset 的终止原因和 contact body；`--record_state_trace` 默认关闭，只在诊断 run 中额外记录完成 episode 的末尾状态窗口。
 
 #### `task_registry.py`
 
@@ -597,6 +598,7 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 - 默认评估清空 `disturb_masks` / `interrupt_mask`、把 `disturb_rad_curriculum` 置 0，因此 rollout 本身仍然无扰动；但不会再把 `env.use_disturb` 直接设为 `False`，以保留 `R2InterruptRobot` 对 interrupt arm joints 的训练期 reward masking 语义，避免无扰动评估把手臂 soft-limit 项重新计入 task return。`env.reset()` 在评估入口的 `torch.inference_mode()` 内执行，因此 `_disable_eval_disturbance()` 也在 `torch.inference_mode()` 内写这些 interrupt buffer，避免 PyTorch inference tensor 的原地写入错误。显式传入 `--eval_disturb_ratio <0.0-1.0>` 时，会开启 noise-disturb、固定 `disturb_rad_curriculum`，并在 reset 后只给刚重置的 env 重新采样扰动动作，用于 run-only disturb sweep。
 - 显式传入 `--record_reward_terms` 时，`evaluate.py` 会把环境实例的 `record_reward_terms` 设为 `True`，使 `R2Robot.compute_reward()` 在不改变 `rew_buf` / `episode_sums` 的前提下缓存当前 step 的各 reward term；评估脚本再按完成 episode 汇总并额外写出 `reward_terms.json` / `reward_terms.csv`，字段包括 `reward_return_mean`、`reward_per_step_mean` 和 `reward_per_second_mean`。该路径用于诊断某个 preset 是被 tracking、termination、姿态或站立/跳跃相关 reward 项主导，不用于常规批量评估。
 - 显式传入 `--record_termination_reasons` 时，`evaluate.py` 会在 episode 完成时调用 `_detect_termination_reason()`，按 `time_out_buf`、termination contact force、`large_ori_buf` 和低 base height 诊断阈值分类为 `timeout/contact/orientation/base_height/unknown`；contact 终止会把最大 contact force 对应的 `body_names` 条目写入 `termination_detail`。`_summarize_termination_reasons()` 按 preset、reason 和 detail 聚合 count、rate、mean survival，并额外写出 `termination_reasons.json` / `termination_reasons.csv`。该路径用于定位 `jump/run` 是 base contact、姿态翻倒还是 timeout 主导，不改变默认 `metrics.json/csv` schema。
+- 显式传入 `--record_state_trace` 时，`evaluate.py` 会设置 `env.record_eval_pre_reset_state=True`，并用 `_init_state_trace_buffers()` 为每个 env 维护固定长度 tail window。`_append_state_trace()` 每步记录 base height、roll/pitch/yaw、base linear/yaw velocity、command、速度误差、最大 termination contact force 和 contact body；done env 会优先使用环境侧 reset 前快照。`_flush_state_trace_episode()` 只为请求的前 `--num_episodes` 个 episode 写出窗口样本，输出 `state_trace.json` / `state_trace.csv`，字段含 `steps_until_done`，用于定位 contact 或 orientation failure 是突然发生还是提前多步积累。
 - `_routed_discriminator_score()` 根据 `infos["amp_expert_id"]` 选择 runner 中对应专家的 discriminator；旧单 discriminator checkpoint 仍走兼容路径。
 - 输出 `metrics.json` 和 `metrics.csv`，字段包括速度 RMSE、task return、fall rate、episode length、`survival_time_mean_s`、base height / roll-pitch violation、AMP style reward、routed discriminator logit、torque/action-rate/dof-acc 平滑性指标。
 - 默认固定 preset 评估不计算 DTW，以避免 64 episode 批量评估被每个完成 episode 的 `O(T * motion_frames)` best-clip DTW 拖慢；只有显式加 `--compute_dtw` 时，`_finalize_done_envs()` 才会调用 `_compute_dtw_for_episode()`。

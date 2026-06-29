@@ -280,6 +280,34 @@ def test_evaluate_can_record_termination_reason_diagnostics():
     assert "termination_reasons.json" in evaluate_source
 
 
+def test_evaluate_can_record_state_trace_diagnostics():
+    evaluate_source = (ROOT_DIR / "legged_gym/scripts/evaluate.py").read_text(
+        encoding="utf-8"
+    )
+    helpers_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
+        encoding="utf-8"
+    )
+    r2_source = (ROOT_DIR / "legged_gym/envs/r2/r2.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--record_state_trace" in helpers_source
+    assert "--state_trace_window_steps" in helpers_source
+    assert "STATE_TRACE_FIELDS" in evaluate_source
+    assert "_init_state_trace_buffers" in evaluate_source
+    assert "_append_state_trace" in evaluate_source
+    assert "_flush_state_trace_episode" in evaluate_source
+    assert "state_trace.csv" in evaluate_source
+    assert "state_trace.json" in evaluate_source
+    assert "steps_until_done" in evaluate_source
+    assert "contact_force_max" in evaluate_source
+    assert "max_episodes" in evaluate_source
+    assert "len(episode_rows) < max_episodes" in evaluate_source
+    assert "record_eval_pre_reset_state" in evaluate_source
+    assert "record_eval_pre_reset_state" in r2_source
+    assert "_cache_eval_pre_reset_state" in r2_source
+
+
 def test_evaluate_supports_forced_disturbance_sweep_metrics():
     helper_source = (ROOT_DIR / "legged_gym/utils/helpers.py").read_text(
         encoding="utf-8"
@@ -603,6 +631,7 @@ if __name__ == "__main__":
     test_evaluate_uses_routed_amp_discriminator()
     test_evaluate_dtw_is_opt_in()
     test_evaluate_can_record_termination_reason_diagnostics()
+    test_evaluate_can_record_state_trace_diagnostics()
     test_evaluate_supports_forced_disturbance_sweep_metrics()
     test_expert_hard_gate_ablation_json_and_docs_contract()
     test_interrupt_disturb_release_can_bypass_terrain_curriculum_gate()

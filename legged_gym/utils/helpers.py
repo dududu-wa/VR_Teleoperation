@@ -231,6 +231,8 @@ def get_args():
         {"name": "--eval_disturb_ratio", "type": float, "help": "Force a fixed disturb curriculum ratio during evaluate.py, e.g. 0.0 to 1.0 for run-only disturb sweeps."},
         {"name": "--record_reward_terms", "action": "store_true", "default": False, "help": "Write per-preset reward term diagnostics in evaluate.py."},
         {"name": "--record_termination_reasons", "action": "store_true", "default": False, "help": "Write per-preset termination reason diagnostics in evaluate.py."},
+        {"name": "--record_state_trace", "action": "store_true", "default": False, "help": "Write per-episode tail state traces in evaluate.py."},
+        {"name": "--state_trace_window_steps", "type": int, "default": 50, "help": "Tail window length, in simulation steps, for --record_state_trace."},
     ]
     # parse arguments
     args = gymutil.parse_arguments(

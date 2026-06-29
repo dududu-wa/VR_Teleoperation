@@ -217,6 +217,8 @@ class R2Robot(BaseTask):
             self.extras["amp_expert_id"] = self.get_amp_expert_ids()
 
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
+        if self.record_eval_pre_reset_state:
+            self._cache_eval_pre_reset_state(env_ids)
         self.reset_idx(env_ids)
         self.compute_observations(env_ids) # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
@@ -224,6 +226,24 @@ class R2Robot(BaseTask):
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
+
+    def _cache_eval_pre_reset_state(self, env_ids):
+        """Cache terminal state for headless eval diagnostics before reset_idx()."""
+        if len(env_ids) == 0:
+            return
+        # evaluate.py reads this snapshot after env.step() returns, when done
+        # environments have already been reset to the nominal initial pose.
+        self.eval_pre_reset_state = {
+            "env_ids": env_ids.detach().clone(),
+            "root_states": self.root_states.detach().clone(),
+            "rpy": self.rpy.detach().clone(),
+            "base_lin_vel": self.base_lin_vel.detach().clone(),
+            "base_ang_vel": self.base_ang_vel.detach().clone(),
+            "commands": self.commands.detach().clone(),
+            "contact_forces": self.contact_forces.detach().clone(),
+            "reset_buf": self.reset_buf.detach().clone(),
+            "time_out_buf": self.time_out_buf.detach().clone(),
+        }
 
     def check_termination(self):   # TODO ADD HEIGHT TERMINATION
         """ Check if environments need to be reset
@@ -1197,6 +1217,8 @@ class R2Robot(BaseTask):
         self.extras = {}
         self.record_reward_terms = False
         self.last_reward_terms = {}
+        self.record_eval_pre_reset_state = False
+        self.eval_pre_reset_state = {}
         self.noise_scale_vec = self._get_noise_scale_vec(self.cfg)
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
