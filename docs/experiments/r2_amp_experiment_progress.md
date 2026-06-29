@@ -1309,6 +1309,83 @@ Interpretation:
 - For the current Jun25_0 decision, there is no hidden recent checkpoint left to evaluate locally. The next model-development decision should be based on conservative `8000` diagnostics, not on unevaluated Jun29/Jun30 transient logs.
 - If "all evaluations" is extended to archival pre-Jun17 runs, the next step is a separate compatibility/normalization task: map each non-standard checkpoint filename to an explicit load path or create a temporary normalized copy/symlink, then run the current fixed-preset CPU protocol. That is separate from the Jun25_0 continuation decision.
 
+### Archival Checkpoint Compatibility Evaluation - 2026-06-30
+
+Hypothesis: the remaining pre-Jun17 archival R2 AMP checkpoints should be evaluated only after proving that their saved policy architecture and checkpoint naming are compatible with the current `evaluate.py` loader.
+
+Compatibility facts:
+
+- `logs/r2_amp/Apr17_15-18-11_r2v2_amp_version4/model_best_mixed.pt` is not directly comparable with the current evaluator. Its checkpoint has `std.shape=(24,)` and first actor layer shape `(256, 124)`, while current R2 policy checkpoints use `std.shape=(26,)` and first actor layer shape `(256, 131)`.
+- The Jun10 and Jun15 archival checkpoints listed below all use the current 26-action policy shape and can be loaded by the current evaluator after filename normalization.
+- `logs/r2_amp/eval_style0_jun10_30000/model_30000.pt` and `logs/r2_amp/Jun10/style0_30000.pt` have the same file hash, so only the normalized `Jun10_style0` evaluation is kept as the formal row.
+- Temporary hard-link load directories were created under ignored local output state:
+
+```text
+logs/r2_amp/_archive_eval_compat/Jun10_style0
+logs/r2_amp/_archive_eval_compat/Jun10_mixed
+logs/r2_amp/_archive_eval_compat/Jun10_mixed2
+logs/r2_amp/_archive_eval_compat/Jun10_walk
+logs/r2_amp/_archive_eval_compat/Jun10_sw1
+logs/r2_amp/_archive_eval_compat/Jun15_sw05
+logs/r2_amp/_archive_eval_compat/Jun15_sw1
+```
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_archive_Jun10_style0_30000
+outputs/eval/June30_archive_Jun10_style0_best
+outputs/eval/June30_archive_Jun10_mixed_30000
+outputs/eval/June30_archive_Jun10_mixed_best_mixed
+outputs/eval/June30_archive_Jun10_mixed2_30000
+outputs/eval/June30_archive_Jun10_walk_30000
+outputs/eval/June30_archive_Jun10_sw1_30000
+outputs/eval/June30_archive_Jun10_sw1_best
+outputs/eval/June30_archive_Jun15_sw05_30000
+outputs/eval/June30_archive_Jun15_sw05_best
+outputs/eval/June30_archive_Jun15_sw1_30000
+outputs/eval/June30_archive_Jun15_sw1_best
+outputs/eval/June30_archive_eval_summary/archive_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides were matched to the archival intent where available: `style0.json`, `sw1.json`, `sw005.json`, and `motion_walk.json`.
+
+Aggregate evaluation:
+
+| archive eval | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | torque L2 | action-rate L2 | worst preset | worst return |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| `Jun10_mixed_best_mixed` | 7 | 5.27 | 0.208 | 8.52 | 0.435 | 0.509 | 0.01161 | -0.266 | 0.307 | 22647 | 2.580 | `run` | -1.96 |
+| `Jun10_style0_best` | 7 | 5.02 | 0.446 | 6.28 | 0.602 | 0.635 | 0.00000 | -0.384 | 0.424 | 16802 | 3.539 | `run` | -9.73 |
+| `Jun10_sw1_best` | 7 | 0.05 | 0.219 | 8.37 | 0.427 | 0.532 | 0.01195 | -0.228 | 0.263 | 29265 | 3.282 | `run` | -9.64 |
+| `Jun10_mixed2_30000` | 7 | -0.22 | 0.384 | 6.63 | 0.486 | 0.694 | 0.01125 | -0.292 | 0.337 | 33970 | 91.120 | `jump` | -11.39 |
+| `Jun10_walk_30000` | 7 | -3.72 | 0.462 | 6.46 | 0.515 | 0.723 | 0.01109 | -0.294 | 0.328 | 32618 | 21.766 | `stand` | -13.39 |
+| `Jun10_mixed_30000` | 7 | -3.72 | 0.462 | 6.46 | 0.515 | 0.723 | 0.01109 | -0.294 | 0.328 | 32618 | 21.766 | `stand` | -13.39 |
+| `Jun15_sw05_best` | 7 | -6.47 | 1.000 | 1.09 | 1.102 | 0.418 | 0.00064 | -0.201 | 0.124 | 3178 | 0.005 | `jump` | -10.15 |
+| `Jun15_sw1_best` | 7 | -6.50 | 1.000 | 1.09 | 1.095 | 0.427 | 0.01270 | -0.201 | 0.123 | 3161 | 0.005 | `jump` | -10.28 |
+| `Jun15_sw05_30000` | 7 | -8.58 | 1.000 | 0.86 | 0.999 | 1.245 | 0.00060 | -0.227 | 0.224 | 53223 | 339.257 | `jump` | -11.09 |
+| `Jun15_sw1_30000` | 7 | -9.57 | 1.000 | 1.35 | 0.962 | 1.132 | 0.01266 | -0.185 | 0.174 | 44781 | 6.598 | `jump` | -11.92 |
+| `Jun10_style0_30000` | 7 | -12.31 | 1.000 | 0.98 | 0.954 | 1.924 | 0.00000 | -0.386 | 0.433 | 44206 | 283.808 | `stand` | -17.64 |
+| `Jun10_sw1_30000` | 7 | -14.00 | 1.000 | 1.03 | 0.893 | 1.823 | 0.01120 | -0.306 | 0.338 | 48254 | 412.549 | `stand` | -19.07 |
+
+Facts:
+
+- Every formal archival output has 7 preset rows in `metrics.csv`.
+- The strongest archival row is `Jun10_mixed_best_mixed`, but it is still much weaker than the current conservative Jun25_0 `8000` checkpoint on the corrected fixed-preset protocol. `Jun10_mixed_best_mixed` has avg task return `5.27` and avg fall rate `0.208`; Jun25_0 conservative `8000` corrected eval was `18.91` and `0.170`.
+- Jun10 `best` checkpoints retain some usable behavior, especially `mixed_best_mixed`, `style0_best`, and `sw1_best`; the corresponding 30000 checkpoints are substantially worse or fully unstable.
+- Jun15 `sw05` and `sw1` are not useful continuation targets under the current protocol. Both final checkpoints have `fall_rate=1.000` across all presets, and the `model_best_task(...)` files also show `fall_rate=1.000`. Those two best files also carry checkpoint `iter=0`, so they are recorded as archive evidence rather than serious trained-policy candidates.
+- `Jun10_mixed_30000` and `Jun10_walk_30000` produced identical aggregate metrics in this protocol, which suggests either duplicated policy content or equivalent loaded behavior. They are not competitive with current Jun25_0 evidence.
+
+Interpretation:
+
+- The archival compatibility task is now closed for the model-bearing pre-Jun17 checkpoints that can be loaded by the current 26-action evaluator.
+- These archive results do not change the current development decision. The best available evidence still points to continuing from `Jun25_0` conservative `8000`, with a warm-start, narrow robustness run focused on jump/run base-contact and roll/pitch stability.
+- The next non-training local diagnostic, if needed before warm-starting, should be a narrow jump/run reward or state-trace probe around base height, roll/pitch, and contact timing; more broad archival evaluation is unlikely to improve the decision.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
