@@ -1520,6 +1520,84 @@ Interpretation:
 - It should not automatically replace Jun25_0 conservative `8000` as the warm-start source, because it has not yet received the same corrected disturbance sweep, termination-reason, state-trace, and play diagnostics. It is, however, now the most important historical control to compare against.
 - The next non-training evaluation step should be a focused robustness diagnostic for `expert_hard_gate_selective_walk` best using the same jump/run disturbance and termination/state-trace tools already applied to Jun25_0 conservative `8000`.
 
+### Jun17 Selective-Walk Best Robustness Diagnostic - 2026-06-30
+
+Hypothesis: because `expert_hard_gate_selective_walk` best nearly matches Jun25_0 conservative `8000` on no-disturb fixed-preset aggregate metrics, it should receive the same focused jump/run robustness diagnostics before deciding which checkpoint is the better warm-start/control source.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June30_Jun17_selective_walk_best_disturb_sweep
+outputs/eval/June30_Jun17_selective_walk_best_disturb_sweep/summary_metrics.csv
+outputs/eval/June30_Jun17_selective_walk_best_state_trace_corrected
+outputs/eval/June30_Jun17_selective_walk_best_state_trace_disturb100
+outputs/eval/June30_Jun17_selective_walk_best_state_trace_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- Checkpoint: `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`.
+- Config: `configs/ablation/expert_hard_gate_selective_walk.json`.
+- Disturbance sweep: `jump` and `run`, ratios `0.0`, `0.25`, `0.5`, `0.75`, `1.0`, `64` episodes per row.
+- State trace: `jump` and `run`, `64` episodes per row, `--record_termination_reasons`, `--record_state_trace`, `--state_trace_window_steps=50`, once with default corrected no-disturb evaluation and once with `--eval_disturb_ratio=1.0`.
+
+Focused disturbance sweep:
+
+| preset | disturb ratio | task return | fall rate | survival s | lin rmse | yaw rmse | style reward | disc gap | torque L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | 0.00 | 31.42 | 0.047 | 9.66 | 0.198 | 0.330 | 0.00000 | 1.672 | 23328 |
+| `jump` | 0.25 | 31.48 | 0.031 | 9.87 | 0.214 | 0.337 | 0.00000 | 1.676 | 20540 |
+| `jump` | 0.50 | 31.29 | 0.016 | 9.88 | 0.213 | 0.346 | 0.00000 | 1.681 | 16011 |
+| `jump` | 0.75 | 30.55 | 0.016 | 9.97 | 0.212 | 0.355 | 0.00000 | 1.702 | 10461 |
+| `jump` | 1.00 | -19.55 | 1.000 | 2.56 | 0.983 | 1.323 | 0.00000 | 1.694 | 23373 |
+| `run` | 0.00 | 16.10 | 0.047 | 9.59 | 0.633 | 0.573 | 0.00000 | 1.651 | 37565 |
+| `run` | 0.25 | 18.01 | 0.031 | 9.77 | 0.624 | 0.575 | 0.00000 | 1.692 | 35957 |
+| `run` | 0.50 | 15.95 | 0.016 | 9.89 | 0.650 | 0.570 | 0.00000 | 1.732 | 28904 |
+| `run` | 0.75 | 11.57 | 0.016 | 9.89 | 0.705 | 0.660 | 0.00000 | 1.738 | 22405 |
+| `run` | 1.00 | -22.61 | 1.000 | 3.33 | 1.666 | 1.932 | 0.00000 | 1.668 | 36020 |
+
+Termination facts:
+
+| protocol | preset | task return | fall rate | survival s | termination reason | detail | count | rate | mean survival s |
+|---|---|---:|---:|---:|---|---|---:|---:|---:|
+| corrected no-disturb | `jump` | 30.48 | 0.078 | 9.54 | contact | `base_link` | 5 | 0.078 | 3.82 |
+| corrected no-disturb | `jump` | 30.48 | 0.078 | 9.54 | timeout | - | 59 | 0.922 | 10.02 |
+| corrected no-disturb | `run` | 16.28 | 0.063 | 9.44 | contact | `base_link` | 4 | 0.063 | 0.69 |
+| corrected no-disturb | `run` | 16.28 | 0.063 | 9.44 | timeout | - | 60 | 0.938 | 10.02 |
+| full disturb ratio 1.0 | `jump` | -19.55 | 1.000 | 2.56 | contact | `base_link` | 53 | 0.828 | 2.56 |
+| full disturb ratio 1.0 | `jump` | -19.55 | 1.000 | 2.56 | orientation | `roll_pitch` | 11 | 0.172 | 2.57 |
+| full disturb ratio 1.0 | `run` | -22.58 | 1.000 | 3.49 | contact | `base_link` | 42 | 0.656 | 3.24 |
+| full disturb ratio 1.0 | `run` | -22.58 | 1.000 | 3.49 | orientation | `roll_pitch` | 22 | 0.344 | 3.97 |
+
+State-trace facts:
+
+| protocol | preset | reason | detail | n | final z | min z | max abs roll | max abs pitch | final lin err | final yaw err | max contact | contact lead mean | contact lead max |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| corrected no-disturb | `jump` | contact | `base_link` | 5 | 0.698 | 0.655 | 0.133 | 0.215 | 0.757 | 0.612 | 466.6 | 0.0 | 0 |
+| corrected no-disturb | `jump` | timeout | - | 59 | 0.755 | 0.736 | 0.031 | 0.117 | 0.554 | -0.165 | 0.0 | - | - |
+| corrected no-disturb | `run` | contact | `base_link` | 4 | 0.642 | 0.635 | 0.141 | 0.390 | 2.308 | -0.392 | 142.5 | 0.0 | 0 |
+| corrected no-disturb | `run` | timeout | - | 60 | 0.754 | 0.742 | 0.036 | 0.138 | 0.934 | 0.497 | 0.0 | - | - |
+| full disturb ratio 1.0 | `jump` | contact | `base_link` | 53 | 0.393 | 0.393 | 0.775 | 0.625 | 2.431 | -0.905 | 1361.2 | 24.4 | 49 |
+| full disturb ratio 1.0 | `jump` | orientation | `roll_pitch` | 11 | 0.470 | 0.470 | 0.763 | 0.436 | 2.255 | -2.250 | 934.7 | 20.0 | 41 |
+| full disturb ratio 1.0 | `run` | contact | `base_link` | 42 | 0.423 | 0.421 | 0.785 | 0.793 | 2.913 | -1.960 | 1728.4 | 32.5 | 49 |
+| full disturb ratio 1.0 | `run` | orientation | `roll_pitch` | 22 | 0.506 | 0.495 | 0.747 | 0.648 | 2.515 | -0.720 | 1950.8 | 31.0 | 49 |
+
+Facts:
+
+- Compared with Jun25_0 conservative `8000`, `expert_hard_gate_selective_walk` best is much stronger under partial disturbance. At `jump` ratio `0.75`, fall rate is `0.016` versus Jun25_0 conservative `0.484`; at `run` ratio `0.75`, fall rate is `0.016` versus Jun25_0 conservative `0.188`.
+- Full disturbance still breaks the policy. Both `jump` and `run` reach `fall_rate=1.000` at ratio `1.0`.
+- Under corrected no-disturb trace, failures are rare and mostly immediate `base_link` contact events with `contact_lead_mean=0.0`.
+- Under full disturbance, the failure shape matches the Jun25_0 diagnosis: base height drops, contact appears roughly 20-33 steps before termination, and roll/pitch becomes a secondary termination source.
+- Style reward is effectively zero in this selective-walk checkpoint for these `jump`/`run` diagnostics, consistent with the config disabling run/jump style contribution while still routing expert metadata.
+
+Interpretation:
+
+- `expert_hard_gate_selective_walk` best is now the strongest robustness reference among evaluated historical checkpoints for no-disturb and partial-disturb `jump`/`run`.
+- It still does not solve full disturbance. The remaining full-disturb failure mode is the same broad class as Jun25_0 conservative `8000`: base-link contact plus roll/pitch loss after sustained disturbance.
+- The next training decision should compare two possible warm-start sources, not only one: Jun25_0 conservative `8000` has the best current avg task return and existing diagnostic trail, while Jun17 selective-walk best has clearly better partial-disturb robustness and lower no-disturb fall rate.
+- A defensible next run would warm-start from the stronger robustness reference or run a small paired warm-start smoke from both sources, with disturbance capped at `0.75` before attempting full ratio `1.0`.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
