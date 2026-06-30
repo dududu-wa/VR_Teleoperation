@@ -130,12 +130,15 @@ class TaskRegistry():
         _, train_cfg = update_cfg_from_args(None, train_cfg, args)
         validate_amp_cfg_dims(env_cfg, train_cfg)
 
+        # Keep checkpoint lookup rooted in the experiment log tree even when
+        # callers disable new runner logging for evaluation-only loads.
+        load_root = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name)
         if log_root=="default":
-            log_root = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name)
-            log_dir = os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
+            log_dir = os.path.join(load_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
         elif log_root is None:
             log_dir = None
         else:
+            load_root = log_root
             log_dir = os.path.join(log_root, datetime.now().strftime('%b%d_%H-%M-%S') + '_' + train_cfg.runner.run_name)
         
         runner_class = eval(train_cfg.runner_class_name)
@@ -146,7 +149,7 @@ class TaskRegistry():
         if resume:
             # load previously trained model
             if train_cfg.runner.resume_path is None:
-                resume_path = get_load_path(log_root, load_run=train_cfg.runner.load_run, checkpoint=train_cfg.runner.checkpoint)
+                resume_path = get_load_path(load_root, load_run=train_cfg.runner.load_run, checkpoint=train_cfg.runner.checkpoint)
             else:
                 resume_path = train_cfg.runner.resume_path
             resume_message = f"Loading model from: {resume_path}"

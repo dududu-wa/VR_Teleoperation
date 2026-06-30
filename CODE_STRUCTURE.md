@@ -17,6 +17,11 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `legged_gym/scripts/evaluate.py`：AMP/普通 PPO checkpoint 的参数化评估入口。复用现有 task registry 和 runner 加载路径，按固定 command preset 导出 `metrics.json` / `metrics.csv`；默认评估会清空 interrupt/disturb mask 以保持无扰动 rollout，但保留 `R2InterruptRobot` 训练时的 reward masking 语义；显式加 `--record_reward_terms` 时额外导出 `reward_terms.json` / `reward_terms.csv`，用于逐 preset 诊断 reward 分项；显式加 `--record_termination_reasons` 时额外导出 `termination_reasons.json` / `termination_reasons.csv`，用于区分 timeout、contact、orientation 等终止来源以及 contact body；显式加 `--record_state_trace` 时额外导出 episode 末尾状态窗口，用于 headless 诊断接触前高度、姿态和速度误差。
 - `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
 - `scripts/convert_lafan1_to_amp.py`：把 LaFAN1 风格 R2V2 `.npz` 转成当前项目 AMP motion 格式，保留 `base_link`、左右 `arm_yaw_link`、左右 `ankle_roll_link` 等 AMP key body。
+- `scripts/plan_selective_walk_followup_eval.py`：为 selective-walk conservative eval-manifold follow-up checkpoint 生成标准 WSL CPU 评估命令，覆盖 no-disturb full7、`0.75/0.9/0.925/0.95/1.0` forced-disturb full7，以及 `0.925/0.95/1.0` failure diagnostics；它只打印命令，不启动长时间评估。
+- `scripts/plan_selective_walk_followup_train.py`：为同一 follow-up 生成正式训练命令，固定 Jun17 selective-walk best-task warm-start、当前 follow-up JSON、正式 run name，并把 Jun17 best checkpoint 的 `iter=4000` 转换成 runner 需要的追加 `--max_iterations=4000`，使最终目标 checkpoint 对齐 `model_8000.pt`；它只打印命令，不启动训练。
+- `scripts/summarize_selective_walk_followup_eval.py`：读取上述 follow-up 评估输出目录，汇总每个 label 的 `metrics.csv` 行数、平均 task/fall/survival 和最弱 preset，并显式报告缺失目录，避免把未跑完的评估误当成完整结论。
+- `scripts/audit_selective_walk_followup_readiness.py`：扫描 `logs/r2_amp` 中 selective-walk follow-up run 和 checkpoint，再检查计划评估输出是否齐全；用于区分“已有 transient run 目录但尚无 checkpoint”和“checkpoint 已可评估”。当真实 checkpoint 存在时，它还会输出推荐的 `load_run`、checkpoint id 和 9 条正式评估命令。
+- `scripts/run_selective_walk_followup_eval_plan.py`：消费 readiness audit 中的 `recommended_eval_plan`。默认 dry-run 只打印命令；只有显式 `--execute` 才按顺序运行，且没有真实 checkpoint/推荐命令时拒绝执行。
 - `legged_gym/scripts/train.py`：启动 AMP 训练的入口，典型命令是 `python legged_gym/scripts/train.py --task=r2amp --headless`。
 - `legged_gym/scripts/play.py`：回放 AMP checkpoint 的入口，支持 `--checkpoint -3` 加载 `model_best_mixed.pt`。
 
@@ -146,6 +151,8 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 ```
 
 `--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`sw1_dt_nowarm.json` 复现 dt baseline，`sw1_dt_warmup.json` 是推荐 schedule/cap 组，`sw1_dt_ratio025.json` 只测 task-ratio cap，`sw1_dt_gate_task0.json` 叠加严格 task gate，`walk_sw1_dt_warmup.json` 用 walk-only prior 测命令和 motion prior 是否冲突。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`expert_hard_gate_walk_run_jump.json` 打开 walk/run/jump 三专家 hard routing，`expert_hard_gate_walk_run.json` 只注册 walk/run 并让 jump/hop 语义回退到默认 walk 专家，`expert_hard_gate_selective_walk.json` 保留三专家路由但只让 walk style reward 生效，`expert_hard_gate_no_style_warmup.json` 在 `train.amp` 把 `style_reward_start_after/style_reward_warmup_iterations` 设为 0，因为 `AMPPPO` 从 train cfg 读取 schedule。`command_hold_controlled_disturb_release.json`、`command_hold_no_push.json`、`command_hold_conservative_penalty_ramp.json`、`command_hold_style_lowcap.json` 是 July19 后续批次，用于在固定 command range 的基线上拆分 disturb release、push、penalty ramp 和 style cap。`command_hold_staged_disturb_release.json` 和 `command_hold_run_focused_staged_disturb_release.json` 是 July20/July21 后续的两组正式训练实验：前者继续以固定 command range 为 anchor 并分阶段释放 disturb；后者保留同一 staged disturb 机制，但把 command 分布压到 run 专家区域，同时把 lateral/yaw、foot swing height 和 body height 控制在较窄范围，避免 run-focused fine-tune 混成 jump-focused。两者都把 disturb curriculum 限制为 `0.0 -> 0.25 -> 0.5 -> 0.75 -> 1.0`，并设置 `stage_monitor_expert="run"`，要求 run-routed noise-disturb episode 的 task return/fall rate 达标后才进入下一阶段，避免 walk/stand 均值掩盖 run 崩溃。`command_hold_run_recovery_staged_disturb_release.json` 是 July23 后续配置：它使用 walk-run 过渡 command band、较细的 `0.0 -> 0.15 -> 0.3 -> 0.5 -> 0.75 -> 1.0` staged levels，并把 `stage_min_task_return` / `stage_max_fall_rate` 写成与 `stage_levels` 等长的 per-stage 列表，让早期 gate 较宽、后期 gate 收紧。`command_hold_eval_manifold_staged_disturb_release.json` 是 June25 follow-up：它通过 `commands.profile_mixture` 按权重采样贴近 `evaluate.py` 七个固定 preset 的 jitter anchor，用来测试训练/评估 command manifold 不匹配是否是 June24 广泛崩溃的主因；首轮评估后该配置改为 all-profile `stage_monitor_profiles` 和 adaptive stage regression，用于下一次 rerun。`command_hold_eval_manifold_conservative_disturb_release.json` 是相邻诊断配置：沿用同一 eval-manifold/profile-aware gate，但把 staged disturbance 上限压到 `0.75`、早期阶段更细、`stage_min_episodes` 提到 `2048`，用来隔离 full-disturb pressure 是否导致 stand/jump collapse 和 late regression。`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
+
+`selective_walk_eval_manifold_conservative_disturb_release.json` 是 June30 top-task 审计后的后续训练配置：它保留 `command_hold_eval_manifold_conservative_disturb_release.json` 的七 preset `commands.profile_mixture`、all-profile staged gate、`0.75` disturbance cap、`2048` episode gate window 和 adaptive regression，但把 `env.amp.expert_style_enabled` / `train.amp.expert_style_enabled` 设为 `{"walk": true, "run": false, "jump": false}`。这样做的原因是本地评估显示 Jun17 `expert_hard_gate_selective_walk/model_best_task.pt` 在 partial `jump/run` disturbance 下比 Jun20/Jun21 conservative top-task checkpoint 更稳，因此下一步应从 selective-walk best warm-start，隔离“selective-walk style prior + conservative eval-manifold disturbance curriculum”是否优于 full-style conservative 续训。
 
 ### 2.3 回放链路
 
@@ -459,7 +466,7 @@ reward 约定：
 - `get_task_class(name)`：取环境类。
 - `get_cfgs(name)`：取 env/train cfg 的 deep copy，并同步 seed，避免同一 Python 进程连续跑多个 JSON override 时污染注册表默认配置。
 - `make_env(...)`：解析参数、覆盖 cfg、应用 JSON override、校验 AMP 维度、设置 seed、解析 sim params、实例化环境。
-- `make_alg_runner(...)`：创建 `OnPolicyRunner`，应用同一个 JSON override，建立日志目录，处理 resume checkpoint 加载。
+- `make_alg_runner(...)`：创建 `OnPolicyRunner`，应用同一个 JSON override，建立日志目录，处理 resume checkpoint 加载。实现中把 `load_root` 和 `log_dir` 分开：默认训练仍在 `logs/<experiment>/<date>_<run_name>` 写日志；评估入口传 `log_root=None` 时不创建新 runner 日志目录，但 resume checkpoint lookup 仍使用默认 `logs/<experiment>` 根目录。
 
 全局对象：
 
@@ -593,6 +600,7 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 
 - 复用 `task_registry.make_env()` 和 `task_registry.make_alg_runner()`，因此 `--task`、`--checkpoint`、`--load_run`、`--cfg_override_json` 的语义和训练入口一致。
 - 当使用 `--cfg_override_json` 时，必须显式传入 `--load_run`，避免从 `logs/<experiment>` 自动选择最新 run 时加载到其他消融组的 checkpoint。
+- 创建 runner 时显式传入 `log_root=None`。评估只应把 `metrics.csv/json`、reward/termination/state-trace 诊断写到 `--output_dir`；checkpoint 加载阶段不应在 `logs/r2_amp` 下创建训练式 run 目录。`task_registry.make_alg_runner()` 为此把 resume lookup root 与新建 log dir 分离，所以该参数不会影响 `--load_run` / `--checkpoint` 的解析。
 - 默认关闭 terrain curriculum、noise、domain randomization、command curriculum，并使用 plane 地形，保证固定 preset 评估更可复现。
 - 固定 preset 包括 `stand`、`walk_slow`、`walk_fast`、`run`、`jump`、`turn_left`、`strafe_right`，也可用 `--preset` 指定子集；其中 `jump` 复用 `play.py` 的 demo 命令，`run` 对应 `configs/ablation/motion_run.json` 指向的 run 类 motion prior。
 - 默认评估清空 `disturb_masks` / `interrupt_mask`、把 `disturb_rad_curriculum` 置 0，因此 rollout 本身仍然无扰动；但不会再把 `env.use_disturb` 直接设为 `False`，以保留 `R2InterruptRobot` 对 interrupt arm joints 的训练期 reward masking 语义，避免无扰动评估把手臂 soft-limit 项重新计入 task return。`env.reset()` 在评估入口的 `torch.inference_mode()` 内执行，因此 `_disable_eval_disturbance()` 也在 `torch.inference_mode()` 内写这些 interrupt buffer，避免 PyTorch inference tensor 的原地写入错误。显式传入 `--eval_disturb_ratio <0.0-1.0>` 时，会开启 noise-disturb、固定 `disturb_rad_curriculum`，并在 reset 后只给刚重置的 env 重新采样扰动动作，用于 run-only disturb sweep。
@@ -1142,6 +1150,85 @@ H1 STL 网格目录。
 - `convert_file(src_path, dst_path, target_base_height=0.78)`
 - `main()`
 
+### `plan_selective_walk_followup_eval.py`
+
+为 `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json` 训练完成后的 checkpoint 生成评估命令清单。它不运行 Isaac Gym，只把后续评估 protocol 固化成可审阅、可复制的 WSL CPU 命令：
+
+- `build_eval_plan(...)`：返回 9 条 `EvalCommand`，包括 no-disturb full7、forced-disturb `0.75/0.9/0.925/0.95/1.0` full7，以及 `0.925/0.95/1.0` failure diagnostics。这样做是为了让后续新 checkpoint 出现后直接复用已经审计过的边界评估合同，而不是手工重拼命令。
+- `_build_evaluate_command(...)`：组装 `wsl.exe -d Ubuntu-22.04 --cd /mnt/e/codebase/VR_Teleoperation -- sh -lc ... evaluate.py` 命令，固定 CPU PhysX/CPU policy、`--num_envs=64`、`--num_episodes=64`、`--episode_seconds=10` 和当前 follow-up JSON。
+- `main()`：命令行入口；默认打印 shell 命令，传 `--json` 时输出结构化命令数组，便于后续自动执行或审查。
+
+示例：
+
+```powershell
+python scripts\plan_selective_walk_followup_eval.py --load_run JunXX/JunXX_selective_walk_followup --checkpoint 8000 --output_prefix outputs/eval/JuneXX_selective_walk_followup_8000 --json
+```
+
+### `plan_selective_walk_followup_train.py`
+
+为 `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json` 生成正式训练启动命令。它不运行 Isaac Gym，只输出经过审计的 WSL CPU 命令：
+
+- `additional_iterations(...)`：把绝对目标 checkpoint id 转换成 `OnPolicyRunner.learn(num_learning_iterations=...)` 需要的追加迭代数。Jun17 selective-walk `model_best_task.pt` 已验证 `iter=4000`，目标 `model_8000.pt` 因此需要追加 `4000` 次，而不是传 `8000`。
+- `build_train_command(...)`：返回 `wsl.exe -d Ubuntu-22.04 --cd /mnt/e/codebase/VR_Teleoperation -- sh -lc ... train.py` 命令，固定 `--task=r2amp`、`--headless`、CPU sim/RL device、`--resume`、Jun17 selective-walk best-task warm-start、当前 follow-up JSON、正式 run name 和默认 `--max_iterations=4000`。这样做是为了避免把 smoke run name、缺少 warm-start 参数的命令，或会训练到 `model_12000.pt` 的错误迭代数用于正式训练。
+- `main()`：命令行入口；支持覆盖 `--repo_wsl`、`--python`、`--load_run`、`--checkpoint`、`--run_name`、`--resume_iteration`、`--target_iteration`、device 和 `--num_envs`，但默认输出正式 follow-up 训练命令。
+
+示例：
+
+```powershell
+python scripts\plan_selective_walk_followup_train.py
+```
+
+### `summarize_selective_walk_followup_eval.py`
+
+读取 `plan_selective_walk_followup_eval.py` 规划出的 9 个输出目录，并生成 follow-up checkpoint 的评估汇总。它用于评估跑完后的本地诊断，不会启动 Isaac Gym：
+
+- `EXPECTED_LABELS`：固定 9 个评估 label，和计划器保持一致：baseline full7、五档 forced-disturb full7、三档 failure diagnostics。
+- `summarize_eval_outputs(output_prefix, output_dir, require_all=True)`：按 `<output_prefix>_<label>` 查找每个目录；存在 `metrics.csv` 时计算行数、平均 `task_return_mean`、平均 `fall_rate`、平均 `survival_time_mean_s`、最差 task preset 和最差 fall preset；缺目录或缺 `metrics.csv` 时写出明确状态。
+- `_write_summary(...)`：写出 `selective_walk_followup_eval_summary.csv` 和 `selective_walk_followup_eval_summary.json`。默认 `require_all=True` 会在缺失任一计划输出时失败，防止把部分评估当成完整结果；调试时可用 `--allow_missing` 输出部分汇总。
+- `main()`：命令行入口，适合在 9 条 WSL CPU eval 命令跑完后统一检查是否完整。
+
+示例：
+
+```powershell
+python scripts\summarize_selective_walk_followup_eval.py --output_prefix <planned_eval_output_prefix> --output_dir <summary_output_dir>
+```
+
+### `run_selective_walk_followup_eval_plan.py`
+
+消费 `audit_selective_walk_followup_readiness.py` 写出的 readiness JSON，负责把推荐的 9 条正式评估命令从“可审计计划”推进到“可执行队列”。默认不运行评估：
+
+- `load_audit(path)`：读取 readiness JSON。
+- `prepare_execution(audit)`：检查 `recommended_eval_plan` 是否存在。没有推荐命令时返回 `can_execute=False` 和明确原因；这会阻止 transient run 或 smoke run 被误执行。
+- `format_dry_run_lines(commands)`：把计划格式化成带 label 注释的命令列表，便于人工审阅。
+- `run_eval_plan(audit, execute=False, command_runner=None)`：默认 dry-run 只返回命令文本；`execute=True` 时才按顺序调用 command runner。没有推荐命令且 `execute=True` 会抛出 `ValueError`。
+- `main()`：CLI 入口。默认读取 `outputs/eval/June30_selective_walk_followup_readiness_audit/readiness_audit.json` 并 dry-run；显式 `--execute` 才运行。
+
+示例：
+
+```powershell
+python scripts\run_selective_walk_followup_eval_plan.py
+python scripts\run_selective_walk_followup_eval_plan.py --execute
+```
+
+### `audit_selective_walk_followup_readiness.py`
+
+训练和评估之间的轻量级门禁脚本。它只查文件系统，不启动训练、不调用 Isaac Gym：
+
+- `_find_runs(logs_root, run_name_contains)`：递归查找名称包含 `selective_walk_eval_manifold_conservative_disturb_release` 的 run 目录。这样可以识别短暂 smoke/失败启动留下的空 run 目录。
+- `_relative_load_run(logs_root, run_dir)`：把绝对/仓库相对 run 目录转成 `evaluate.py --load_run` 需要的 `logs/r2_amp` 相对路径，避免后续手工拼错 `JunXX/<run>`。
+- `_find_checkpoints(logs_root, run_dir)`：读取 `model_best_task.pt`、`model_best_mixed.pt`、`model_8000.pt`、`model_top_task_*.pt` 等 checkpoint 文件，并规范化成 `best_task`、`8000`、`top_task_<iter>` 等 id；每条 checkpoint 还携带 `run_dir` 和可直接传给 `evaluate.py` 的 `load_run`。
+- `_select_recommended_checkpoint(checkpoints)`：为正式评估选择默认 checkpoint。优先 `8000`，否则取最新数字 checkpoint，再退到 `best_task`，最后用扫描到的第一个 checkpoint。
+- `_classify_progress(run_dir, checkpoint_count)`：按 `train.log` 和 checkpoint 判断 run 进度状态，并输出 `artifact_source` 辅助字段。`checkpoint_present` 优先级最高并标为 `trained_run`；没有 checkpoint 但日志出现 iteration/timestep 关键词时标为 `training_progress_no_checkpoint` / `training_run_no_checkpoint`；只有 `Loading model from` / `load_path` 两行时标为 `load_only_no_training_progress` / `evaluate_checkpoint_load_log_dir`，用于识别旧版 `evaluate.py` checkpoint load 通过 runner 初始化留下的 transient log_dir，而不是失败训练 run。
+- `_audit_planned_outputs(output_prefix)`：复用 `plan_selective_walk_followup_eval.build_eval_plan()` 的 9 个 label，检查每个计划输出目录下是否存在 `metrics.csv`。
+- `audit_readiness(...)`：汇总 run 数、checkpoint 数、计划输出数、已有输出数、缺失输出数，并给出两个布尔 gate：`ready_for_evaluation` 表示已有 checkpoint 可开始评估，`ready_for_completion` 表示 checkpoint 和 9 个计划评估输出都齐全。checkpoint 存在时额外输出 `recommended_checkpoint`、`recommended_load_run` 和 `recommended_eval_plan`，使后续正式评估可以直接复制审计结果中的命令。
+- `main()`：命令行入口，可用 `--output_json` 持久化审计结果，便于写入实验进度文档。
+
+示例：
+
+```powershell
+python scripts\audit_selective_walk_followup_readiness.py --output_prefix <planned_eval_output_prefix> --output_json <audit_output_json>
+```
+
 ### `scripts/__pycache__/`
 
 Python 运行缓存。属于生成物，不是源码。
@@ -1199,7 +1286,7 @@ AMP 任务实验输出。
 
 ### `tests/`
 
-当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint、多专家 AMP 接线、interrupt disturb release 开关、staged disturb release、run-only disturb sweep helper、eval-manifold/profile-aware staged gate，以及 conservative eval-manifold JSON 合同。完整训练验证仍主要依赖：
+当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint、多专家 AMP 接线、interrupt disturb release 开关、staged disturb release、run-only disturb sweep helper、eval-manifold/profile-aware staged gate、conservative eval-manifold JSON 合同、selective-walk conservative eval-manifold follow-up JSON 合同、follow-up checkpoint 标准评估命令生成合同、follow-up 评估输出汇总/缺失检查合同、follow-up 训练/评估 readiness audit 合同，以及 `evaluate.py` checkpoint 加载时禁用训练式 `log_dir` 且 `task_registry.make_alg_runner()` 仍保留默认 resume lookup root 的合同。完整训练验证仍主要依赖：
 
 - 能否创建环境。
 - 能否启动训练。

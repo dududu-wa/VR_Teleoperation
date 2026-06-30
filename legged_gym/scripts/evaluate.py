@@ -1073,7 +1073,15 @@ def evaluate(args):
     env.record_reward_terms = bool(args.record_reward_terms)
     env.record_eval_pre_reset_state = bool(args.record_state_trace)
     train_cfg.runner.resume = True
-    runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
+    # Evaluation artifacts belong under args.output_dir; disable runner log_dir so
+    # checkpoint loading does not create train-style directories in logs/r2_amp.
+    runner, train_cfg = task_registry.make_alg_runner(
+        env=env,
+        name=args.task,
+        args=args,
+        train_cfg=train_cfg,
+        log_root=None,
+    )
     policy = runner.get_inference_policy(device=env.device)
 
     rows = []

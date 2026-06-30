@@ -1,0 +1,109 @@
+{
+  "notes": "Post-audit follow-up after the June30 local top-task sweep: resume from the Jun17 selective-walk best-task checkpoint, keep the eval-like command-profile manifold and conservative staged disturbance cap from command_hold_eval_manifold_conservative_disturb_release, and disable run/jump style reward as in expert_hard_gate_selective_walk. This isolates whether the empirically stronger selective-walk prior is a better warm-start/control source than the later full-style conservative checkpoints. The curriculum rationale follows Bengio et al. 2009 Curriculum Learning; the disturbance randomization rationale follows Tobin et al. 2017 Domain Randomization and OpenAI et al. 2019 Automatic Domain Randomization.",
+  "env": {
+    "commands": {
+      "curriculum": false,
+      "ranges": {
+        "lin_vel_x": [0.0, 1.7],
+        "lin_vel_y": [-0.35, 0.35],
+        "ang_vel_yaw": [-0.65, 0.65],
+        "gait_frequency": [1.5, 3.1],
+        "foot_swing_height": [0.08, 0.21],
+        "body_height": [0.0, 0.035],
+        "body_pitch": [0.0, 0.04]
+      },
+      "profile_mixture": [
+        {
+          "name": "stand",
+          "weight": 0.18,
+          "command": [0.0, 0.0, 0.0, 1.6, 0.5, 0.5, 0.08, 0.0, 0.0, 0.0],
+          "jitter": [0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.005, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "walk_slow",
+          "weight": 0.12,
+          "command": [0.5, 0.0, 0.0, 2.2, 0.5, 0.5, 0.12, 0.0, 0.0, 0.0],
+          "jitter": [0.05, 0.03, 0.03, 0.08, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "walk_fast",
+          "weight": 0.16,
+          "command": [1.2, 0.0, 0.0, 2.8, 0.5, 0.5, 0.17, 0.0, 0.03, 0.0],
+          "jitter": [0.08, 0.03, 0.04, 0.1, 0.0, 0.0, 0.015, 0.0, 0.005, 0.0]
+        },
+        {
+          "name": "run",
+          "weight": 0.2,
+          "command": [1.6, 0.0, 0.0, 3.0, 0.5, 0.5, 0.2, 0.0, 0.03, 0.0],
+          "jitter": [0.08, 0.03, 0.04, 0.1, 0.0, 0.0, 0.01, 0.0, 0.005, 0.0]
+        },
+        {
+          "name": "jump",
+          "weight": 0.14,
+          "command": [0.0, 0.0, 0.0, 2.35, 0.0, 0.5, 0.2, 0.03, 0.0, 0.0],
+          "jitter": [0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.005, 0.003, 0.0, 0.0]
+        },
+        {
+          "name": "turn_left",
+          "weight": 0.1,
+          "command": [0.4, 0.0, 0.6, 2.2, 0.5, 0.5, 0.12, 0.0, 0.0, 0.0],
+          "jitter": [0.04, 0.02, 0.04, 0.08, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "strafe_right",
+          "weight": 0.1,
+          "command": [0.0, 0.3, 0.0, 2.2, 0.5, 0.5, 0.12, 0.0, 0.0, 0.0],
+          "jitter": [0.02, 0.04, 0.03, 0.08, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0]
+        }
+      ]
+    },
+    "disturb": {
+      "start_by_curriculum": false,
+      "staged_release": true,
+      "stage_levels": [0.0, 0.05, 0.1, 0.18, 0.28, 0.42, 0.6, 0.75],
+      "stage_min_episodes": 2048,
+      "stage_min_task_return": [4.0, 8.0, 12.0, 16.0, 20.0, 22.0, 22.0, 22.0],
+      "stage_max_fall_rate": [0.6, 0.45, 0.32, 0.24, 0.18, 0.14, 0.1, 0.08],
+      "stage_monitor_noise_only": true,
+      "stage_monitor_expert": null,
+      "stage_monitor_profiles": [
+        "stand",
+        "walk_slow",
+        "walk_fast",
+        "run",
+        "jump",
+        "turn_left",
+        "strafe_right"
+      ],
+      "stage_regress_on_failure": true,
+      "stage_regress_patience": 2
+    },
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run",
+        "jump": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/jump"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": false,
+        "jump": false
+      }
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "selective_walk_eval_manifold_conservative_disturb_release",
+      "save_top_task_checkpoints": 3,
+      "max_iterations": 8000
+    },
+    "amp": {
+      "expert_style_enabled": {
+        "walk": true,
+        "run": false,
+        "jump": false
+      }
+    }
+  }
+}

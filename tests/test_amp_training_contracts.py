@@ -1,7 +1,10 @@
 import sys
 import types
 import ast
+import csv
+import importlib.util
 import json
+import tempfile
 from pathlib import Path
 
 import torch
@@ -597,6 +600,42 @@ def test_eval_manifold_conservative_disturb_release_json_contract():
     assert disturb["stage_max_fall_rate"][0] > disturb["stage_max_fall_rate"][-1]
 
 
+def test_selective_walk_eval_manifold_conservative_disturb_release_json_contract():
+    # Keep the post-audit follow-up as a one-variable change from the conservative
+    # eval-manifold config: selective-walk style reward replaces full-style reward.
+    base_payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/command_hold_eval_manifold_conservative_disturb_release.json"
+        ).read_text(encoding="utf-8")
+    )
+    payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json"
+        ).read_text(encoding="utf-8")
+    )
+    profiles = payload["env"]["commands"]["profile_mixture"]
+    profile_names = {profile["name"] for profile in profiles}
+    base_profile_names = {
+        profile["name"] for profile in base_payload["env"]["commands"]["profile_mixture"]
+    }
+    disturb = payload["env"]["disturb"]
+    env_style = payload["env"]["amp"]["expert_style_enabled"]
+    train_style = payload["train"]["amp"]["expert_style_enabled"]
+
+    assert payload["train"]["runner"]["run_name"] == "selective_walk_eval_manifold_conservative_disturb_release"
+    assert payload["train"]["runner"]["max_iterations"] == 8000
+    assert payload["train"]["runner"]["save_top_task_checkpoints"] == 3
+    assert payload["env"]["commands"]["curriculum"] is False
+    assert profile_names == base_profile_names
+    assert abs(sum(float(profile["weight"]) for profile in profiles) - 1.0) < 1e-6
+    assert disturb == base_payload["env"]["disturb"]
+    assert env_style == {"walk": True, "run": False, "jump": False}
+    assert train_style == {"walk": True, "run": False, "jump": False}
+    assert payload["env"]["amp"]["default_motion_expert"] == "walk"
+
+
 def test_run_disturb_sweep_helper_contract():
     script = (ROOT_DIR / "scripts/run_run_disturb_sweep.ps1").read_text(
         encoding="utf-8"
@@ -607,6 +646,347 @@ def test_run_disturb_sweep_helper_contract():
     assert "--eval_disturb_ratio" in script
     for token in ("0.0", "0.2", "0.4", "0.6", "0.8", "1.0"):
         assert token in script
+
+
+def test_selective_walk_followup_eval_plan_script_contract():
+    script_path = ROOT_DIR / "scripts/plan_selective_walk_followup_eval.py"
+    spec = importlib.util.spec_from_file_location(
+        "plan_selective_walk_followup_eval",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    commands = module.build_eval_plan(
+        load_run="JunXX/JunXX_selective_walk_followup",
+        checkpoint="8000",
+        output_prefix="outputs/eval/JuneXX_selective_walk_followup_8000",
+    )
+    labels = [command.label for command in commands]
+    command_text = "\n".join(command.command for command in commands)
+
+    assert labels == [
+        "baseline_full7",
+        "full7_disturb075",
+        "full7_disturb090",
+        "full7_disturb0925",
+        "full7_disturb095",
+        "full7_disturb100",
+        "failure_diagnostics_disturb0925",
+        "failure_diagnostics_disturb095",
+        "failure_diagnostics_disturb100",
+    ]
+    assert all("--task=r2amp" in command.command for command in commands)
+    assert all("--num_envs=64" in command.command for command in commands)
+    assert all("--num_episodes=64" in command.command for command in commands)
+    assert all("--episode_seconds=10" in command.command for command in commands)
+    assert "configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json" in command_text
+    assert "--eval_disturb_ratio=0.75" in command_text
+    assert "--eval_disturb_ratio=0.925" in command_text
+    assert "--eval_disturb_ratio=1.0" in command_text
+    assert "--record_termination_reasons" in command_text
+    assert "--record_state_trace" in command_text
+    assert "--preset stand --preset run --preset jump --preset strafe_right" in command_text
+
+
+def test_selective_walk_followup_train_plan_script_contract():
+    script_path = ROOT_DIR / "scripts/plan_selective_walk_followup_train.py"
+    spec = importlib.util.spec_from_file_location(
+        "plan_selective_walk_followup_train",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    command = module.build_train_command()
+
+    assert "wsl.exe -d Ubuntu-22.04" in command
+    assert "legged_gym/scripts/train.py" in command
+    assert "--task=r2amp" in command
+    assert "--headless" in command
+    assert "--sim_device=cpu" in command
+    assert "--rl_device=cpu" in command
+    assert "--resume" in command
+    assert "--load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk" in command
+    assert "--checkpoint=-2" in command
+    assert (
+        "--cfg_override_json configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json"
+        in command
+    )
+    assert "--run_name selective_walk_eval_manifold_conservative_disturb_release" in command
+    assert "--max_iterations=4000" in command
+    assert "smoke_sw_eval_manifold_conservative_disturb_release" not in command
+    assert module.additional_iterations(resume_iteration=4000, target_iteration=8000) == 4000
+
+
+def test_selective_walk_followup_eval_runner_requires_recommended_plan():
+    script_path = ROOT_DIR / "scripts/run_selective_walk_followup_eval_plan.py"
+    spec = importlib.util.spec_from_file_location(
+        "run_selective_walk_followup_eval_plan",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    empty_audit = {
+        "ready_for_evaluation": False,
+        "recommended_eval_plan": [],
+    }
+    empty_plan = module.prepare_execution(empty_audit)
+    assert empty_plan["can_execute"] is False
+    assert "No recommended eval commands" in empty_plan["reason"]
+    try:
+        module.run_eval_plan(empty_audit, execute=True)
+    except ValueError as exc:
+        assert "No recommended eval commands" in str(exc)
+    else:
+        raise AssertionError("execute=True must refuse an audit without recommended commands")
+
+    audit = {
+        "ready_for_evaluation": True,
+        "recommended_eval_plan": [
+            {
+                "label": "baseline_full7",
+                "output_dir": "outputs/eval/example_baseline_full7",
+                "command": "echo baseline",
+            },
+            {
+                "label": "full7_disturb075",
+                "output_dir": "outputs/eval/example_full7_disturb075",
+                "command": "echo disturb",
+            },
+        ],
+    }
+    dry_run = module.run_eval_plan(audit, execute=False)
+    assert dry_run["executed"] == 0
+    assert dry_run["planned"] == 2
+    assert "# baseline_full7" in "\n".join(dry_run["lines"])
+    assert "echo disturb" in "\n".join(dry_run["lines"])
+
+    executed = []
+    result = module.run_eval_plan(
+        audit,
+        execute=True,
+        command_runner=lambda command: executed.append(command),
+    )
+    assert result["planned"] == 2
+    assert result["executed"] == 2
+    assert executed == ["echo baseline", "echo disturb"]
+
+
+def test_selective_walk_followup_eval_summary_script_contract():
+    script_path = ROOT_DIR / "scripts/summarize_selective_walk_followup_eval.py"
+    spec = importlib.util.spec_from_file_location(
+        "summarize_selective_walk_followup_eval",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        output_prefix = tmp_path / "selective_walk_followup_8000"
+        summary_dir = tmp_path / "summary"
+
+        baseline_dir = Path(f"{output_prefix}_baseline_full7")
+        baseline_dir.mkdir()
+        with (baseline_dir / "metrics.csv").open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["preset_name", "task_return_mean", "fall_rate", "survival_time_mean_s"],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "preset_name": "stand",
+                    "task_return_mean": "10",
+                    "fall_rate": "0.0",
+                    "survival_time_mean_s": "10",
+                }
+            )
+            writer.writerow(
+                {
+                    "preset_name": "run",
+                    "task_return_mean": "20",
+                    "fall_rate": "0.25",
+                    "survival_time_mean_s": "8",
+                }
+            )
+
+        disturb_dir = Path(f"{output_prefix}_full7_disturb075")
+        disturb_dir.mkdir()
+        with (disturb_dir / "metrics.csv").open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["preset_name", "task_return_mean", "fall_rate", "survival_time_mean_s"],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "preset_name": "jump",
+                    "task_return_mean": "30",
+                    "fall_rate": "0.125",
+                    "survival_time_mean_s": "9",
+                }
+            )
+
+        summary = module.summarize_eval_outputs(
+            output_prefix=str(output_prefix),
+            output_dir=str(summary_dir),
+            require_all=False,
+        )
+
+        assert summary["expected_outputs"] == 9
+        assert summary["present_outputs"] == 2
+        assert summary["missing_outputs"] == 7
+        rows = {row["label"]: row for row in summary["rows"]}
+        assert rows["baseline_full7"]["status"] == "present"
+        assert rows["baseline_full7"]["rows"] == 2
+        assert rows["baseline_full7"]["task_return_mean"] == 15.0
+        assert rows["baseline_full7"]["fall_rate"] == 0.125
+        assert rows["baseline_full7"]["worst_fall_preset"] == "run"
+        assert rows["failure_diagnostics_disturb100"]["status"] == "missing"
+        assert (summary_dir / "selective_walk_followup_eval_summary.csv").exists()
+        assert (summary_dir / "selective_walk_followup_eval_summary.json").exists()
+
+
+def test_selective_walk_followup_readiness_audit_contract():
+    script_path = ROOT_DIR / "scripts/audit_selective_walk_followup_readiness.py"
+    spec = importlib.util.spec_from_file_location(
+        "audit_selective_walk_followup_readiness",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        logs_root = tmp_path / "logs" / "r2_amp"
+        eval_root = tmp_path / "outputs" / "eval"
+        transient_run_dir = (
+            logs_root
+            / "JuneXX"
+            / "JunXX_loading_only_selective_walk_eval_manifold_conservative_disturb_release"
+        )
+        transient_run_dir.mkdir(parents=True)
+        (transient_run_dir / "train.log").write_text(
+            "Loading model from: source/model_best_task.pt\n"
+            "load_path: source/model_best_task.pt\n",
+            encoding="utf-8",
+        )
+
+        run_dir = logs_root / "JuneXX" / "JunXX_selective_walk_eval_manifold_conservative_disturb_release"
+        run_dir.mkdir(parents=True)
+        for checkpoint in ("model_best_task.pt", "model_8000.pt", "model_top_task_1234.pt"):
+            (run_dir / checkpoint).write_text("checkpoint placeholder", encoding="utf-8")
+
+        output_prefix = eval_root / "JuneXX_selective_walk_followup_8000"
+        eval_dir = Path(f"{output_prefix}_baseline_full7")
+        eval_dir.mkdir(parents=True)
+        (eval_dir / "metrics.csv").write_text(
+            "preset_name,task_return_mean,fall_rate,survival_time_mean_s\n"
+            "stand,1,0,10\n",
+            encoding="utf-8",
+        )
+
+        audit_path = tmp_path / "audit.json"
+        audit = module.audit_readiness(
+            logs_root=str(logs_root),
+            eval_root=str(eval_root),
+            run_name_contains="selective_walk_eval_manifold_conservative_disturb_release",
+            output_prefix=str(output_prefix),
+            output_json=str(audit_path),
+        )
+
+        assert audit["runs_found"] == 2
+        assert audit["checkpoint_count"] == 3
+        statuses = {Path(run["run_dir"]).name: run["progress_status"] for run in audit["runs"]}
+        artifact_sources = {
+            Path(run["run_dir"]).name: run["artifact_source"] for run in audit["runs"]
+        }
+        assert statuses[transient_run_dir.name] == "load_only_no_training_progress"
+        assert statuses[run_dir.name] == "checkpoint_present"
+        assert artifact_sources[transient_run_dir.name] == "evaluate_checkpoint_load_log_dir"
+        assert artifact_sources[run_dir.name] == "trained_run"
+        assert audit["evaluation_complete"] is False
+        assert audit["planned_eval_outputs"] == 9
+        assert audit["present_eval_outputs"] == 1
+        assert audit["missing_eval_outputs"] == 8
+        assert audit["ready_for_evaluation"] is True
+        assert audit["ready_for_completion"] is False
+        assert audit["recommended_checkpoint"] == "8000"
+        assert audit["recommended_load_run"] == "JuneXX/JunXX_selective_walk_eval_manifold_conservative_disturb_release"
+        assert len(audit["recommended_eval_plan"]) == 9
+        first_eval = audit["recommended_eval_plan"][0]
+        assert first_eval["label"] == "baseline_full7"
+        assert "--load_run JuneXX/JunXX_selective_walk_eval_manifold_conservative_disturb_release" in first_eval["command"]
+        assert "--checkpoint=8000" in first_eval["command"]
+        assert str(output_prefix) in first_eval["output_dir"]
+        checkpoint_names = {checkpoint["checkpoint"] for checkpoint in audit["checkpoints"]}
+        assert checkpoint_names == {"best_task", "8000", "top_task_1234"}
+        assert audit_path.exists()
+
+
+def test_evaluate_checkpoint_load_disables_training_log_dir():
+    source_path = ROOT_DIR / "legged_gym/scripts/evaluate.py"
+    module = ast.parse(source_path.read_text(encoding="utf-8"))
+    calls = [
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "make_alg_runner"
+    ]
+    assert calls, "evaluate.py should create the runner through task_registry.make_alg_runner"
+
+    # Evaluation writes artifacts under --output_dir; checkpoint loading should not
+    # create train-style log directories under logs/r2_amp.
+    log_root_keywords = [
+        keyword
+        for call in calls
+        for keyword in call.keywords
+        if keyword.arg == "log_root"
+    ]
+    assert len(log_root_keywords) == 1
+    assert isinstance(log_root_keywords[0].value, ast.Constant)
+    assert log_root_keywords[0].value.value is None
+
+
+def test_task_registry_none_log_root_keeps_default_resume_lookup():
+    source_path = ROOT_DIR / "legged_gym/utils/task_registry.py"
+    module = ast.parse(source_path.read_text(encoding="utf-8"))
+    task_registry_class = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.ClassDef) and node.name == "TaskRegistry"
+    )
+    make_alg_runner = next(
+        node
+        for node in task_registry_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "make_alg_runner"
+    )
+
+    # log_root=None disables new runner logging, but resume checkpoint lookup
+    # still needs the default experiment log root used by get_load_path().
+    load_root_assignments = [
+        node
+        for node in ast.walk(make_alg_runner)
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name) and target.id == "load_root"
+    ]
+    assert load_root_assignments
+
+    get_load_path_calls = [
+        node
+        for node in ast.walk(make_alg_runner)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "get_load_path"
+    ]
+    assert len(get_load_path_calls) == 1
+    assert isinstance(get_load_path_calls[0].args[0], ast.Name)
+    assert get_load_path_calls[0].args[0].id == "load_root"
 
 
 def test_next_batch_command_hold_ablation_json_contract():
@@ -659,5 +1039,13 @@ if __name__ == "__main__":
     test_run_recovery_staged_disturb_release_uses_per_stage_gates()
     test_eval_manifold_staged_disturb_release_uses_command_profile_mixture()
     test_eval_manifold_conservative_disturb_release_json_contract()
+    test_selective_walk_eval_manifold_conservative_disturb_release_json_contract()
     test_run_disturb_sweep_helper_contract()
+    test_selective_walk_followup_eval_plan_script_contract()
+    test_selective_walk_followup_train_plan_script_contract()
+    test_selective_walk_followup_eval_runner_requires_recommended_plan()
+    test_selective_walk_followup_eval_summary_script_contract()
+    test_selective_walk_followup_readiness_audit_contract()
+    test_evaluate_checkpoint_load_disables_training_log_dir()
+    test_task_registry_none_log_root_keeps_default_resume_lookup()
     test_next_batch_command_hold_ablation_json_contract()

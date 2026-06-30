@@ -117,7 +117,7 @@ Use discriminator accuracy only as an auxiliary diagnostic. A high discriminator
 Historical run:
 
 ```text
-logs/r2_amp/June15/sw1
+logs/r2_amp/Jun15/sw1
 ```
 
 Config:
@@ -349,10 +349,10 @@ Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.c
 
 | experiment | config | run directory | top task checkpoint iterations | final train task reward | final disturb curriculum | status |
 |---|---|---|---|---:|---:|---|
-| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | `logs/r2_amp/June20/Jun20_15-18-58_command_hold_conservative_penalty_ramp` | `5818`, `7663`, `7930` | `23.49` | `0.0000` | evaluated |
-| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | `logs/r2_amp/June20/Jun20_15-19-48_command_hold_controlled_disturb_release` | `1166`, `1706`, `1944` | `-4.26` | `0.9956` | evaluated |
-| `command_hold_no_push` | `configs/ablation/command_hold_no_push.json` | `logs/r2_amp/June20/Jun20_15-21-52_command_hold_no_push` | `6059`, `6973`, `7440` | `31.15` | `0.0000` | evaluated |
-| `command_hold_style_lowcap` | `configs/ablation/command_hold_style_lowcap.json` | `logs/r2_amp/June20/Jun20_15-22-56_command_hold_style_lowcap` | `7439`, `7600`, `7937` | `28.81` | `0.0000` | evaluated |
+| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | `logs/r2_amp/Jun20/Jun20_15-18-58_command_hold_conservative_penalty_ramp` | `5818`, `7663`, `7930` | `23.49` | `0.0000` | evaluated |
+| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | `logs/r2_amp/Jun20/Jun20_15-19-48_command_hold_controlled_disturb_release` | `1166`, `1706`, `1944` | `-4.26` | `0.9956` | evaluated |
+| `command_hold_no_push` | `configs/ablation/command_hold_no_push.json` | `logs/r2_amp/Jun20/Jun20_15-21-52_command_hold_no_push` | `6059`, `6973`, `7440` | `31.15` | `0.0000` | evaluated |
+| `command_hold_style_lowcap` | `configs/ablation/command_hold_style_lowcap.json` | `logs/r2_amp/Jun20/Jun20_15-22-56_command_hold_style_lowcap` | `7439`, `7600`, `7937` | `28.81` | `0.0000` | evaluated |
 
 ### Aggregate Evaluation
 
@@ -424,8 +424,8 @@ Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.c
 
 | experiment | config | run directory | top task checkpoint iterations | final train task reward | final disturb curriculum | best train task reward | status |
 |---|---|---|---|---:|---:|---:|---|
-| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | `logs/r2_amp/June21/Jun21_12-28-33_command_hold_conservative_penalty_ramp` | `7075`, `7654`, `7657` | `32.80` | `0.0000` | `34.69` | evaluated |
-| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | `logs/r2_amp/June21/Jun21_12-28-55_command_hold_controlled_disturb_release` | `1450`, `1498`, `1608` | `9.36` | `0.9943` | `21.39` | evaluated |
+| `command_hold_conservative_penalty_ramp` | `configs/ablation/command_hold_conservative_penalty_ramp.json` | `logs/r2_amp/Jun21/Jun21_12-28-33_command_hold_conservative_penalty_ramp` | `7075`, `7654`, `7657` | `32.80` | `0.0000` | `34.69` | evaluated |
+| `command_hold_controlled_disturb_release` | `configs/ablation/command_hold_controlled_disturb_release.json` | `logs/r2_amp/Jun21/Jun21_12-28-55_command_hold_controlled_disturb_release` | `1450`, `1498`, `1608` | `9.36` | `0.9943` | `21.39` | evaluated |
 
 ### Aggregate Evaluation
 
@@ -612,8 +612,8 @@ Each output directory contains `metrics.csv` and `metrics.json`. Each `metrics.c
 
 | experiment | config | run directory | top task checkpoint iterations | final train task reward | final disturb curriculum | final staged level / stage | final staged window fall rate | best train task reward | status |
 |---|---|---|---|---:|---:|---|---:|---:|---|
-| `command_hold_staged_disturb_release` | `configs/ablation/command_hold_staged_disturb_release.json` | `logs/r2_amp/June23/Jun23_03-38-06_command_hold_staged_disturb_release` | `1315`, `1331`, `1705` | `7.36` | `0.9944` | `1.0000 / 4` | `0.1174` | `26.76` | evaluated |
-| `command_hold_run_focused_staged_disturb_release` | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | `logs/r2_amp/June23/Jun23_14-58-32_command_hold_run_focused_staged_disturb_release` | `4221`, `4294`, `7112` | `8.14` | `0.0000` | `0.0000 / 0` | `0.6372` | `12.08` | evaluated |
+| `command_hold_staged_disturb_release` | `configs/ablation/command_hold_staged_disturb_release.json` | `logs/r2_amp/Jun23/Jun23_03-38-06_command_hold_staged_disturb_release` | `1315`, `1331`, `1705` | `7.36` | `0.9944` | `1.0000 / 4` | `0.1174` | `26.76` | evaluated |
+| `command_hold_run_focused_staged_disturb_release` | `configs/ablation/command_hold_run_focused_staged_disturb_release.json` | `logs/r2_amp/Jun23/Jun23_14-58-32_command_hold_run_focused_staged_disturb_release` | `4221`, `4294`, `7112` | `8.14` | `0.0000` | `0.0000 / 0` | `0.6372` | `12.08` | evaluated |
 
 ### Aggregate Evaluation
 
@@ -1284,6 +1284,9 @@ outputs/eval/June30_r2_amp_checkpoint_eval_coverage/summary.json
 outputs/eval/June30_r2_amp_checkpoint_eval_coverage/checkpoint_eval_coverage.csv
 outputs/eval/June30_r2_amp_checkpoint_eval_coverage/checkpoint_eval_coverage.json
 outputs/eval/June30_r2_amp_checkpoint_eval_coverage/transient_log_dirs.csv
+outputs/eval/June30_r2_amp_checkpoint_eval_coverage/top_level_model_artifacts.csv
+outputs/eval/June30_r2_amp_checkpoint_eval_coverage/documented_eval_output_paths.csv
+outputs/eval/June30_r2_amp_checkpoint_eval_coverage/documented_eval_output_paths_summary.json
 ```
 
 Coverage summary:
@@ -1303,6 +1306,7 @@ Facts:
 - The current Jun19-Jun25 model-bearing experiment line is covered through the documented fixed-preset outputs and the later focused diagnostics. This includes Jun25_0 conservative/staged best and final checkpoints.
 - The only remaining model-bearing directories outside that covered line are archival runs: `Apr17_15-18-11_r2v2_amp_version4`, `eval_style0_jun10_30000`, `Jun10`, `Jun10/sw1`, `Jun15/sw05`, and `Jun15/sw1`.
 - Those archive runs are not ready for the current `evaluate.py --checkpoint` path as-is because several checkpoint filenames are non-standard for `get_load_path()`, for example `model_best_task(3).pt`, `model_30000(6).pt`, `mixed_30000.pt`, and `style0_30000.pt`.
+- The top-level `logs/r2_amp/model*.pt` files are not additional unevaluated runs: `top_level_model_artifacts.csv` shows seven are byte-identical duplicates of already evaluated Jun24 artifacts, while `logs/r2_amp/model_top_task_1518.pt` is an invalid artifact; current WSL `torch.load(..., map_location="cpu")` fails with `UnpicklingError: invalid load key, '#'`.
 
 Interpretation:
 
@@ -1597,6 +1601,1226 @@ Interpretation:
 - It still does not solve full disturbance. The remaining full-disturb failure mode is the same broad class as Jun25_0 conservative `8000`: base-link contact plus roll/pitch loss after sustained disturbance.
 - The next training decision should compare two possible warm-start sources, not only one: Jun25_0 conservative `8000` has the best current avg task return and existing diagnostic trail, while Jun17 selective-walk best has clearly better partial-disturb robustness and lower no-disturb fall rate.
 - A defensible next run would warm-start from the stronger robustness reference or run a small paired warm-start smoke from both sources, with disturbance capped at `0.75` before attempting full ratio `1.0`.
+
+### Jun17 Top-Task Checkpoint Evaluation - 2026-06-30
+
+Hypothesis: after `expert_hard_gate_selective_walk` best emerged as a strong robustness reference, evaluate the saved Jun17 `model_top_task_*` checkpoints to ensure no adjacent early checkpoint is stronger under the current 64-episode fixed-preset protocol.
+
+Compatibility facts:
+
+- Valid top-task checkpoints were hard-linked into ignored local load directories under:
+
+```text
+logs/r2_amp/_topk_eval_compat/Jun17
+```
+
+- Seven Jun17 top-task files are valid current-shape torch checkpoints:
+  - `sw1_dt_warmup`: `model_top_task_1549.pt`, `model_top_task_1679.pt`, `model_top_task_1689.pt`
+  - `expert_hard_gate_no_style_warmup`: `model_top_task_2003.pt`, `model_top_task_2126.pt`, `model_top_task_2130.pt`
+  - `expert_hard_gate_selective_walk`: `model_top_task_1274.pt`
+- `expert_hard_gate_selective_walk/model_top_task_1461.pt` and `model_top_task_1464.pt` are not valid torch checkpoints in this local tree. They raise `UnpicklingError` during `torch.load()` and are not evaluation targets.
+- `expert_hard_gate_selective_walk/model_top_task_1274.pt` loads successfully but reports internal `iter=12000`; the evaluation keeps the filename-based checkpoint label `1274` and records this mismatch as an archive artifact issue.
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun17_top_sw1_dt_warmup_1549
+outputs/eval/June30_Jun17_top_sw1_dt_warmup_1679
+outputs/eval/June30_Jun17_top_sw1_dt_warmup_1689
+outputs/eval/June30_Jun17_top_no_style_2003
+outputs/eval/June30_Jun17_top_no_style_2126
+outputs/eval/June30_Jun17_top_no_style_2130
+outputs/eval/June30_Jun17_top_selective_walk_1274
+outputs/eval/June30_Jun17_top_task_eval_summary/jun17_top_task_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides:
+  - `configs/ablation/sw1_dt_warmup.json`
+  - `configs/ablation/expert_hard_gate_no_style_warmup.json`
+  - `configs/ablation/expert_hard_gate_selective_walk.json`
+
+Aggregate comparison:
+
+| eval | config | checkpoint | source | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `selective_walk_best` | `expert_hard_gate_selective_walk` | `best` | `best_task` | 7 | 29.79 | 0.036 | 9.78 | 0.311 | 0.453 | 0.00040 | -0.806 | 1.698 | `run` | 20.03 | `stand` | 0.141 |
+| `no_style_top_2126` | `expert_hard_gate_no_style_warmup` | `2126` | `top_task` | 7 | 24.27 | 0.094 | 9.28 | 0.352 | 0.537 | 0.00556 | -0.666 | 1.539 | `run` | 6.91 | `run` | 0.234 |
+| `no_style_best` | `expert_hard_gate_no_style_warmup` | `best` | `best_task` | 7 | 24.27 | 0.094 | 9.28 | 0.352 | 0.537 | 0.00556 | -0.666 | 1.539 | `run` | 6.91 | `run` | 0.234 |
+| `no_style_top_2003` | `expert_hard_gate_no_style_warmup` | `2003` | `top_task` | 7 | 24.22 | 0.085 | 9.34 | 0.366 | 0.533 | 0.00548 | -0.676 | 1.550 | `run` | 7.22 | `run` | 0.203 |
+| `no_style_top_2130` | `expert_hard_gate_no_style_warmup` | `2130` | `top_task` | 7 | 23.99 | 0.094 | 9.27 | 0.368 | 0.544 | 0.00542 | -0.676 | 1.542 | `run` | 6.18 | `run` | 0.297 |
+| `selective_walk_top_1274` | `expert_hard_gate_selective_walk` | `1274` | `top_task` | 7 | 23.92 | 0.176 | 8.37 | 0.405 | 0.566 | 0.00025 | -0.898 | 1.805 | `run` | 0.54 | `run` | 0.703 |
+| `sw1_dt_warmup_top_1679` | `sw1_dt_warmup` | `1679` | `top_task` | 7 | 21.84 | 0.230 | 8.14 | 0.432 | 0.547 | 0.00437 | -0.781 | 1.656 | `run` | -2.22 | `run` | 0.641 |
+| `sw1_dt_warmup_best` | `sw1_dt_warmup` | `best` | `best_task` | 7 | 20.93 | 0.250 | 7.99 | 0.407 | 0.569 | 0.00413 | -0.793 | 1.656 | `run` | -0.50 | `jump` | 0.922 |
+| `sw1_dt_warmup_top_1549` | `sw1_dt_warmup` | `1549` | `top_task` | 7 | 20.93 | 0.250 | 7.99 | 0.407 | 0.569 | 0.00413 | -0.793 | 1.656 | `run` | -0.50 | `jump` | 0.922 |
+| `sw1_dt_warmup_top_1689` | `sw1_dt_warmup` | `1689` | `top_task` | 7 | 20.78 | 0.239 | 8.06 | 0.435 | 0.570 | 0.00408 | -0.796 | 1.661 | `run` | -4.21 | `run` | 0.703 |
+
+Facts:
+
+- Every valid Jun17 top-task output has 7 preset rows in `metrics.csv`.
+- No Jun17 top-task checkpoint beats `expert_hard_gate_selective_walk` `model_best_task.pt` under the current no-disturb fixed-preset protocol.
+- `expert_hard_gate_no_style_warmup/model_top_task_2126.pt` is behaviorally identical to `model_best_task.pt` under this protocol; `model_top_task_2003.pt` has slightly lower avg fall rate (`0.085` vs `0.094`) but nearly the same task return.
+- `sw1_dt_warmup/model_top_task_1679.pt` improves over the `sw1_dt_warmup` best aggregate (`21.84` vs `20.93`) but remains weaker than the no-style and selective-walk best checkpoints, mainly because `run` and `jump` remain weak.
+- `selective_walk_top_1274` is much weaker than `selective_walk_best`, especially on `run` (`fall_rate=0.703`).
+
+Interpretation:
+
+- The Jun17 top-task checkpoint gap is now closed for all valid saved top-k files.
+- The strongest Jun17 checkpoint remains `expert_hard_gate_selective_walk/model_best_task.pt`, not an adjacent top-task file.
+- The invalid top-task files should remain documented as archive corruption / non-checkpoint artifacts, not silently ignored.
+
+### Jun24 Top-Task Checkpoint Evaluation - 2026-06-30
+
+Hypothesis: the Jun24 staged-release runs were previously represented mostly by best/final checkpoints, so the saved `model_top_task_*` files should be evaluated before using those runs as negative evidence.
+
+Compatibility facts:
+
+- Six run-local Jun24 top-task checkpoints load as current-shape torch checkpoints:
+  - `logs/r2_amp/Jun24_07-02-24_command_hold_run_recovery_staged_disturb_release/Jun24_07-02-24_command_hold_run_recovery_staged_disturb_release/model_top_task_6996.pt`
+  - `logs/r2_amp/Jun24_07-02-24_command_hold_run_recovery_staged_disturb_release/Jun24_07-02-24_command_hold_run_recovery_staged_disturb_release/model_top_task_7752.pt`
+  - `logs/r2_amp/Jun24_07-02-24_command_hold_run_recovery_staged_disturb_release/Jun24_07-02-24_command_hold_run_recovery_staged_disturb_release/model_top_task_7845.pt`
+  - `logs/r2_amp/Jun24_16-51-59_command_hold_eval_manifold_staged_disturb_release/model_top_task_1490.pt`
+  - `logs/r2_amp/Jun24_16-51-59_command_hold_eval_manifold_staged_disturb_release/model_top_task_1517.pt`
+  - `logs/r2_amp/Jun24_16-51-59_command_hold_eval_manifold_staged_disturb_release/model_top_task_1518.pt`
+- Local compatibility load directories were created under:
+
+```text
+logs/r2_amp/_topk_eval_compat/Jun24
+```
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun24_top_run_recovery_6996
+outputs/eval/June30_Jun24_top_run_recovery_7752
+outputs/eval/June30_Jun24_top_run_recovery_7845
+outputs/eval/June30_Jun24_top_eval_manifold_staged_1490
+outputs/eval/June30_Jun24_top_eval_manifold_staged_1517
+outputs/eval/June30_Jun24_top_eval_manifold_staged_1518
+outputs/eval/June30_Jun24_top_task_eval_summary/jun24_top_task_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides:
+  - `configs/ablation/command_hold_run_recovery_staged_disturb_release.json`
+  - `configs/ablation/command_hold_eval_manifold_staged_disturb_release.json`
+
+Aggregate comparison:
+
+| eval | config | checkpoint | source | rows | avg task return | avg fall rate | avg survival s | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---|---:|---|---:|---:|---:|---:|---|---:|---|---:|
+| `eval_manifold_staged_top_1518` | `command_hold_eval_manifold_staged_disturb_release` | `1518` | `top_task` | 7 | 17.34 | 0.435 | 6.70 | `jump` | -2.72 | `jump` | 1.000 |
+| `eval_manifold_staged_top_1490` | `command_hold_eval_manifold_staged_disturb_release` | `1490` | `top_task` | 7 | 15.16 | 0.491 | 6.09 | `jump` | -2.25 | `jump` | 1.000 |
+| `eval_manifold_staged_top_1517` | `command_hold_eval_manifold_staged_disturb_release` | `1517` | `top_task` | 7 | 15.15 | 0.500 | 6.31 | `jump` | -2.34 | `jump` | 1.000 |
+| `run_recovery_top_7845` | `command_hold_run_recovery_staged_disturb_release` | `7845` | `top_task` | 7 | -2.56 | 0.938 | 1.41 | `jump` | -4.71 | `strafe_right` | 1.000 |
+| `run_recovery_top_6996` | `command_hold_run_recovery_staged_disturb_release` | `6996` | `top_task` | 7 | -2.87 | 0.960 | 1.17 | `jump` | -4.57 | `strafe_right` | 1.000 |
+| `run_recovery_top_7752` | `command_hold_run_recovery_staged_disturb_release` | `7752` | `top_task` | 7 | -4.24 | 1.000 | 0.69 | `run` | -5.27 | `jump` | 1.000 |
+| `eval_manifold_staged_best` | `command_hold_eval_manifold_staged_disturb_release` | `best` | `best_task` | 7 | -7.20 | 0.496 | 6.45 | `jump` | -10.21 | `jump` | 1.000 |
+| `run_recovery_8000` | `command_hold_run_recovery_staged_disturb_release` | `8000` | `final` | 7 | -8.49 | 0.933 | 1.43 | `jump` | -9.95 | `strafe_right` | 1.000 |
+| `run_recovery_best` | `command_hold_run_recovery_staged_disturb_release` | `best` | `best_task` | 7 | -8.56 | 0.920 | 1.55 | `run` | -11.54 | `strafe_right` | 1.000 |
+| `eval_manifold_staged_8000` | `command_hold_eval_manifold_staged_disturb_release` | `8000` | `final` | 7 | -35.71 | 0.533 | 6.31 | `turn_left` | -50.62 | `jump` | 1.000 |
+
+Selected per-preset facts:
+
+- `eval_manifold_staged_top_1518` is the strongest Jun24 top-task checkpoint in this batch. It is good on `walk_fast` (task return `29.93`, fall rate `0.047`), `strafe_right` (`27.38`, `0.219`), `walk_slow` (`25.66`, `0.266`), and `run` (`20.77`, `0.203`).
+- The same `eval_manifold_staged_top_1518` checkpoint still fully fails `jump` (`task_return=-2.72`, `fall_rate=1.000`) and `stand` (`task_return=0.45`, `fall_rate=1.000`), so it is not a robust replacement for the Jun17 selective-walk best checkpoint.
+- `run_recovery_top_7845` improves over the Jun24 run-recovery best/final aggregate, but it remains unstable: six of seven presets have `fall_rate=1.000`, while only `run` is partly usable (`task_return=5.68`, `fall_rate=0.562`).
+
+Interpretation:
+
+- The Jun24 top-task gap is now closed for `command_hold_run_recovery_staged_disturb_release` and `command_hold_eval_manifold_staged_disturb_release`.
+- `eval_manifold_staged_top_1518` changes the historical read of the Jun24 eval-manifold run: the run did contain a much better intermediate checkpoint than its best/final archive suggested.
+- It still does not change the current training recommendation. The best evaluated control remains Jun17 `expert_hard_gate_selective_walk/model_best_task.pt`, because that checkpoint has far lower no-disturb fall rate and already survived partial `jump`/`run` disturbance up to ratio `0.75`.
+- The next local no-training step is to continue the same top-task coverage audit backward through Jun23, Jun21, Jun20, and Jun19 before finalizing the historical checkpoint ranking.
+
+### Jun23 Top-Task Checkpoint Evaluation - 2026-06-30
+
+Hypothesis: the Jun23 staged-release runs had saved top-task checkpoints that were not covered by the existing best/final fixed-preset evaluations, so they should be evaluated before closing the historical checkpoint ranking.
+
+Compatibility facts:
+
+- Six Jun23 top-task checkpoints load successfully in the current `r2gym` evaluation environment, and their internal `iter` values match the filename labels:
+  - `logs/r2_amp/Jun23/Jun23_03-38-06_command_hold_staged_disturb_release/model_top_task_1315.pt`
+  - `logs/r2_amp/Jun23/Jun23_03-38-06_command_hold_staged_disturb_release/model_top_task_1331.pt`
+  - `logs/r2_amp/Jun23/Jun23_03-38-06_command_hold_staged_disturb_release/model_top_task_1705.pt`
+  - `logs/r2_amp/Jun23/Jun23_14-58-32_command_hold_run_focused_staged_disturb_release/model_top_task_4221.pt`
+  - `logs/r2_amp/Jun23/Jun23_14-58-32_command_hold_run_focused_staged_disturb_release/model_top_task_4294.pt`
+  - `logs/r2_amp/Jun23/Jun23_14-58-32_command_hold_run_focused_staged_disturb_release/model_top_task_7112.pt`
+- Local compatibility load directories were created under:
+
+```text
+logs/r2_amp/_topk_eval_compat/Jun23
+```
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun23_top_staged_1315
+outputs/eval/June30_Jun23_top_staged_1331
+outputs/eval/June30_Jun23_top_staged_1705
+outputs/eval/June30_Jun23_top_run_focused_4221
+outputs/eval/June30_Jun23_top_run_focused_4294
+outputs/eval/June30_Jun23_top_run_focused_7112
+outputs/eval/June30_Jun23_top_task_eval_summary/jun23_top_task_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides:
+  - `configs/ablation/command_hold_staged_disturb_release.json`
+  - `configs/ablation/command_hold_run_focused_staged_disturb_release.json`
+
+Aggregate comparison:
+
+| eval | config | checkpoint | source | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `staged_top_1331` | `command_hold_staged_disturb_release` | `1331` | `top_task` | 7 | 15.04 | 0.431 | 6.65 | 0.501 | 0.628 | `run` | -4.86 | `run` | 1.000 |
+| `staged_top_1315` | `command_hold_staged_disturb_release` | `1315` | `top_task` | 7 | 12.40 | 0.513 | 5.86 | 0.555 | 0.699 | `run` | -4.96 | `run` | 1.000 |
+| `staged_top_1705` | `command_hold_staged_disturb_release` | `1705` | `top_task` | 7 | 7.20 | 0.699 | 4.24 | 0.636 | 0.737 | `run` | -4.75 | `run` | 1.000 |
+| `run_focused_top_4221` | `command_hold_run_focused_staged_disturb_release` | `4221` | `top_task` | 7 | -0.81 | 0.888 | 1.92 | 0.687 | 0.968 | `jump` | -4.53 | `jump` | 1.000 |
+| `run_focused_top_4294` | `command_hold_run_focused_staged_disturb_release` | `4294` | `top_task` | 7 | -1.80 | 0.915 | 1.67 | 0.720 | 0.976 | `jump` | -4.89 | `jump` | 1.000 |
+| `run_focused_top_7112` | `command_hold_run_focused_staged_disturb_release` | `7112` | `top_task` | 7 | -3.49 | 0.953 | 1.24 | 0.791 | 1.083 | `run` | -6.55 | `run` | 1.000 |
+| `run_focused_best` | `command_hold_run_focused_staged_disturb_release` | `best` | `best_task` | 7 | -7.91 | 0.978 | 1.17 | 0.856 | 1.170 | `walk_fast` | -8.68 | `jump` | 1.000 |
+| `run_focused_8000` | `command_hold_run_focused_staged_disturb_release` | `8000` | `final` | 7 | -8.46 | 1.000 | 0.75 | 0.883 | 1.198 | `run` | -10.10 | `run` | 1.000 |
+| `staged_best` | `command_hold_staged_disturb_release` | `best` | `best_task` | 7 | -14.39 | 0.540 | 5.66 | 0.569 | 0.664 | `turn_left` | -23.01 | `run` | 1.000 |
+| `staged_8000` | `command_hold_staged_disturb_release` | `8000` | `final` | 7 | -41.51 | 0.219 | 8.23 | 0.405 | 0.488 | `walk_fast` | -50.78 | `run` | 0.656 |
+
+Selected per-preset facts:
+
+- `staged_top_1331` is the strongest Jun23 checkpoint in this batch. It is reasonably good on `strafe_right` (task return `29.66`, fall rate `0.172`), `walk_slow` (`26.46`, `0.156`), and `turn_left` (`20.93`, `0.141`).
+- The same `staged_top_1331` checkpoint fully fails `run` (`task_return=-4.86`, `fall_rate=1.000`) and is still weak on `stand` (`task_return=5.85`, `fall_rate=0.828`). This keeps it below the Jun24 `eval_manifold_staged_top_1518` checkpoint and far below the Jun17 selective-walk best reference.
+- `run_focused_top_4221` is the best run-focused top-task checkpoint but remains broadly unstable: `jump`, `stand`, `turn_left`, `walk_slow`, and `strafe_right` all have `fall_rate=1.000`; only `run` (`task_return=9.32`, `fall_rate=0.562`) and `walk_fast` (`5.88`, `0.656`) are partly usable.
+
+Interpretation:
+
+- The Jun23 top-task checkpoint gap is now closed for both staged-release runs.
+- Jun23 contains useful evidence that early top-task snapshots can be much better than archived best/final checkpoints, especially for `command_hold_staged_disturb_release`; however, the absolute robustness level is still insufficient.
+- No Jun23 checkpoint should be used as a warm-start source. The current candidate hierarchy remains Jun17 `expert_hard_gate_selective_walk/model_best_task.pt` first, Jun25_0 conservative `8000` as a diagnostic anchor, and Jun24 `eval_manifold_staged_top_1518` only as historical evidence.
+- The next local no-training step is to continue the same top-task coverage audit through Jun21, Jun20, and Jun19.
+
+### Jun21 Top-Task Checkpoint Evaluation - 2026-06-30
+
+Hypothesis: the June21 rerun had poor best/final task-return numbers for `command_hold_conservative_penalty_ramp`, but its saved top-task checkpoints may contain a better intermediate policy that the best/final archive missed.
+
+Compatibility facts:
+
+- Six Jun21 top-task checkpoints load successfully in the current `r2gym` evaluation environment, and their internal `iter` values match the filename labels:
+  - `logs/r2_amp/Jun21/Jun21_12-28-33_command_hold_conservative_penalty_ramp/model_top_task_7075.pt`
+  - `logs/r2_amp/Jun21/Jun21_12-28-33_command_hold_conservative_penalty_ramp/model_top_task_7654.pt`
+  - `logs/r2_amp/Jun21/Jun21_12-28-33_command_hold_conservative_penalty_ramp/model_top_task_7657.pt`
+  - `logs/r2_amp/Jun21/Jun21_12-28-55_command_hold_controlled_disturb_release/model_top_task_1450.pt`
+  - `logs/r2_amp/Jun21/Jun21_12-28-55_command_hold_controlled_disturb_release/model_top_task_1498.pt`
+  - `logs/r2_amp/Jun21/Jun21_12-28-55_command_hold_controlled_disturb_release/model_top_task_1608.pt`
+- Local compatibility load directories were created under:
+
+```text
+logs/r2_amp/_topk_eval_compat/Jun21
+```
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun21_top_conservative_penalty_ramp_7075
+outputs/eval/June30_Jun21_top_conservative_penalty_ramp_7654
+outputs/eval/June30_Jun21_top_conservative_penalty_ramp_7657
+outputs/eval/June30_Jun21_top_controlled_disturb_1450
+outputs/eval/June30_Jun21_top_controlled_disturb_1498
+outputs/eval/June30_Jun21_top_controlled_disturb_1608
+outputs/eval/June30_Jun21_top_task_eval_summary/jun21_top_task_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides:
+  - `configs/ablation/command_hold_conservative_penalty_ramp.json`
+  - `configs/ablation/command_hold_controlled_disturb_release.json`
+
+Aggregate comparison:
+
+| eval | config | checkpoint | source | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `conservative_penalty_top_7654` | `command_hold_conservative_penalty_ramp` | `7654` | `top_task` | 7 | 29.16 | 0.054 | 9.59 | 0.328 | 0.400 | 0.00548 | -0.687 | 1.575 | `run` | 7.06 | `run` | 0.156 |
+| `conservative_penalty_top_7075` | `command_hold_conservative_penalty_ramp` | `7075` | `top_task` | 7 | 28.46 | 0.069 | 9.47 | 0.339 | 0.407 | 0.00551 | -0.684 | 1.574 | `run` | 6.74 | `stand` | 0.250 |
+| `conservative_penalty_top_7657` | `command_hold_conservative_penalty_ramp` | `7657` | `top_task` | 7 | 27.21 | 0.107 | 9.17 | 0.362 | 0.430 | 0.00534 | -0.688 | 1.575 | `run` | 3.12 | `run` | 0.297 |
+| `controlled_disturb_top_1450` | `command_hold_controlled_disturb_release` | `1450` | `top_task` | 7 | 10.30 | 0.605 | 5.12 | 0.603 | 0.710 | 0.00453 | -0.768 | 1.631 | `walk_fast` | -5.04 | `walk_fast` | 1.000 |
+| `controlled_disturb_top_1498` | `command_hold_controlled_disturb_release` | `1498` | `top_task` | 7 | 8.66 | 0.650 | 4.73 | 0.608 | 0.740 | 0.00449 | -0.770 | 1.637 | `walk_fast` | -5.02 | `walk_fast` | 1.000 |
+| `controlled_disturb_top_1608` | `command_hold_controlled_disturb_release` | `1608` | `top_task` | 7 | 6.99 | 0.730 | 3.90 | 0.606 | 0.753 | 0.00442 | -0.775 | 1.641 | `run` | -5.05 | `run` | 1.000 |
+| `controlled_disturb_best` | `command_hold_controlled_disturb_release` | `best` | `best_task` | 7 | -9.98 | 0.676 | 4.73 | 0.641 | 0.749 | 0.00438 | -0.774 | 1.640 | `jump` | -14.95 | `stand` | 1.000 |
+| `conservative_penalty_8000` | `command_hold_conservative_penalty_ramp` | `8000` | `final` | 7 | -33.57 | 0.045 | 9.68 | 0.359 | 0.406 | 0.00541 | -0.692 | 1.577 | `run` | -46.21 | `stand` | 0.188 |
+| `controlled_disturb_8000` | `command_hold_controlled_disturb_release` | `8000` | `final` | 7 | -33.83 | 0.498 | 6.19 | 0.634 | 0.614 | 0.00229 | -0.863 | 1.768 | `walk_fast` | -46.18 | `run` | 1.000 |
+| `conservative_penalty_best` | `command_hold_conservative_penalty_ramp` | `best` | `best_task` | 7 | -34.71 | 0.051 | 9.68 | 0.340 | 0.399 | 0.00554 | -0.686 | 1.574 | `run` | -54.38 | `run` | 0.109 |
+
+Selected per-preset facts:
+
+- `conservative_penalty_top_7654` is a newly important historical candidate. It is strong on `strafe_right` (task return `40.42`, fall rate `0.000`), `walk_slow` (`38.24`, `0.016`), `turn_left` (`34.58`, `0.016`), `stand` (`33.37`, `0.125`), and `jump` (`31.73`, `0.047`).
+- Its main weakness is still `run`: `task_return=7.06`, `fall_rate=0.156`, `survival=8.57s`. This is much weaker than Jun17 selective-walk best on the same no-disturb fixed-preset protocol (`run` task return `20.03`, fall rate `0.031`).
+- `command_hold_conservative_penalty_ramp` best/final were misleading for task return. Both kept low fall rates but produced very negative `run` returns (`best=-54.38`, `8000=-46.21`), while top-task `7654` retains low fall rate and much higher task return.
+- `controlled_disturb_top_1450` improves over the controlled-disturb best/final task return, but it is not a candidate because `walk_fast` and `run` both have `fall_rate=1.000`.
+
+Interpretation:
+
+- The Jun21 top-task gap is now closed, and it materially changes the historical ranking.
+- `conservative_penalty_top_7654` is now the second-best no-disturb fixed-preset historical checkpoint by aggregate task return among the evaluated top-task batch, close to Jun17 selective-walk best (`29.16` vs `29.79`) but still weaker on the critical `run` preset.
+- It has now received the same focused `jump`/`run` disturbance and termination/state-trace diagnostics below.
+- The next local no-training step is to continue the remaining top-task coverage audit through Jun20 and Jun19.
+
+### Jun21 Conservative-Penalty Top-7654 Robustness Diagnostic - 2026-06-30
+
+Hypothesis: because Jun21 `command_hold_conservative_penalty_ramp/model_top_task_7654.pt` nearly matches Jun17 selective-walk best on no-disturb fixed-preset aggregate metrics, it needs the same `jump`/`run` disturbance and state-trace diagnostic before ranking it as a warm-start/control candidate.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June30_Jun21_conservative_penalty_top_7654_disturb_sweep
+outputs/eval/June30_Jun21_conservative_penalty_top_7654_disturb_sweep/summary_metrics.csv
+outputs/eval/June30_Jun21_conservative_penalty_top_7654_state_trace_corrected
+outputs/eval/June30_Jun21_conservative_penalty_top_7654_state_trace_disturb100
+outputs/eval/June30_Jun21_conservative_penalty_top_7654_state_trace_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- Checkpoint: `logs/r2_amp/_topk_eval_compat/Jun21/conservative_penalty_ramp_top_7654/model_7654.pt`, hard-linked from `logs/r2_amp/Jun21/Jun21_12-28-33_command_hold_conservative_penalty_ramp/model_top_task_7654.pt`.
+- Config: `configs/ablation/command_hold_conservative_penalty_ramp.json`.
+- Disturbance sweep: `jump` and `run`, ratios `0.0`, `0.25`, `0.5`, `0.75`, `1.0`, `64` episodes per row.
+- State trace: `jump` and `run`, `64` episodes per row, `--record_termination_reasons`, `--record_state_trace`, `--state_trace_window_steps=50`, once with default corrected no-disturb evaluation and once with `--eval_disturb_ratio=1.0`.
+
+Focused disturbance sweep:
+
+| preset | disturb ratio | task return | fall rate | survival s | lin rmse | yaw rmse | style reward | disc gap | torque L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | 0.00 | 31.39 | 0.047 | 9.66 | 0.203 | 0.295 | 0.00834 | 1.350 | 19949 |
+| `jump` | 0.25 | 30.88 | 0.062 | 9.58 | 0.237 | 0.296 | 0.00835 | 1.344 | 18312 |
+| `jump` | 0.50 | 29.18 | 0.062 | 9.56 | 0.246 | 0.331 | 0.00816 | 1.359 | 16129 |
+| `jump` | 0.75 | 6.83 | 0.500 | 6.94 | 0.519 | 0.596 | 0.00289 | 1.714 | 14785 |
+| `jump` | 1.00 | -13.18 | 1.000 | 1.34 | 0.755 | 0.927 | 0.00391 | 1.651 | 13660 |
+| `run` | 0.00 | 3.23 | 0.188 | 8.33 | 0.801 | 0.760 | 0.00521 | 1.580 | 40841 |
+| `run` | 0.25 | 5.32 | 0.031 | 9.78 | 0.697 | 0.647 | 0.00560 | 1.577 | 38167 |
+| `run` | 0.50 | 0.77 | 0.078 | 9.56 | 0.754 | 0.775 | 0.00443 | 1.641 | 35051 |
+| `run` | 0.75 | -3.56 | 0.250 | 8.19 | 0.861 | 1.068 | 0.00161 | 1.806 | 29771 |
+| `run` | 1.00 | -18.41 | 1.000 | 2.44 | 1.307 | 1.820 | 0.00148 | 1.817 | 33311 |
+
+Termination facts:
+
+| protocol | preset | task return | fall rate | survival s | termination reason | detail | count | rate | mean survival s |
+|---|---|---:|---:|---:|---|---|---:|---:|---:|
+| corrected no-disturb | `jump` | 29.37 | 0.109 | 9.40 | contact | `base_link` | 7 | 0.109 | 4.32 |
+| corrected no-disturb | `jump` | 29.37 | 0.109 | 9.40 | timeout | - | 57 | 0.891 | 10.02 |
+| corrected no-disturb | `run` | 7.64 | 0.172 | 8.64 | contact | `base_link` | 11 | 0.172 | 1.97 |
+| corrected no-disturb | `run` | 7.64 | 0.172 | 8.64 | timeout | - | 53 | 0.828 | 10.02 |
+| full disturb ratio 1.0 | `jump` | -13.18 | 1.000 | 1.34 | contact | `base_link` | 62 | 0.969 | 1.34 |
+| full disturb ratio 1.0 | `jump` | -13.18 | 1.000 | 1.34 | orientation | `roll_pitch` | 2 | 0.031 | 1.41 |
+| full disturb ratio 1.0 | `run` | -17.11 | 1.000 | 2.26 | contact | `base_link` | 52 | 0.812 | 2.29 |
+| full disturb ratio 1.0 | `run` | -17.11 | 1.000 | 2.26 | orientation | `roll_pitch` | 12 | 0.188 | 2.15 |
+
+State-trace facts:
+
+| protocol | preset | reason | detail | n | final z | min z | max abs roll | max abs pitch | final lin err | final yaw err | max contact |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| corrected no-disturb | `jump` | contact | `base_link` | 7 | 0.741 | 0.673 | 0.291 | 0.735 | 1.001 | 0.831 | 1295.4 |
+| corrected no-disturb | `jump` | timeout | - | 57 | 0.745 | 0.731 | 0.051 | 0.215 | 0.518 | -0.096 | 0.0 |
+| corrected no-disturb | `run` | contact | `base_link` | 11 | 0.697 | 0.644 | 0.272 | 0.456 | 1.297 | 0.753 | 797.4 |
+| corrected no-disturb | `run` | timeout | - | 53 | 0.736 | 0.715 | 0.116 | 0.128 | 0.933 | -0.491 | 0.0 |
+| full disturb ratio 1.0 | `jump` | contact | `base_link` | 62 | 0.557 | 0.278 | 0.916 | 1.080 | 1.759 | 0.139 | 3980.6 |
+| full disturb ratio 1.0 | `jump` | orientation | `roll_pitch` | 2 | 0.642 | 0.559 | 0.563 | 1.018 | 1.524 | -0.221 | 0.0 |
+| full disturb ratio 1.0 | `run` | contact | `base_link` | 52 | 0.550 | 0.364 | 0.873 | 1.081 | 1.619 | 0.117 | 5859.1 |
+| full disturb ratio 1.0 | `run` | orientation | `roll_pitch` | 12 | 0.543 | 0.265 | 0.826 | 1.047 | 2.210 | -0.556 | 0.0 |
+
+Facts:
+
+- Jun21 `top_7654` is competitive on no-disturb `jump`, but weaker than Jun17 selective-walk best under partial disturbance. At `jump` ratio `0.75`, Jun21 fall rate is `0.500` while Jun17 selective-walk best is `0.016`.
+- `run` is the decisive weakness. At no-disturb and ratio `0.75`, Jun21 `top_7654` has task returns `3.23` and `-3.56`; Jun17 selective-walk best has `16.10` and `11.57`.
+- Full disturbance breaks Jun21 `top_7654` in both `jump` and `run`, with `fall_rate=1.000`.
+- Full-disturb failures are mostly `base_link` contact, with roll/pitch orientation as a secondary termination path. This is the same broad failure class as Jun17 selective-walk best and Jun25_0 conservative `8000`, but the Jun21 checkpoint reaches the failure region earlier at ratio `0.75`.
+
+Interpretation:
+
+- Jun21 `conservative_penalty_top_7654` remains an important historical control, but it should not replace Jun17 selective-walk best as the leading warm-start/control source.
+- The positive signal from Jun21 is not full robustness; it is that a non-selective-style conservative-penalty run can produce a strong intermediate no-disturb checkpoint before best/final task returns collapse.
+- The next local no-training step should return to top-task coverage for Jun20 and Jun19. If a later training run needs a second warm-start comparison, Jun21 `top_7654` is the best secondary candidate after Jun17 selective-walk best.
+
+### Jun20 Top-Task Checkpoint Evaluation - 2026-06-30
+
+Hypothesis: the June20 best/final evaluations made the batch look weak, but the saved `model_top_task_*` checkpoints may contain high-quality intermediate policies before late task-return collapse.
+
+Compatibility facts:
+
+- Twelve Jun20 top-task checkpoints load successfully in the current `r2gym` evaluation environment, and their internal `iter` values match the filename labels:
+  - `command_hold_conservative_penalty_ramp`: `model_top_task_5818.pt`, `model_top_task_7663.pt`, `model_top_task_7930.pt`
+  - `command_hold_controlled_disturb_release`: `model_top_task_1166.pt`, `model_top_task_1706.pt`, `model_top_task_1944.pt`
+  - `command_hold_no_push`: `model_top_task_6059.pt`, `model_top_task_6973.pt`, `model_top_task_7440.pt`
+  - `command_hold_style_lowcap`: `model_top_task_7439.pt`, `model_top_task_7600.pt`, `model_top_task_7937.pt`
+- Local compatibility load directories were created under:
+
+```text
+logs/r2_amp/_topk_eval_compat/Jun20
+```
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun20_top_conservative_penalty_ramp_5818
+outputs/eval/June30_Jun20_top_conservative_penalty_ramp_7663
+outputs/eval/June30_Jun20_top_conservative_penalty_ramp_7930
+outputs/eval/June30_Jun20_top_controlled_disturb_1166
+outputs/eval/June30_Jun20_top_controlled_disturb_1706
+outputs/eval/June30_Jun20_top_controlled_disturb_1944
+outputs/eval/June30_Jun20_top_no_push_6059
+outputs/eval/June30_Jun20_top_no_push_6973
+outputs/eval/June30_Jun20_top_no_push_7440
+outputs/eval/June30_Jun20_top_style_lowcap_7439
+outputs/eval/June30_Jun20_top_style_lowcap_7600
+outputs/eval/June30_Jun20_top_style_lowcap_7937
+outputs/eval/June30_Jun20_top_task_eval_summary/jun20_top_task_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides:
+  - `configs/ablation/command_hold_conservative_penalty_ramp.json`
+  - `configs/ablation/command_hold_controlled_disturb_release.json`
+  - `configs/ablation/command_hold_no_push.json`
+  - `configs/ablation/command_hold_style_lowcap.json`
+
+Aggregate comparison:
+
+| eval | config | checkpoint | source | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `conservative_penalty_top_5818` | `command_hold_conservative_penalty_ramp` | `5818` | `top_task` | 7 | 30.28 | 0.062 | 9.63 | 0.289 | 0.379 | 0.00475 | -0.739 | 1.630 | `run` | 11.41 | `stand` | 0.172 |
+| `conservative_penalty_top_7663` | `command_hold_conservative_penalty_ramp` | `7663` | `top_task` | 7 | 29.44 | 0.080 | 9.55 | 0.290 | 0.414 | 0.00553 | -0.694 | 1.586 | `run` | 9.66 | `jump` | 0.312 |
+| `conservative_penalty_top_7930` | `command_hold_conservative_penalty_ramp` | `7930` | `top_task` | 7 | 29.19 | 0.071 | 9.64 | 0.291 | 0.431 | 0.00541 | -0.703 | 1.596 | `run` | 10.94 | `jump` | 0.203 |
+| `style_lowcap_top_7439` | `command_hold_style_lowcap` | `7439` | `top_task` | 7 | 28.64 | 0.056 | 9.68 | 0.295 | 0.440 | 0.00538 | -0.699 | 1.568 | `run` | 3.92 | `run` | 0.266 |
+| `style_lowcap_top_7600` | `command_hold_style_lowcap` | `7600` | `top_task` | 7 | 27.95 | 0.132 | 9.12 | 0.332 | 0.467 | 0.00522 | -0.704 | 1.570 | `run` | -0.85 | `run` | 0.703 |
+| `no_push_top_6973` | `command_hold_no_push` | `6973` | `top_task` | 7 | 26.68 | 0.205 | 8.24 | 0.389 | 0.530 | 0.00278 | -0.847 | 1.733 | `run` | -6.78 | `run` | 0.984 |
+| `style_lowcap_top_7937` | `command_hold_style_lowcap` | `7937` | `top_task` | 7 | 26.23 | 0.188 | 8.58 | 0.364 | 0.506 | 0.00476 | -0.729 | 1.597 | `run` | -5.12 | `run` | 1.000 |
+| `no_push_top_7440` | `command_hold_no_push` | `7440` | `top_task` | 7 | 24.92 | 0.250 | 7.84 | 0.402 | 0.521 | 0.00272 | -0.848 | 1.732 | `run` | -5.65 | `run` | 1.000 |
+| `no_push_top_6059` | `command_hold_no_push` | `6059` | `top_task` | 7 | 24.58 | 0.199 | 8.39 | 0.401 | 0.567 | 0.00266 | -0.846 | 1.739 | `run` | 2.82 | `run` | 0.578 |
+| `controlled_disturb_top_1706` | `command_hold_controlled_disturb_release` | `1706` | `top_task` | 7 | 20.24 | 0.290 | 7.47 | 0.416 | 0.576 | 0.00431 | -0.768 | 1.631 | `jump` | -4.67 | `jump` | 1.000 |
+| `controlled_disturb_top_1944` | `command_hold_controlled_disturb_release` | `1944` | `top_task` | 7 | 17.01 | 0.357 | 6.92 | 0.455 | 0.608 | 0.00437 | -0.761 | 1.624 | `jump` | -4.68 | `jump` | 1.000 |
+| `controlled_disturb_top_1166` | `command_hold_controlled_disturb_release` | `1166` | `top_task` | 7 | 16.33 | 0.429 | 6.55 | 0.479 | 0.633 | 0.00418 | -0.781 | 1.637 | `run` | -4.60 | `jump` | 1.000 |
+| `controlled_disturb_best` | `command_hold_controlled_disturb_release` | `best` | `best_task` | 7 | -9.44 | 0.435 | - | 0.536 | 0.651 | 0.00418 | -0.782 | 1.638 | `turn_left` | -13.58 | `run` | 1.000 |
+| `no_push_best` | `command_hold_no_push` | `best` | `best_task` | 7 | -22.34 | 0.205 | - | 0.441 | 0.604 | 0.00269 | -0.845 | 1.738 | `jump` | -28.75 | `run` | 0.609 |
+| `no_push_8000` | `command_hold_no_push` | `8000` | `final` | 7 | -31.86 | 0.143 | - | 0.346 | 0.520 | 0.00264 | -0.853 | 1.734 | `jump` | -41.82 | `run` | 0.500 |
+| `style_lowcap_8000` | `command_hold_style_lowcap` | `8000` | `final` | 7 | -44.22 | 0.167 | - | 0.368 | 0.489 | 0.00476 | -0.728 | 1.594 | `walk_fast` | -61.55 | `run` | 1.000 |
+| `style_lowcap_best` | `command_hold_style_lowcap` | `best` | `best_task` | 7 | -45.33 | 0.154 | - | 0.358 | 0.498 | 0.00482 | -0.724 | 1.593 | `walk_fast` | -61.84 | `run` | 1.000 |
+| `controlled_disturb_8000` | `command_hold_controlled_disturb_release` | `8000` | `final` | 7 | -67.70 | 0.049 | - | 0.318 | 0.466 | 0.00585 | -0.670 | 1.547 | `run` | -94.09 | `jump` | 0.172 |
+| `conservative_penalty_best` | `command_hold_conservative_penalty_ramp` | `best` | `best_task` | 7 | -79.37 | 0.087 | - | 0.317 | 0.426 | 0.00537 | -0.704 | 1.597 | `turn_left` | -93.46 | `run` | 0.188 |
+| `conservative_penalty_8000` | `command_hold_conservative_penalty_ramp` | `8000` | `final` | 7 | -80.78 | 0.080 | - | 0.298 | 0.438 | 0.00544 | -0.701 | 1.590 | `turn_left` | -91.15 | `jump` | 0.391 |
+
+Selected per-preset facts:
+
+- `conservative_penalty_top_5818` is the strongest no-disturb fixed-preset checkpoint found so far by aggregate task return (`30.28`), narrowly above Jun17 selective-walk best (`29.79`).
+- Its weakest preset is still `run`: task return `11.41`, fall rate `0.125`, survival `9.20s`. This is better than Jun21 `top_7654` on `run` but still weaker than Jun17 selective-walk best (`run` task `20.03`, fall `0.031`).
+- `style_lowcap_top_7439` is also strong by aggregate fall rate (`0.056`) and task return (`28.64`), but its `run` row is much weaker (`task_return=3.92`, `fall_rate=0.266`).
+- The best/final rows for June20 are misleading for task quality because several final checkpoints keep low fall rates while task return collapses to very negative values.
+
+Interpretation:
+
+- The Jun20 top-task checkpoint gap is now closed for all four Jun20 runs.
+- Jun20 materially changes the candidate ranking: `command_hold_conservative_penalty_ramp/model_top_task_5818.pt` is now the strongest no-disturb aggregate checkpoint, but it needs focused robustness evidence before replacing Jun17 selective-walk best as the leading candidate.
+- The high top-task scores support a repeated pattern: intermediate snapshots before late collapse are more informative than the archived best/final names for this experiment line.
+
+### Jun20 Conservative-Penalty Top-5818 Robustness Diagnostic - 2026-06-30
+
+Hypothesis: because Jun20 `command_hold_conservative_penalty_ramp/model_top_task_5818.pt` is now the strongest no-disturb aggregate checkpoint, it needs the same `jump`/`run` disturbance and state-trace diagnostic used for Jun17 selective-walk best and Jun21 `top_7654`.
+
+Local diagnostic outputs:
+
+```text
+outputs/eval/June30_Jun20_conservative_penalty_top_5818_disturb_sweep
+outputs/eval/June30_Jun20_conservative_penalty_top_5818_disturb_sweep/summary_metrics.csv
+outputs/eval/June30_Jun20_conservative_penalty_top_5818_state_trace_corrected
+outputs/eval/June30_Jun20_conservative_penalty_top_5818_state_trace_disturb100
+outputs/eval/June30_Jun20_conservative_penalty_top_5818_state_trace_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- Checkpoint: `logs/r2_amp/_topk_eval_compat/Jun20/conservative_penalty_ramp_top_5818/model_5818.pt`, hard-linked from `logs/r2_amp/Jun20/Jun20_15-18-58_command_hold_conservative_penalty_ramp/model_top_task_5818.pt`.
+- Config: `configs/ablation/command_hold_conservative_penalty_ramp.json`.
+- Disturbance sweep: `jump` and `run`, ratios `0.0`, `0.25`, `0.5`, `0.75`, `1.0`, `64` episodes per row.
+- State trace: `jump` and `run`, `64` episodes per row, `--record_termination_reasons`, `--record_state_trace`, `--state_trace_window_steps=50`, once with default corrected no-disturb evaluation and once with `--eval_disturb_ratio=1.0`.
+
+Focused disturbance sweep:
+
+| preset | disturb ratio | task return | fall rate | survival s | lin rmse | yaw rmse | style reward | disc gap | torque L2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | 0.00 | 24.76 | 0.203 | 8.45 | 0.278 | 0.380 | 0.00639 | 1.491 | 21345 |
+| `jump` | 0.25 | 28.76 | 0.094 | 9.28 | 0.271 | 0.343 | 0.00688 | 1.473 | 15030 |
+| `jump` | 0.50 | 29.01 | 0.062 | 9.49 | 0.250 | 0.321 | 0.00427 | 1.641 | 10835 |
+| `jump` | 0.75 | 7.30 | 0.453 | 7.26 | 0.477 | 0.718 | 0.00287 | 1.733 | 12984 |
+| `jump` | 1.00 | -18.12 | 1.000 | 1.34 | 0.953 | 1.288 | 0.00327 | 1.708 | 16651 |
+| `run` | 0.00 | 10.61 | 0.203 | 9.09 | 0.546 | 0.702 | 0.00574 | 1.575 | 29061 |
+| `run` | 0.25 | 18.22 | 0.031 | 9.82 | 0.516 | 0.536 | 0.00570 | 1.579 | 22681 |
+| `run` | 0.50 | 13.69 | 0.000 | 10.02 | 0.482 | 0.661 | 0.00575 | 1.575 | 21039 |
+| `run` | 0.75 | 3.94 | 0.078 | 9.62 | 0.575 | 1.040 | 0.00158 | 1.814 | 23700 |
+| `run` | 1.00 | -12.72 | 1.000 | 1.46 | 1.126 | 1.594 | 0.00304 | 1.737 | 24339 |
+
+Termination facts:
+
+| protocol | preset | task return | fall rate | survival s | termination reason | detail | count | rate | mean survival s |
+|---|---|---:|---:|---:|---|---|---:|---:|---:|
+| corrected no-disturb | `jump` | 24.40 | 0.172 | 8.68 | contact | `base_link` | 11 | 0.172 | 2.25 |
+| corrected no-disturb | `jump` | 24.40 | 0.172 | 8.68 | timeout | - | 53 | 0.828 | 10.02 |
+| corrected no-disturb | `run` | 10.80 | 0.203 | 9.13 | contact | `base_link` | 13 | 0.203 | 5.64 |
+| corrected no-disturb | `run` | 10.80 | 0.203 | 9.13 | timeout | - | 51 | 0.797 | 10.02 |
+| full disturb ratio 1.0 | `jump` | -18.12 | 1.000 | 1.34 | contact | `base_link` | 53 | 0.828 | 1.32 |
+| full disturb ratio 1.0 | `jump` | -18.12 | 1.000 | 1.34 | orientation | `roll_pitch` | 11 | 0.172 | 1.42 |
+| full disturb ratio 1.0 | `run` | -12.16 | 1.000 | 1.43 | contact | `base_link` | 41 | 0.641 | 1.51 |
+| full disturb ratio 1.0 | `run` | -12.16 | 1.000 | 1.43 | orientation | `roll_pitch` | 23 | 0.359 | 1.30 |
+
+State-trace facts:
+
+| protocol | preset | reason | detail | n | final z | min z | max abs roll | max abs pitch | final lin err | final yaw err | max contact |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| corrected no-disturb | `jump` | contact | `base_link` | 11 | 0.679 | 0.616 | 0.437 | 0.729 | 1.246 | -0.261 | 2106.3 |
+| corrected no-disturb | `jump` | timeout | - | 53 | 0.737 | 0.723 | 0.033 | 0.221 | 0.573 | 0.031 | 0.0 |
+| corrected no-disturb | `run` | contact | `base_link` | 13 | 0.660 | 0.528 | 0.551 | 0.641 | 1.504 | -0.911 | 1463.4 |
+| corrected no-disturb | `run` | timeout | - | 51 | 0.734 | 0.684 | 0.084 | 0.245 | 1.158 | 0.020 | 0.0 |
+| full disturb ratio 1.0 | `jump` | contact | `base_link` | 53 | 0.475 | 0.350 | 0.908 | 1.091 | 1.667 | -0.902 | 4423.0 |
+| full disturb ratio 1.0 | `jump` | orientation | `roll_pitch` | 11 | 0.543 | 0.437 | 0.922 | 1.067 | 1.695 | -0.323 | 0.0 |
+| full disturb ratio 1.0 | `run` | contact | `base_link` | 41 | 0.467 | 0.349 | 0.882 | 1.088 | 1.297 | -0.904 | 4514.2 |
+| full disturb ratio 1.0 | `run` | orientation | `roll_pitch` | 23 | 0.471 | 0.389 | 0.885 | 1.092 | 1.404 | -1.956 | 0.0 |
+
+Facts:
+
+- Jun20 `top_5818` is the best no-disturb aggregate checkpoint so far, but not the strongest robustness checkpoint.
+- At `run` ratio `0.75`, Jun20 `top_5818` keeps fall rate relatively low but still higher than Jun17 selective-walk best (`0.078` vs `0.016`), and its task return is much lower (`3.94` vs `11.57`).
+- At `jump` ratio `0.75`, Jun20 `top_5818` degrades sharply (`task_return=7.30`, `fall_rate=0.453`), while Jun17 selective-walk best remains stable (`task_return=30.55`, `fall_rate=0.016`).
+- Full disturbance still breaks the checkpoint in both `jump` and `run`, with `fall_rate=1.000`.
+- Failure mode remains dominated by `base_link` contact, with roll/pitch orientation as a secondary full-disturb path.
+
+Interpretation:
+
+- Jun20 `conservative_penalty_top_5818` should be ranked first for no-disturb fixed-preset aggregate quality, but Jun17 selective-walk best remains the better robustness/warm-start candidate because it handles partial `jump` disturbance much better and has stronger `run` task return.
+- The next training decision should not use no-disturb aggregate alone. Candidate choice should weight partial-disturb `jump/run` diagnostics above small differences in seven-preset no-disturb average return.
+- With the Jun19 top-task audit below, the current saved top-task checkpoint coverage pass for the Jun19-Jun25 line is complete.
+
+### Jun19 Top-Task Checkpoint Evaluation - 2026-06-30
+
+Hypothesis: the first Jun19 ablation batch looked weak under archived best/final checkpoints, but its saved `model_top_task_*` snapshots may contain intermediate policies that close part of the gap to the later Jun20-Jun21 candidates.
+
+Compatibility facts:
+
+- Twelve Jun19 top-task checkpoints load successfully in the current `r2gym` evaluation environment:
+  - `scratch_amp_slow_lowcap`: `model_top_task_1214.pt`, `model_top_task_1227.pt`, `model_top_task_1806.pt`
+  - `scratch_command_hold`: `model_top_task_7120.pt`, `model_top_task_7219.pt`, `model_top_task_7966.pt`
+  - `scratch_no_push`: `model_top_task_1676.pt`, `model_top_task_1685.pt`, `model_top_task_1881.pt`
+  - `scratch_slow_penalty_ramp`: `model_top_task_1163.pt`, `model_top_task_1219.pt`, `model_top_task_1222.pt`
+- The `scratch_slow_penalty_ramp` directory is under the Jun19 group but has the timestamped path `logs/r2_amp/Jun19/Jun20_04-58-31_scratch_slow_penalty_ramp`; this is treated as part of the Jun19 first ablation batch because it matches the same config family and was already grouped there in the earlier best/final evaluation record.
+- Local compatibility load directories were created under:
+
+```text
+logs/r2_amp/_topk_eval_compat/Jun19
+```
+
+Local evaluation outputs:
+
+```text
+outputs/eval/June30_Jun19_top_amp_slow_lowcap_1214
+outputs/eval/June30_Jun19_top_amp_slow_lowcap_1227
+outputs/eval/June30_Jun19_top_amp_slow_lowcap_1806
+outputs/eval/June30_Jun19_top_command_hold_7120
+outputs/eval/June30_Jun19_top_command_hold_7219
+outputs/eval/June30_Jun19_top_command_hold_7966
+outputs/eval/June30_Jun19_top_no_push_1676
+outputs/eval/June30_Jun19_top_no_push_1685
+outputs/eval/June30_Jun19_top_no_push_1881
+outputs/eval/June30_Jun19_top_slow_penalty_ramp_1163
+outputs/eval/June30_Jun19_top_slow_penalty_ramp_1219
+outputs/eval/June30_Jun19_top_slow_penalty_ramp_1222
+outputs/eval/June30_Jun19_top_task_eval_summary/jun19_top_task_eval_summary.csv
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default 7 fixed presets from `evaluate.py`.
+- Config overrides:
+  - `configs/ablation/scratch_amp_slow_lowcap.json`
+  - `configs/ablation/scratch_command_hold.json`
+  - `configs/ablation/scratch_no_push.json`
+  - `configs/ablation/scratch_slow_penalty_ramp.json`
+
+Aggregate comparison:
+
+| eval | config | checkpoint | source | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | worst task preset | worst return | worst fall preset | worst fall rate |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `command_hold_top_7966` | `scratch_command_hold` | `7966` | `top_task` | 7 | 23.48 | 0.138 | 9.00 | 0.418 | 0.559 | 0.00466 | -0.726 | 1.620 | `run` | -2.12 | `run` | 0.578 |
+| `no_push_top_1881` | `scratch_no_push` | `1881` | `top_task` | 7 | 23.21 | 0.172 | 8.82 | 0.395 | 0.476 | 0.00376 | -0.803 | 1.672 | `run` | -0.27 | `stand` | 0.578 |
+| `command_hold_top_7219` | `scratch_command_hold` | `7219` | `top_task` | 7 | 23.06 | 0.188 | 8.62 | 0.430 | 0.593 | 0.00456 | -0.731 | 1.621 | `run` | -7.89 | `run` | 0.938 |
+| `slow_penalty_ramp_top_1163` | `scratch_slow_penalty_ramp` | `1163` | `top_task` | 7 | 21.40 | 0.132 | 9.26 | 0.347 | 0.526 | 0.00413 | -0.784 | 1.638 | `run` | 6.53 | `stand` | 0.344 |
+| `slow_penalty_ramp_top_1222` | `scratch_slow_penalty_ramp` | `1222` | `top_task` | 7 | 21.26 | 0.152 | 9.09 | 0.362 | 0.505 | 0.00426 | -0.776 | 1.638 | `run` | 1.86 | `jump` | 0.328 |
+| `command_hold_top_7120` | `scratch_command_hold` | `7120` | `top_task` | 7 | 20.60 | 0.210 | 8.36 | 0.450 | 0.657 | 0.00418 | -0.753 | 1.645 | `run` | -8.73 | `run` | 1.000 |
+| `no_push_top_1685` | `scratch_no_push` | `1685` | `top_task` | 7 | 19.59 | 0.263 | 8.05 | 0.434 | 0.575 | 0.00393 | -0.797 | 1.669 | `run` | -2.60 | `jump` | 1.000 |
+| `no_push_top_1676` | `scratch_no_push` | `1676` | `top_task` | 7 | 19.59 | 0.283 | 8.01 | 0.447 | 0.594 | 0.00380 | -0.803 | 1.671 | `run` | -3.50 | `jump` | 0.750 |
+| `amp_slow_lowcap_top_1806` | `scratch_amp_slow_lowcap` | `1806` | `top_task` | 7 | 19.07 | 0.203 | 8.53 | 0.415 | 0.544 | 0.00376 | -0.806 | 1.675 | `run` | 6.74 | `jump` | 0.656 |
+| `amp_slow_lowcap_top_1214` | `scratch_amp_slow_lowcap` | `1214` | `top_task` | 7 | 18.94 | 0.234 | 8.25 | 0.390 | 0.523 | 0.00392 | -0.796 | 1.648 | `jump` | -1.92 | `jump` | 1.000 |
+| `slow_penalty_ramp_top_1219` | `scratch_slow_penalty_ramp` | `1219` | `top_task` | 7 | 18.86 | 0.194 | 8.71 | 0.403 | 0.544 | 0.00391 | -0.797 | 1.647 | `run` | 6.69 | `jump` | 0.531 |
+| `amp_slow_lowcap_top_1227` | `scratch_amp_slow_lowcap` | `1227` | `top_task` | 7 | 18.54 | 0.243 | 8.27 | 0.400 | 0.529 | 0.00399 | -0.791 | 1.645 | `jump` | -1.99 | `jump` | 1.000 |
+
+For comparison, the earlier Jun19 best/final rows remain far below the top-task snapshots by task return: `no_push_best=-11.48`, `slow_penalty_ramp_best=-14.85`, `command_hold_best=-21.57`, `slow_penalty_ramp_8000=-21.70`, `amp_slow_lowcap_best=-22.25`, `command_hold_8000=-24.24`, `no_push_8000=-64.47`, and `amp_slow_lowcap_8000=-142.87`.
+
+Selected per-preset facts:
+
+- `command_hold_top_7966` is the strongest Jun19 top-task checkpoint by aggregate task return (`23.48`), but its weakest preset is `run`: task return `-2.12`, fall rate `0.578`, survival `5.50s`.
+- `no_push_top_1881` has a less negative `run` return (`-0.27`) and lower `run` fall rate (`0.172`) than `command_hold_top_7966`, but it has weak `stand` and `jump` stability: `stand` fall rate `0.578`, `jump` fall rate `0.359`.
+- `slow_penalty_ramp_top_1163` is the cleanest Jun19 snapshot by average fall rate among the better task-return rows (`0.132`), but its aggregate task return (`21.40`) is below `command_hold_top_7966` and far below the Jun20/Jun21 leaders.
+
+Interpretation:
+
+- The Jun19 top-task checkpoint gap is now closed for the first ablation batch.
+- The top-task snapshots substantially improve the Jun19 read compared with best/final checkpoint names, confirming the same late-collapse pattern seen in later batches.
+- No Jun19 checkpoint changes the warm-start/control hierarchy: Jun20 `conservative_penalty_top_5818` remains the best no-disturb aggregate checkpoint, Jun17 selective-walk best remains the leading robustness/warm-start candidate, and Jun21 `conservative_penalty_top_7654` remains the best secondary control.
+- A focused disturbance diagnostic is not justified for Jun19 at this point because even the best Jun19 top-task row has much lower aggregate task return and much worse `run` stability than the already-diagnosed Jun20, Jun21, and Jun17 candidates.
+
+### Next Training Config - Selective-Walk Conservative Eval-Manifold - 2026-06-30
+
+Hypothesis: Jun17 `expert_hard_gate_selective_walk/model_best_task.pt` is the best warm-start/control source because it has the strongest partial-disturb `jump/run` robustness, but it should be combined with the conservative eval-manifold disturbance curriculum rather than full-disturb release.
+
+Config added:
+
+```text
+configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json
+```
+
+Design:
+
+- Warm-start source: `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`.
+- Keep the seven-profile eval-manifold command mixture from `command_hold_eval_manifold_conservative_disturb_release.json`.
+- Keep conservative staged disturbance release: levels `[0.0, 0.05, 0.1, 0.18, 0.28, 0.42, 0.6, 0.75]`, `stage_min_episodes=2048`, all-profile monitor, adaptive regression.
+- Keep three motion experts registered, but use selective-walk style contribution: `walk=true`, `run=false`, `jump=false` in both `env.amp.expert_style_enabled` and `train.amp.expert_style_enabled`.
+- Save top task checkpoints and train for `8000` resumed iterations when launched.
+
+Suggested launch command when training budget is available:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk --checkpoint=-2 --cfg_override_json configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json
+```
+
+Status: `not trained`.
+
+Post-training evaluation helpers added:
+
+```text
+scripts/plan_selective_walk_followup_eval.py
+scripts/plan_selective_walk_followup_train.py
+scripts/run_selective_walk_followup_eval_plan.py
+scripts/summarize_selective_walk_followup_eval.py
+scripts/audit_selective_walk_followup_readiness.py
+```
+
+Purpose: once a real `selective_walk_eval_manifold_conservative_disturb_release` training run produces checkpoints, this helper prints the standard WSL CPU evaluation commands instead of requiring manual command reconstruction. For each checkpoint it emits nine commands: no-disturb full7, forced-disturb full7 at `0.75`, `0.9`, `0.925`, `0.95`, and `1.0`, plus termination/state-trace diagnostics at `0.925`, `0.95`, and `1.0`. This is a planning helper only; it does not launch training or evaluation by itself.
+
+The training planner prints the reviewed formal warm-start command for the same follow-up: Jun17 selective-walk `model_best_task.pt` via `--resume --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk --checkpoint=-2`, the follow-up JSON, and the formal run name `selective_walk_eval_manifold_conservative_disturb_release`. The Jun17 source checkpoint was verified with `torch.load(..., map_location="cpu")` to contain `iter=4000`, and `OnPolicyRunner.learn(num_learning_iterations=...)` treats `max_iterations` as additional updates after resume; therefore the planner defaults to `--max_iterations=4000` so the final target checkpoint is `model_8000.pt`. It is also a planner only; it does not launch the long training job.
+
+The companion summarizer reads those nine planned output directories after the WSL CPU jobs finish, writes a compact CSV/JSON summary, and defaults to failing if any planned output is missing. This keeps the formal follow-up checkpoint evaluation from being marked complete from a partial set of `metrics.csv` files.
+
+The readiness audit helper scans `logs/r2_amp` for matching follow-up run directories and checkpoint files, then checks whether the nine planned evaluation outputs exist. This separates transient/no-checkpoint run directories from a real trained checkpoint that is ready for evaluation.
+
+The eval-plan runner consumes the readiness audit JSON. Its default mode is dry-run: it prints the audit's `recommended_eval_plan` commands without launching Isaac Gym. It runs only with explicit `--execute`, and it refuses execution when no real checkpoint exists and `recommended_eval_plan` is empty.
+
+Template:
+
+```powershell
+python scripts\plan_selective_walk_followup_train.py
+python scripts\plan_selective_walk_followup_eval.py --load_run <new_run_dir_under_logs/r2_amp> --checkpoint <checkpoint_id> --output_prefix <planned_eval_output_prefix> --json
+python scripts\audit_selective_walk_followup_readiness.py --output_prefix <planned_eval_output_prefix> --output_json <audit_output_json>
+python scripts\run_selective_walk_followup_eval_plan.py --audit_json <audit_output_json>
+python scripts\summarize_selective_walk_followup_eval.py --output_prefix <planned_eval_output_prefix> --output_dir <summary_output_dir>
+```
+
+Readiness audit output:
+
+```text
+outputs/eval/June30_selective_walk_followup_readiness_audit
+outputs/eval/June30_selective_walk_followup_readiness_audit/readiness_audit.json
+```
+
+Readiness audit result:
+
+| metric | value |
+|---|---:|
+| matching follow-up run dirs | 15 |
+| `load_only_no_training_progress` run dirs | 15 |
+| `evaluate_checkpoint_load_log_dir` artifact_source dirs | 15 |
+| matching checkpoints | 0 |
+| planned eval outputs | 9 |
+| present eval outputs | 0 |
+| missing eval outputs | 9 |
+| recommended checkpoint | `null` |
+| recommended load_run | `null` |
+| recommended eval commands | 0 |
+| ready for evaluation | `false` |
+| ready for completion | `false` |
+
+Interpretation: the filesystem currently contains transient `selective_walk_eval_manifold_conservative_disturb_release` run directories, but each one contains only a 265-byte `train.log` with `Loading model from` / `load_path` and no TensorBoard event file, iteration log, or `model*.pt` checkpoint. These directories were created by the previous `evaluate.py` checkpoint-load path initializing `task_registry.make_alg_runner()` with the default runner log root; they are evaluation load artifacts, not failed training runs. The readiness JSON marks all 15 such rows with `artifact_source="evaluate_checkpoint_load_log_dir"` so this source is machine-readable instead of only a prose interpretation. `evaluate.py` now passes `log_root=None` during checkpoint evaluation so future eval jobs should not create new train-style run directories under `logs/r2_amp`. The readiness audit emits `recommended_checkpoint`, `recommended_load_run`, and `recommended_eval_plan` only when a real checkpoint exists; all three are empty/null in the current audit, so no formal follow-up checkpoint evaluation should be launched yet. The next required external step is still a real training run that enters the training loop and produces at least one checkpoint.
+
+Evaluation log-dir regression smoke:
+
+```text
+outputs/eval/June30_evaluate_log_root_none_smoke
+```
+
+Protocol: WSL CPU PhysX / CPU policy eval, Jun17 selective-walk `model_best_task.pt` via `--checkpoint=-2`, config `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json`, preset `stand`, `--num_envs=1`, `--num_episodes=1`, `--episode_seconds=0.2`. This smoke exists only to verify the evaluation toolchain after the `log_root=None` fix; it is not a policy-quality result.
+
+Result: `metrics.csv` and `metrics.json` were written successfully. `metrics.csv` contains one `stand` row with `task_return_mean=0.4041624665`, `fall_rate=0.0`, and `survival_time_mean_s=0.2199999951`. The matching `logs/r2_amp/*selective_walk_eval_manifold_conservative_disturb_release*` directory count remained `15` before and after the smoke, so the fixed evaluation path did not create a new train-style run directory.
+
+Training-entry smoke:
+
+```text
+logs/r2_amp/Jun30_19-34-57_smoke_sw_eval_manifold_conservative_disturb_release
+outputs/eval/June30_smoke_sw_eval_manifold_conservative_4001_stand
+```
+
+Protocol: WSL CPU PhysX / CPU policy, `train.py --task=r2amp --num_envs=4 --max_iterations=1`, `--resume --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk --checkpoint=-2`, config `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json`, and override `--run_name smoke_sw_eval_manifold_conservative_disturb_release`. The smoke run name intentionally avoids the full formal `selective_walk_eval_manifold_conservative_disturb_release` substring so readiness audit does not treat it as the real follow-up training run.
+
+Result: the run entered `OnPolicyRunner.learn()` and continued from the resumed checkpoint iteration, logging `Learning iteration 4000/4001`. It wrote TensorBoard events, `train.log`, `model_4000.pt`, `model_4001.pt`, `model_best_task.pt`, and `model_top_task_4000.pt`. The one-iteration window reported `Mean task reward=-4.00`, `Mean mixed reward=-4.00`, `staged_disturb_stage=0.0`, and `staged_disturb_window_fall_rate=1.0000`; this confirms plumbing only and is not a quality signal.
+
+The newly written smoke checkpoint `model_4001.pt` was then loaded through `evaluate.py` with preset `stand`, `--num_envs=1`, `--num_episodes=1`, and `--episode_seconds=0.2`. `outputs/eval/June30_smoke_sw_eval_manifold_conservative_4001_stand/metrics.csv` contains one row with `task_return_mean=0.2805526853`, `fall_rate=0.0`, and `survival_time_mean_s=0.2199999951`. The formal readiness audit still reports `runs_found=15`, `checkpoint_count=0`, `ready_for_evaluation=false`, and `ready_for_completion=false`, proving the smoke artifacts did not pollute the formal follow-up gate.
+
+Compatibility smoke:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_smoke_jump
+outputs/eval/June30_selective_walk_conservative_followup_smoke_run
+outputs/eval/June30_selective_walk_conservative_followup_smoke_jump_disturb075
+outputs/eval/June30_selective_walk_conservative_followup_smoke_run_disturb075
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- Checkpoint: `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`, loaded through `--checkpoint=-2`.
+- Config: `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json`.
+- `--preset jump` and `--preset run`, each as a separate output directory with `--num_envs=8`, `--num_episodes=4`, `--episode_seconds=2`.
+- Each preset was run once without forced disturbance and once with `--eval_disturb_ratio=0.75` to exercise the same key partial-disturbance path that motivated this follow-up.
+- Purpose: load-chain, config compatibility, and forced-disturbance plumbing smoke only. This is not a formal ranking evaluation because it uses two presets, four short episodes each, and the old checkpoint rather than a newly trained follow-up checkpoint.
+
+Smoke result:
+
+| preset | forced disturb ratio | rows | episodes | seconds | task return | fall rate | survival s | style reward | disc gap |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | 0.00 | 1 | 4 | 2.0 | 5.13 | 0.000 | 2.02 | 0.00002 | 1.673 |
+| `run` | 0.00 | 1 | 4 | 2.0 | -0.81 | 0.000 | 2.02 | 0.00005 | 1.591 |
+| `jump` | 0.75 | 1 | 4 | 2.0 | 4.69 | 0.000 | 2.02 | 0.00000 | 1.705 |
+| `run` | 0.75 | 1 | 4 | 2.0 | -1.38 | 0.000 | 2.02 | 0.00000 | 1.738 |
+
+Fact: the first smoke attempt without CPU device flags reproduced the known local GPU incompatibility (`no kernel image is available for execution on the device` on RTX 5080 Laptop with `torch 2.4.1+cu118`). The CPU reruns with `--sim_device=cpu --rl_device=cpu` loaded the config and checkpoint and wrote `metrics.csv` / `metrics.json` successfully for both `jump` and `run`, including the forced `eval_disturb_ratio=0.75` path.
+
+Full-shape old-checkpoint baseline:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_baseline_full7
+outputs/eval/June30_selective_walk_conservative_followup_baseline_full7/baseline_summary.json
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- Checkpoint: `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`, loaded through `--checkpoint=-2`.
+- Config: `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json`.
+- Default seven fixed presets from `evaluate.py`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Purpose: full evaluation-shape compatibility/baseline for the warm-start checkpoint under the new follow-up config. This is still not a formal result for the follow-up policy, because no `selective_walk_eval_manifold_conservative_disturb_release` training checkpoint exists yet.
+
+Baseline result:
+
+| rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | style reward | policy logit | disc gap | worst task preset | worst return | worst fall preset | worst fall rate |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| 7 | 28.03 | 0.038 | 9.76 | 0.339 | 0.485 | 0.00040 | -0.799 | 1.691 | `run` | 11.80 | `stand` | 0.109 |
+
+Selected per-preset facts:
+
+- `jump`: task return `34.48`, fall rate `0.000`, survival `10.02s`.
+- `run`: task return `11.80`, fall rate `0.094`, survival `9.16s`.
+- `stand`: task return `21.74`, fall rate `0.109`, survival `9.50s`.
+
+Formal partial-disturbance old-checkpoint diagnostic:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_jump_run_disturb075_formal
+outputs/eval/June30_selective_walk_conservative_followup_jump_run_disturb075_formal/disturb075_summary.json
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- Checkpoint: `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`, loaded through `--checkpoint=-2`.
+- Config: `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json`.
+- Presets: `jump` and `run`, `--eval_disturb_ratio=0.75`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Purpose: replace the earlier 4-episode smoke with a formal-size partial-disturbance diagnostic for the key presets that motivated this follow-up. This still uses the old warm-start checkpoint, so it remains diagnostic rather than a trained follow-up result.
+
+Diagnostic result:
+
+| preset | episodes | seconds | task return | fall rate | survival s | lin rmse | yaw rmse | disc gap |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | 64 | 10.0 | 29.44 | 0.031 | 9.75 | 0.256 | 0.397 | 1.680 |
+| `run` | 64 | 10.0 | 15.77 | 0.031 | 9.86 | 0.683 | 0.561 | 1.692 |
+
+Aggregate over the two focused presets: avg task return `22.60`, avg fall rate `0.031`, avg survival `9.80s`. This supports the same training direction as the earlier Jun17 diagnostic: partial-disturb `jump/run` robustness is strong enough to justify using the selective-walk checkpoint as the warm-start for the conservative eval-manifold rerun.
+
+Full seven-preset forced-disturbance old-checkpoint diagnostic:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb075
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb075/full7_disturb075_summary.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb075/full7_disturb075_vs_baseline_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb075/full7_disturb075_vs_baseline_delta.json
+```
+
+Protocol:
+
+- WSL CPU PhysX / CPU policy eval.
+- Checkpoint: `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`, loaded through `--checkpoint=-2`.
+- Config: `configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json`.
+- Default seven fixed presets from `evaluate.py`, `--eval_disturb_ratio=0.75`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Purpose: check whether the same forced `0.75` disturbance pressure that looks acceptable on `jump/run` creates hidden failures on the remaining evaluation presets. This is still an old-checkpoint diagnostic, not a trained follow-up result.
+
+Diagnostic result:
+
+| rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | base-height violation | roll/pitch violation | worst task preset | worst return | worst fall preset | worst fall rate |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| 7 | 27.69 | 0.018 | 9.93 | 0.357 | 0.488 | 0.00176 | 0.00011 | `run` | 12.50 | `stand` | 0.047 |
+
+Selected per-preset facts:
+
+- `stand`: task return `25.41`, fall rate `0.047`, survival `9.93s`.
+- `walk_slow`: task return `34.59`, fall rate `0.000`, survival `10.02s`.
+- `run`: task return `12.50`, fall rate `0.031`, survival `9.76s`.
+- `jump`: task return `31.91`, fall rate `0.031`, survival `9.89s`.
+- `strafe_right`: task return `34.10`, fall rate `0.000`, survival `10.02s`.
+
+Delta versus the no-forced-disturbance full7 baseline:
+
+| metric | no-disturb baseline | forced 0.75 | delta |
+|---|---:|---:|---:|
+| avg task return | 28.03 | 27.69 | -0.34 |
+| avg fall rate | 0.038 | 0.018 | -0.020 |
+| avg survival s | 9.76 | 9.93 | +0.17 |
+
+Largest local changes:
+
+- Largest task-return drop: `strafe_right`, `-3.46`.
+- Largest fall-rate increase: `jump`, `+0.031`.
+- `run` improves slightly under forced `0.75` in this paired run: task return `+0.70`, fall rate `-0.063`, survival `+0.60s`.
+
+Near-boundary forced-disturbance old-checkpoint diagnostic:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090/full7_disturb090_summary.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090/full7_disturb090_vs_baseline_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090/full7_disturb090_vs_baseline_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090/full7_disturb090_vs_disturb075_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090/full7_disturb090_vs_disturb075_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090/full7_disturb100_vs_disturb090_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090/full7_disturb100_vs_disturb090_delta.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the forced `0.75` run, but with `--eval_disturb_ratio=0.9`.
+- Purpose: locate whether the collapse boundary starts immediately above the conservative `0.75` cap or appears only near full-disturb `1.0`.
+
+Diagnostic result:
+
+| rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | base-height violation | roll/pitch violation | worst task preset | worst return | worst fall preset | worst fall rate |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| 7 | 25.47 | 0.029 | 9.82 | 0.387 | 0.550 | 0.00343 | 0.00025 | `run` | 15.77 | `run` | 0.063 |
+
+Selected per-preset facts:
+
+- `stand`: task return `16.98`, fall rate `0.047`, survival `9.80s`.
+- `walk_slow`: task return `31.01`, fall rate `0.031`, survival `9.78s`.
+- `run`: task return `15.77`, fall rate `0.063`, survival `9.49s`.
+- `jump`: task return `28.81`, fall rate `0.016`, survival `9.92s`.
+- `strafe_right`: task return `32.68`, fall rate `0.016`, survival `9.93s`.
+
+Stable-stress failure diagnostics:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090_failure_diagnostics
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090_failure_diagnostics/termination_reasons.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090_failure_diagnostics/state_trace.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090_failure_diagnostics/failure_diagnostics_summary.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090_failure_diagnostics/failure_diagnostics_summary.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the `0.9` full7 run.
+- Presets: `stand`, `run`, and `jump`, to match the onset/collapse diagnostic set while keeping the run focused.
+- Flags: `--eval_disturb_ratio=0.9`, `--record_termination_reasons`, and `--record_state_trace`.
+
+Failure summary:
+
+| preset | task return | fall rate | contact `base_link` rate | orientation rate | timeout rate | contact mean survival s | terminal base z | terminal mean abs roll | terminal mean abs pitch |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `stand` | 16.98 | 0.047 | 0.016 | 0.031 | 0.953 | 5.72 | 0.751 | 0.048 | 0.117 |
+| `run` | 16.42 | 0.047 | 0.031 | 0.016 | 0.953 | 3.37 | 0.742 | 0.049 | 0.138 |
+| `jump` | 24.11 | 0.078 | 0.078 | 0.000 | 0.922 | 4.88 | 0.723 | 0.081 | 0.115 |
+
+Interpretation: the `0.9` stress point remains stable under focused termination/state tracing. All three presets time out in more than `92%` of episodes, contact remains low-rate (`0.016-0.078`), and terminal base height stays close to the target (`0.72-0.75` versus target `0.78`). This makes `0.9` a useful post-training robustness check, while `0.925` is the first tested ratio with clear onset degradation.
+
+Onset-boundary forced-disturbance old-checkpoint diagnostic:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb0925_summary.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb0925_vs_baseline_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb0925_vs_baseline_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb0925_vs_disturb075_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb0925_vs_disturb075_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb0925_vs_disturb090_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb0925_vs_disturb090_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb095_vs_disturb0925_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb095_vs_disturb0925_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb100_vs_disturb0925_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb100_vs_disturb0925_delta.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the other boundary runs, but with `--eval_disturb_ratio=0.925`.
+- Purpose: check whether degradation starts immediately after `0.9` or closer to `0.95`.
+
+Diagnostic result:
+
+| rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | base-height violation | roll/pitch violation | worst task preset | worst return | worst fall preset | worst fall rate |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| 7 | 22.18 | 0.054 | 9.68 | 0.432 | 0.619 | 0.00667 | 0.00042 | `run` | 11.42 | `stand` | 0.188 |
+
+Selected per-preset facts:
+
+- `stand`: task return `13.59`, fall rate `0.188`, survival `9.00s`.
+- `walk_slow`: task return `25.21`, fall rate `0.000`, survival `10.02s`.
+- `run`: task return `11.42`, fall rate `0.094`, survival `9.26s`.
+- `jump`: task return `25.97`, fall rate `0.047`, survival `9.71s`.
+- `strafe_right`: task return `30.36`, fall rate `0.016`, survival `9.97s`.
+
+Onset-boundary failure diagnostics:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925_failure_diagnostics
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925_failure_diagnostics/termination_reasons.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925_failure_diagnostics/state_trace.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925_failure_diagnostics/failure_diagnostics_summary.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925_failure_diagnostics/failure_diagnostics_summary.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the `0.925` full7 run.
+- Presets: `stand`, `run`, and `jump`, because `stand` has the highest fall rate at `0.925`, `run` has the lowest return, and `jump` is the most sensitive preset at full-disturb `1.0`.
+- Flags: `--eval_disturb_ratio=0.925`, `--record_termination_reasons`, and `--record_state_trace`.
+
+Failure summary:
+
+| preset | task return | fall rate | contact `base_link` rate | orientation rate | timeout rate | contact mean survival s | terminal base z | terminal mean abs roll | terminal mean abs pitch |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `stand` | 13.59 | 0.188 | 0.156 | 0.031 | 0.812 | 4.82 | 0.691 | 0.143 | 0.200 |
+| `run` | 8.81 | 0.078 | 0.078 | 0.000 | 0.922 | 3.47 | 0.729 | 0.082 | 0.157 |
+| `jump` | 24.34 | 0.062 | 0.062 | 0.000 | 0.938 | 3.29 | 0.732 | 0.064 | 0.101 |
+
+Interpretation: the `0.925` onset is already dominated by `base_link` contact, but it is still a low-rate onset rather than a full collapse. Terminal base height stays around `0.69-0.73`, much closer to the `0.78` target than the `1.0` collapse diagnostics (`0.54-0.58`), and roll/pitch is still modest except for rare failures. This supports treating `0.925` as a stress-test threshold, not as a training target.
+
+Transition-zone forced-disturbance old-checkpoint diagnostic:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb095_summary.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb095_vs_baseline_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb095_vs_baseline_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb095_vs_disturb075_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb095_vs_disturb075_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb095_vs_disturb090_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb095_vs_disturb090_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb100_vs_disturb095_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb100_vs_disturb095_delta.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the forced `0.75` and `0.9` runs, but with `--eval_disturb_ratio=0.95`.
+- Purpose: determine whether the collapse transition is gradual between `0.9` and `1.0`, or concentrated at the exact full-disturb setting.
+
+Diagnostic result:
+
+| rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | base-height violation | roll/pitch violation | worst task preset | worst return | worst fall preset | worst fall rate |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| 7 | 19.46 | 0.098 | 9.35 | 0.483 | 0.704 | 0.01086 | 0.00078 | `stand` | 11.21 | `stand` | 0.219 |
+
+Selected per-preset facts:
+
+- `stand`: task return `11.21`, fall rate `0.219`, survival `8.56s`.
+- `walk_slow`: task return `26.42`, fall rate `0.047`, survival `9.63s`.
+- `run`: task return `12.28`, fall rate `0.125`, survival `9.04s`.
+- `jump`: task return `20.85`, fall rate `0.125`, survival `9.08s`.
+- `strafe_right`: task return `25.71`, fall rate `0.094`, survival `9.63s`.
+
+Transition-zone failure diagnostics:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095_failure_diagnostics
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095_failure_diagnostics/termination_reasons.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095_failure_diagnostics/state_trace.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095_failure_diagnostics/failure_diagnostics_summary.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095_failure_diagnostics/failure_diagnostics_summary.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the `0.95` full7 run.
+- Presets: `stand`, `run`, `jump`, and `strafe_right`, because these are the visible weak presets at `0.95`.
+- Flags: `--eval_disturb_ratio=0.95`, `--record_termination_reasons`, and `--record_state_trace`.
+
+Failure summary:
+
+| preset | task return | fall rate | contact `base_link` rate | orientation rate | timeout rate | contact mean survival s | terminal base z | terminal mean abs roll | terminal mean abs pitch |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `stand` | 11.21 | 0.219 | 0.188 | 0.031 | 0.781 | 3.37 | 0.682 | 0.164 | 0.221 |
+| `run` | 10.88 | 0.125 | 0.062 | 0.062 | 0.875 | 1.85 | 0.721 | 0.119 | 0.174 |
+| `jump` | 19.43 | 0.125 | 0.125 | 0.000 | 0.875 | 3.47 | 0.707 | 0.116 | 0.127 |
+| `strafe_right` | 28.85 | 0.062 | 0.062 | 0.000 | 0.938 | 4.67 | 0.734 | 0.054 | 0.139 |
+
+Interpretation: the `0.95` transition zone expands the same contact-led failure mode seen at `0.925`: `stand` contact rises from `0.156` to `0.188`, `jump` contact rises from `0.062` to `0.125`, and `strafe_right` begins to show low-rate contact failure. `run` adds a secondary roll/pitch failure path (`0.062`) that is absent at `0.925`. Terminal base height remains `0.68-0.73`, so this still differs from the `1.0` collapse regime where terminal base height drops to `0.54-0.58` and contact rates exceed `0.4-0.5`.
+
+Disturbance boundary comparison:
+
+| metric | forced 0.75 | forced 0.9 | forced 0.925 | forced 0.95 | forced 1.0 |
+|---|---:|---:|---:|---:|---:|
+| avg task return | 27.69 | 25.47 | 22.18 | 19.46 | 6.03 |
+| avg fall rate | 0.018 | 0.029 | 0.054 | 0.098 | 0.444 |
+| avg survival s | 9.93 | 9.82 | 9.68 | 9.35 | 6.55 |
+
+Delta versus forced `0.75`: avg task return `-2.21`, avg fall rate `+0.011`, avg survival `-0.12s`. Forced `0.925` is the first tested setting with clear onset degradation: compared with `0.9`, avg task return drops `-3.29`, avg fall rate rises `+0.025`, and avg survival falls `-0.14s`; the largest task-return drop is `walk_slow` (`-5.80`) and the largest fall-rate increase is `stand` (`+0.141`). Forced `0.95` deepens that degradation: compared with `0.925`, avg task return drops another `-2.72`, avg fall rate rises `+0.045`, and avg survival falls `-0.33s`. Delta from forced `0.95` to forced `1.0` remains much larger: avg task return `-13.43`, avg fall rate `+0.346`, avg survival `-2.80s`, with the largest drop and fall-rate increase both on `jump` (`-20.29`, `+0.422`). This places onset around `0.925`, transition around `0.95`, and outright collapse at `1.0`, so `0.75` remains the safe training cap and `0.9/0.925/0.95` are better reserved for post-training stress tests.
+
+Boundary analysis aggregate:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis
+outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis/boundary_ratio_summary.csv
+outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis/boundary_preset_metrics.csv
+outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis/boundary_failure_summary.csv
+outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis/boundary_adjacent_deltas.csv
+outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis/boundary_analysis_summary.json
+```
+
+Aggregate files:
+
+- `boundary_ratio_summary.csv`: 5 rows for forced ratios `0.75`, `0.90`, `0.925`, `0.95`, and `1.00`.
+- `boundary_preset_metrics.csv`: 35 rows covering all seven fixed presets across those five ratios.
+- `boundary_failure_summary.csv`: 13 rows covering focused failure diagnostics for `0.90`, `0.925`, `0.95`, and `1.00`.
+- `boundary_adjacent_deltas.csv`: adjacent transitions `0.75 -> 0.90`, `0.90 -> 0.925`, `0.925 -> 0.95`, and `0.95 -> 1.00`.
+- `boundary_analysis_summary.json`: machine-readable summary with the current interpretation: safe training cap `0.75`, stable stress test `0.90`, onset `0.925`, transition `0.95`, collapse `1.00`, primary failure mode `base_link` contact with roll/pitch as a secondary high-ratio path.
+
+Full seven-preset full-disturbance old-checkpoint diagnostic:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100/full7_disturb100_summary.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100/full7_disturb100_vs_baseline_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100/full7_disturb100_vs_baseline_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100/full7_disturb100_vs_disturb075_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100/full7_disturb100_vs_disturb075_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb100_vs_disturb0925_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925/full7_disturb100_vs_disturb0925_delta.json
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb100_vs_disturb095_delta.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095/full7_disturb100_vs_disturb095_delta.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the forced `0.75` run, but with `--eval_disturb_ratio=1.0`.
+- Purpose: directly test whether full-disturb pressure is safe enough to train against, or whether the conservative `0.75` cap is a necessary boundary.
+
+Diagnostic result:
+
+| rows | avg task return | avg fall rate | avg survival s | worst task preset | worst return | worst fall preset | worst fall rate |
+|---:|---:|---:|---:|---|---:|---|---:|
+| 7 | 6.03 | 0.444 | 6.55 | `stand` | -1.12 | `jump` | 0.547 |
+
+Selected per-preset facts:
+
+- `stand`: task return `-1.12`, fall rate `0.531`, survival `5.93s`.
+- `walk_slow`: task return `12.04`, fall rate `0.391`, survival `7.17s`.
+- `run`: task return `-0.94`, fall rate `0.484`, survival `6.00s`.
+- `jump`: task return `0.56`, fall rate `0.547`, survival `5.84s`.
+- `strafe_right`: task return `15.76`, fall rate `0.359`, survival `7.27s`.
+
+Delta versus forced `0.75`:
+
+| metric | forced 0.75 | forced 0.9 | forced 0.925 | forced 0.95 | forced 1.0 | delta 0.95 -> 1.0 |
+|---|---:|---:|---:|---:|---:|---:|
+| avg task return | 27.69 | 25.47 | 22.18 | 19.46 | 6.03 | -13.43 |
+| avg fall rate | 0.018 | 0.029 | 0.054 | 0.098 | 0.444 | +0.346 |
+| avg survival s | 9.93 | 9.82 | 9.68 | 9.35 | 6.55 | -2.80 |
+
+Largest `0.75 -> 1.0` local changes:
+
+- Largest task-return drop versus forced `0.95`: `jump`, `-20.29`.
+- Largest fall-rate increase versus forced `0.95`: `jump`, `+0.422`.
+
+Full-disturb failure diagnostics:
+
+```text
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100_failure_diagnostics
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100_failure_diagnostics/termination_reasons.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100_failure_diagnostics/state_trace.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100_failure_diagnostics/failure_diagnostics_summary.csv
+outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100_failure_diagnostics/failure_diagnostics_summary.json
+```
+
+Protocol:
+
+- Same WSL CPU / Jun17 selective-walk best checkpoint / new follow-up config protocol as the full-disturb run.
+- Presets: `stand`, `run`, and `jump`, because these are the lowest-return / highest-fall presets under full-disturb `1.0`.
+- Flags: `--eval_disturb_ratio=1.0`, `--record_termination_reasons`, and `--record_state_trace`.
+
+Failure summary:
+
+| preset | task return | fall rate | contact `base_link` rate | orientation rate | timeout rate | contact mean survival s | terminal base z | terminal mean abs roll | terminal mean abs pitch |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `stand` | -1.12 | 0.531 | 0.438 | 0.094 | 0.469 | 2.47 | 0.576 | 0.416 | 0.350 |
+| `run` | -4.52 | 0.625 | 0.547 | 0.078 | 0.375 | 1.92 | 0.539 | 0.490 | 0.438 |
+| `jump` | 3.23 | 0.516 | 0.500 | 0.016 | 0.484 | 2.07 | 0.562 | 0.311 | 0.428 |
+
+Interpretation: forced `0.75` disturbance does not expose a new collapse mode outside `jump/run`; relative to the no-forced-disturbance full7 baseline, the average task return is nearly unchanged and average fall rate is lower. Forced `0.9` has measurable degradation but remains stable by survival and fall-rate evidence. Forced `0.925` is the onset point: fall rate rises to `0.054`, with `stand` already at `0.188`. Forced `0.95` is the transition zone: fall rate rises to `0.098` and `stand/run/jump/strafe_right` all show visible weakness, but survival remains above `9s`; focused diagnostics show contact failures spreading and `run` adding a secondary roll/pitch failure path. Full-disturb `1.0` then causes broad collapse across all seven presets. The focused diagnostics show that the full-disturb collapse is dominated by early `base_link` contact, with terminal base height around `0.54-0.58` versus the configured `0.78` target, and roll/pitch orientation failures as a secondary mode. This keeps the `0.75` cap as the safest next training boundary, while `0.9`, `0.925`, and `0.95` become useful later stress-test targets after a trained follow-up checkpoint exists.
+
+Reason this is the next code/config change:
+
+- Jun20 `conservative_penalty_top_5818` is best by no-disturb aggregate (`30.28`), but at `jump` ratio `0.75` it falls to `task_return=7.30`, `fall_rate=0.453`.
+- Jun17 selective-walk best is slightly lower by no-disturb aggregate (`29.79`) but is much stronger under partial disturbance: `jump` ratio `0.75` has `task_return=30.55`, `fall_rate=0.016`; `run` ratio `0.75` has `task_return=11.57`, `fall_rate=0.016`.
+- Therefore the next training run should privilege robustness under partial `jump/run` disturbance over a small no-disturb aggregate advantage.
+
+Local candidate decision audit:
+
+```text
+outputs/eval/June30_r2_amp_candidate_decision_audit
+outputs/eval/June30_r2_amp_candidate_decision_audit/candidate_decision_audit.csv
+outputs/eval/June30_r2_amp_candidate_decision_audit/focused_disturbance_risk_audit.csv
+outputs/eval/June30_r2_amp_candidate_decision_audit/candidate_decision_audit_summary.json
+```
+
+Protocol:
+
+- This is a no-training / no-new-rollout audit over existing summary CSVs only.
+- Inputs are the Jun17, Jun19, Jun20, Jun21, Jun23, Jun24, and Jun25_0 top-task summary tables plus focused disturbance summaries for the leading candidates.
+- The conservative decision score is an explicit heuristic for ranking candidates when no-disturb task return is close: `avg_task_return - 40*avg_fall_rate + 0.5*avg_survival_s + 0.1*worst_task_return - 20*worst_fall_rate`. It is not a new training reward; it is only an audit lens that penalizes fall rate and weak worst-preset behavior.
+
+Key facts from `candidate_decision_audit_summary.json`:
+
+| item | result |
+|---|---|
+| candidate rows | `90` |
+| missing inputs | `0` |
+| best by no-disturb task return | `Jun20:conservative_penalty_top_5818:5818` |
+| best by conservative decision score | `Jun17:selective_walk_best:best` |
+| Jun25_0 best row by conservative score | `conservative_8000_corrected`, task rank `2`, decision rank `9` |
+
+Top rows by conservative decision score:
+
+| decision rank | candidate | task rank | avg task return | avg fall rate | avg survival s | worst task preset | worst task return | worst fall rate |
+|---:|---|---:|---:|---:|---:|---|---:|---:|
+| 1 | `Jun17:selective_walk_best:best` | 3 | 29.79 | 0.036 | 9.78 | `run` | 20.03 | 0.141 |
+| 2 | `Jun20:conservative_penalty_top_5818:5818` | 1 | 30.28 | 0.062 | 9.63 | `run` | 11.41 | 0.172 |
+| 3 | `Jun21:conservative_penalty_top_7654:7654` | 6 | 29.16 | 0.054 | 9.59 | `run` | 7.06 | 0.156 |
+| 9 | `Jun25_0:conservative_8000_corrected:8000` | 2 | 30.02 | 0.167 | 8.86 | `jump` | 20.86 | 0.391 |
+
+Interpretation: this cross-audit supports the previous qualitative decision. Jun20 conservative top remains the pure no-disturb task-return winner, but the selective-walk best checkpoint remains the stronger warm-start candidate once fall rate, survival, worst-preset return, and focused disturbance evidence are treated as first-class constraints. Jun25_0 conservative final is a strong no-disturb checkpoint but carries higher fall risk (`0.167` average and `0.391` worst-preset fall rate), so it should remain evaluated evidence rather than replacing the selective-walk follow-up plan.
+
+### Local Evaluation Coverage Audit - 2026-06-30
+
+Hypothesis: after the Jun19 top-task pass and archive compatibility evaluations, no additional no-training checkpoint evaluation should remain for the current R2 AMP ranking unless the filesystem contains a loadable checkpoint that lacks a `metrics.csv` output.
+
+Audit commands used current filesystem state under `logs/r2_amp` and `outputs/eval`, excluding generated compatibility hard-link directories from the source checkpoint count. The audit scope is:
+
+- Current experimental line: Jun17, Jun19, Jun20, Jun21, Jun23, Jun24, and Jun25_0 model-bearing runs.
+- Archive compatibility line: normalized Jun10/Jun15 checkpoints under `logs/r2_amp/_archive_eval_compat`.
+- Evaluation target types: `model_best_task.pt` / `model_best_mixed.pt`, final checkpoints used by the experiment record (`model_8000.pt` or `model_30000.pt`), saved `model_top_task_*.pt`, and focused disturbance/state-trace diagnostics for the leading candidates.
+- Routine periodic autosaves such as `model_0.pt`, `model_2000.pt`, `model_4000.pt`, and `model_6000.pt` are not treated as separate ranking targets unless they are also a best/final/top-task checkpoint. They are training autosaves, not selected candidates in the maintained experiment protocol.
+
+Current-line checkpoint inventory:
+
+| group | run groups | top-task files | evaluated top-task files | invalid / excluded top-task files |
+|---|---:|---:|---:|---:|
+| Jun17 | 3 | 9 | 7 | 2 |
+| Jun19 | 4 | 12 | 12 | 0 |
+| Jun20 | 4 | 12 | 12 | 0 |
+| Jun21 | 2 | 6 | 6 | 0 |
+| Jun23 | 2 | 6 | 6 | 0 |
+| Jun24 | 2 | 6 | 6 | 0 |
+| Jun25_0 | 2 | 6 | 6 | 0 |
+| total | 19 | 57 | 55 | 2 |
+
+Invalid top-task files rechecked in the current WSL `r2gym` environment:
+
+| checkpoint | load result |
+|---|---|
+| `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_top_task_1461.pt` | `torch.load(..., map_location="cpu")` fails with `UnpicklingError: invalid load key, '#'` |
+| `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_top_task_1464.pt` | `torch.load(..., map_location="cpu")` fails with `UnpicklingError: invalid load key, 'H'` |
+
+Archive compatibility coverage:
+
+| archive source | target checkpoints | 7-preset outputs |
+|---|---:|---:|
+| `logs/r2_amp/_archive_eval_compat/Jun10_mixed` | 2 | 2 |
+| `logs/r2_amp/_archive_eval_compat/Jun10_mixed2` | 1 | 1 |
+| `logs/r2_amp/_archive_eval_compat/Jun10_style0` | 2 | 2 |
+| `logs/r2_amp/_archive_eval_compat/Jun10_sw1` | 2 | 2 |
+| `logs/r2_amp/_archive_eval_compat/Jun10_walk` | 1 | 1 |
+| `logs/r2_amp/_archive_eval_compat/Jun15_sw05` | 2 | 2 |
+| `logs/r2_amp/_archive_eval_compat/Jun15_sw1` | 2 | 2 |
+| total | 12 | 12 |
+
+Output-shape facts:
+
+- Current `outputs/eval/June30_Jun*` top-task/focused outputs checked in this audit have valid `metrics.csv` row counts: full fixed-preset evaluations have `7` rows; focused single-preset diagnostics have `1` or paired focused summaries have `2` rows.
+- No `June30_Jun*` output had an unexpected row count outside `{1, 2, 7}` in the audit.
+- The two `June30_archive_smoke_*` outputs have one preset each and remain smoke probes; the archive coverage table above uses the 12 full 7-preset archive outputs as the ranking evidence.
+- The top-level `logs/r2_amp/model*.pt` artifacts were rechecked after the follow-up smoke runs. Seven are SHA256 duplicates of already evaluated Jun24 run artifacts; the remaining `logs/r2_amp/model_top_task_1518.pt` is invalid because `torch.load(..., map_location="cpu")` fails with `UnpicklingError: invalid load key, '#'`. The detailed mapping is saved at `outputs/eval/June30_r2_amp_checkpoint_eval_coverage/top_level_model_artifacts.csv`.
+- The documented output-path audit extracted 214 concrete-or-pattern `outputs/eval/...` references from this progress document. It found 213 concrete paths, all present on disk, and one intentional wildcard prose reference (`outputs/eval/June30_Jun*`). The ten referenced directories without a top-level `metrics.csv` are expected aggregate/probe directories: they contain `summary_metrics.csv`, `run_disturb_sweep_summary.csv`, `joint_limit_probe.csv`, boundary-analysis CSV/JSON files, candidate-decision/readiness audit CSV/JSON files, or per-ratio child directories with metrics.
+
+Conclusion:
+
+- The current no-training evaluation coverage pass is closed for the maintained R2 AMP ranking scope: all loadable current-line top-task checkpoints have fixed-preset metrics, all current best/final candidates used in the record have metrics, all leading candidates have focused `jump/run` disturbance/state-trace diagnostics, and normalized Jun10/Jun15 archive targets have 7-preset metrics.
+- The only current source files without top-task metrics are verified duplicate or non-checkpoint artifacts and should remain excluded rather than forced through `evaluate.py`.
+- The remaining work is not another local evaluation run; it is the not-yet-trained follow-up config above, which requires training budget before it can produce new checkpoints to evaluate.
+
+Current open-item ledger after this audit:
+
+| item | status after audit | reason |
+|---|---|---|
+| Old `pending` run-disturb sweep note for `scratch_command_hold/model_8000.pt` | closed | `outputs/eval/run_disturb_sweep_command_hold_8000` exists and is summarized above. |
+| Old request for Jun25_0 reward/termination/state-trace diagnostics | closed | Corrected reward/termination/state-trace and focused disturbance outputs exist for Jun25_0 conservative `8000`. |
+| Old request for Jun17 selective-walk robustness diagnostics | closed | `outputs/eval/June30_Jun17_selective_walk_best_disturb_sweep`, corrected state trace, and full-disturb state trace exist and are summarized above. |
+| Old request for backward top-task coverage through Jun23/Jun21/Jun20/Jun19 | closed | Jun23, Jun21, Jun20, and Jun19 top-task sections now exist with 7-preset outputs. |
+| Old request for archival pre-Jun17 compatibility evaluation | closed for normalized Jun10/Jun15 scope | `_archive_eval_compat` contains 12 normalized targets and all 12 have 7-preset outputs. |
+| Invalid Jun17 selective-walk `model_top_task_1461.pt` / `1464.pt` | excluded | Current WSL `torch.load` recheck fails with `UnpicklingError`; these are not valid checkpoint targets. |
+| Top-level `logs/r2_amp/model*.pt` artifacts | closed / excluded | Seven files are SHA256 duplicates of already evaluated Jun24 artifacts; `logs/r2_amp/model_top_task_1518.pt` fails current WSL `torch.load` with `UnpicklingError: invalid load key, '#'`. |
+| Documented `outputs/eval/...` references | closed | `documented_eval_output_paths_summary.json` reports 213 concrete documented paths and 0 missing concrete paths; the only non-concrete reference is the intentional wildcard prose `outputs/eval/June30_Jun*`. |
+| Follow-up readiness audit | pending training | `outputs/eval/June30_selective_walk_followup_readiness_audit/readiness_audit.json` finds 15 matching transient run directories, all classified as `load_only_no_training_progress` with 265-byte loading-only `train.log` files, and all 15 carry `artifact_source="evaluate_checkpoint_load_log_dir"`; there are still 0 checkpoints. These are historical `evaluate.py` checkpoint-load artifacts from the old default runner `log_root`, not trained runs. `evaluate.py` now uses `log_root=None` for checkpoint evaluation, and the regression smoke at `outputs/eval/June30_evaluate_log_root_none_smoke` confirmed checkpoint loading still works while the matching transient-directory count remains 15. The audit exposes `recommended_checkpoint`, `recommended_load_run`, and `recommended_eval_plan`; current values are `null`, `null`, and an empty list because no real checkpoint exists. `scripts/plan_selective_walk_followup_train.py` prints the reviewed formal warm-start command with `--max_iterations=4000`, because the source checkpoint is `iter=4000` and the target is `model_8000.pt`; the long formal training job has not been launched in this local no-large-training pass. `scripts/run_selective_walk_followup_eval_plan.py` consumes the audit JSON; current dry-run prints `No recommended eval commands; run readiness audit after a real checkpoint exists.`, and `--execute` refuses for the same reason. Therefore `ready_for_evaluation=false` and `ready_for_completion=false`. |
+| `selective_walk_eval_manifold_conservative_disturb_release.json` | config/checkpoint smoke, old-checkpoint full7 baseline, and formal-size forced-disturb diagnostics passed; `not trained` | The CPU smokes at `outputs/eval/June30_selective_walk_conservative_followup_smoke_jump`, `outputs/eval/June30_selective_walk_conservative_followup_smoke_run`, `outputs/eval/June30_selective_walk_conservative_followup_smoke_jump_disturb075`, and `outputs/eval/June30_selective_walk_conservative_followup_smoke_run_disturb075` prove the config and Jun17 best checkpoint load together for both key presets at no forced disturbance and forced `0.75` disturbance. The full-shape baseline at `outputs/eval/June30_selective_walk_conservative_followup_baseline_full7` adds a 7-preset / 64-episode compatibility baseline for the old warm-start checkpoint; `outputs/eval/June30_selective_walk_conservative_followup_jump_run_disturb075_formal` adds 64-episode `jump/run` diagnostics at forced `0.75`; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb075` extends forced `0.75` to all seven fixed presets; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090` shows the same checkpoint is still broadly stable at forced `0.9` and `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090_failure_diagnostics` confirms low-rate failures with timeout rates above `0.92`; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925` identifies the onset of degradation and `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925_failure_diagnostics` attributes onset mainly to low-rate `base_link` contact; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095` identifies the transition zone and `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095_failure_diagnostics` shows contact spreading plus a secondary `run` orientation path; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100` shows full-disturb `1.0` broadly collapses the same old checkpoint; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100_failure_diagnostics` attributes the worst-preset collapse mainly to early `base_link` contact; `outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis` aggregates the ratio, preset, failure, and adjacent-delta evidence into machine-readable CSV/JSON tables. Formal follow-up evaluation still must wait until a training run creates follow-up checkpoints. |
 
 ## Maintenance Rules
 
