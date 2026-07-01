@@ -1,0 +1,40 @@
+{
+  "notes": "Warm-start control after the July01 selective-walk follow-up failure. Resume from Jun17 selective-walk best-task, keep the default command sampler instead of the eval-profile mixture, and keep selective-walk style routing. This tests whether resume fine-tuning itself is safe before changing the command manifold. Use with --resume --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk --checkpoint=-2 and --max_iterations=8000. The warm-start/retention rationale follows PPO update caution from Schulman et al. 2017 and catastrophic-forgetting evidence from Li & Hoiem 2016 / Kirkpatrick et al. 2017.",
+  "env": {
+    "commands": {},
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run",
+        "jump": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/jump"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": false,
+        "jump": false
+      }
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "selective_walk_resume_null_control",
+      "save_interval": 250,
+      "save_top_task_checkpoints": 3,
+      "max_iterations": 8000
+    },
+    "algorithm": {
+      "clip_param": 0.1,
+      "desired_kl": 0.005,
+      "learning_rate": 0.0002,
+      "teacher_policy_retention_coef": 0.0
+    },
+    "amp": {
+      "expert_style_enabled": {
+        "walk": true,
+        "run": false,
+        "jump": false
+      }
+    }
+  }
+}

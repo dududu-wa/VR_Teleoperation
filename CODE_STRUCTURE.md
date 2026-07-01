@@ -10,6 +10,7 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `legged_gym/motions/README.md`：AMP motion 数据契约。说明 `.npz` 必须包含哪些字段、shape 要求、多 clip 约束，以及如何生成数据。
 - `legged_gym/motions/r2_walk.npz`：本地默认参考 motion 数据，会被 `R2AmpCfg.amp.motion_file` 指向的目录扫描加载。
 - `rsl_rl/rsl_rl/runners/on_policy_runner.py`：训练总控中的 AMP 接入点。`_init_amp()` 为每个专家创建 `AMPDiscriminator`、`AMPReplayBuffer`，并把算法从 `PPO` 替换成 `AMPPPO`；日志和 checkpoint 中记录 task/style reward，并可保留 top-k task checkpoint 供后评估。
+- `rsl_rl/rsl_rl/algorithms/ppo.py`：基础 PPO 算法。除 clipped surrogate/value/entropy/symmetry loss 外，支持 `teacher_policy_retention_coef`；resume 加载后可冻结一份 warm-start policy，并在 fine-tune 时加入 Learning without Forgetting 风格的 action-mean retention loss（Li & Hoiem, 2016），用于短程保持 Jun17 selective-walk reference 行为。
 - `rsl_rl/rsl_rl/algorithms/amp_ppo.py`：AMP-PPO 算法。用路由后的 discriminator 对 `infos["amp_obs"]` 计算 style reward；`r2amp` 配置会把 style reward 归一化，并按 `style_reward_weight * env.dt * schedule * gate` 加权后，与 task reward contribution 相加写入 PPO storage，使 AMP style 项和已按 `env.dt` 积分的 task reward 保持同一时间尺度。
 - `rsl_rl/rsl_rl/modules/discriminator.py`：AMP 判别器网络。输入 flattened AMP observation history，输出真假风格 logit，并提供 gradient penalty。
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
@@ -153,6 +154,8 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 `--cfg_override_json` 的顶层 schema 固定为 `env` / `train`，可附加 `notes` 作为人工说明。JSON 先覆盖，显式 CLI 参数最后覆盖；因此 `--run_name`、`--seed`、`--num_envs` 等命令行值优先级最高。key body 相关配置会校验 `amp_obs_dim == 2 * env.num_actions + 13 + 3 * len(key_body_names)`，避免判别器输入维度和环境 AMP observation 维度不一致。style weight sweep 包含 `sw0005=0.005`、`sw001=0.01`、`sw002=0.02`、`sw005=0.05`。`sw1_dt_nowarm.json` 复现 dt baseline，`sw1_dt_warmup.json` 是推荐 schedule/cap 组，`sw1_dt_ratio025.json` 只测 task-ratio cap，`sw1_dt_gate_task0.json` 叠加严格 task gate，`walk_sw1_dt_warmup.json` 用 walk-only prior 测命令和 motion prior 是否冲突。`motion_walk.json`、`motion_run.json`、`motion_jump.json` 用于在 `legged_gym/motions/walk|run|jump` 分类目录之间切换 AMP prior；`expert_hard_gate_walk_run_jump.json` 打开 walk/run/jump 三专家 hard routing，`expert_hard_gate_walk_run.json` 只注册 walk/run 并让 jump/hop 语义回退到默认 walk 专家，`expert_hard_gate_selective_walk.json` 保留三专家路由但只让 walk style reward 生效，`expert_hard_gate_no_style_warmup.json` 在 `train.amp` 把 `style_reward_start_after/style_reward_warmup_iterations` 设为 0，因为 `AMPPPO` 从 train cfg 读取 schedule。`command_hold_controlled_disturb_release.json`、`command_hold_no_push.json`、`command_hold_conservative_penalty_ramp.json`、`command_hold_style_lowcap.json` 是 July19 后续批次，用于在固定 command range 的基线上拆分 disturb release、push、penalty ramp 和 style cap。`command_hold_staged_disturb_release.json` 和 `command_hold_run_focused_staged_disturb_release.json` 是 July20/July21 后续的两组正式训练实验：前者继续以固定 command range 为 anchor 并分阶段释放 disturb；后者保留同一 staged disturb 机制，但把 command 分布压到 run 专家区域，同时把 lateral/yaw、foot swing height 和 body height 控制在较窄范围，避免 run-focused fine-tune 混成 jump-focused。两者都把 disturb curriculum 限制为 `0.0 -> 0.25 -> 0.5 -> 0.75 -> 1.0`，并设置 `stage_monitor_expert="run"`，要求 run-routed noise-disturb episode 的 task return/fall rate 达标后才进入下一阶段，避免 walk/stand 均值掩盖 run 崩溃。`command_hold_run_recovery_staged_disturb_release.json` 是 July23 后续配置：它使用 walk-run 过渡 command band、较细的 `0.0 -> 0.15 -> 0.3 -> 0.5 -> 0.75 -> 1.0` staged levels，并把 `stage_min_task_return` / `stage_max_fall_rate` 写成与 `stage_levels` 等长的 per-stage 列表，让早期 gate 较宽、后期 gate 收紧。`command_hold_eval_manifold_staged_disturb_release.json` 是 June25 follow-up：它通过 `commands.profile_mixture` 按权重采样贴近 `evaluate.py` 七个固定 preset 的 jitter anchor，用来测试训练/评估 command manifold 不匹配是否是 June24 广泛崩溃的主因；首轮评估后该配置改为 all-profile `stage_monitor_profiles` 和 adaptive stage regression，用于下一次 rerun。`command_hold_eval_manifold_conservative_disturb_release.json` 是相邻诊断配置：沿用同一 eval-manifold/profile-aware gate，但把 staged disturbance 上限压到 `0.75`、早期阶段更细、`stage_min_episodes` 提到 `2048`，用来隔离 full-disturb pressure 是否导致 stand/jump collapse 和 late regression。`mixed_sw05.json` 和 `walk_sw05.json` 用于对比 `style_reward_weight=0.5` 下的混合 prior 与 walk-only prior。`handsfeetwaist.json` 额外要求 AMP motion 文件的 `body_names` 包含 `waist_pitch_link`；若当前 motion 数据仍只含 base、双臂和双脚，应先重新导出 motion。
 
 `selective_walk_eval_manifold_conservative_disturb_release.json` 是 June30 top-task 审计后的后续训练配置：它保留 `command_hold_eval_manifold_conservative_disturb_release.json` 的七 preset `commands.profile_mixture`、all-profile staged gate、`0.75` disturbance cap、`2048` episode gate window 和 adaptive regression，但把 `env.amp.expert_style_enabled` / `train.amp.expert_style_enabled` 设为 `{"walk": true, "run": false, "jump": false}`。这样做的原因是本地评估显示 Jun17 `expert_hard_gate_selective_walk/model_best_task.pt` 在 partial `jump/run` disturbance 下比 Jun20/Jun21 conservative top-task checkpoint 更稳，因此下一步应从 selective-walk best warm-start，隔离“selective-walk style prior + conservative eval-manifold disturbance curriculum”是否优于 full-style conservative 续训。
+
+`selective_walk_resume_null_control.json`、`selective_walk_profile_task_only_probe.json` 和 `selective_walk_profile_teacher_retention_probe.json` 是 July01 失败 follow-up 后的 8000 追加轮诊断配置，三者都应从 Jun17 `expert_hard_gate_selective_walk/model_best_task.pt` 热启动，而不是从头训练。`resume_null_control` 不启用 `profile_mixture`，用于测量单纯 resume 8000 iteration 是否破坏参考策略；`profile_task_only_probe` 启用七 preset `profile_mixture` 但把 `train.amp.style_reward_weight=0.0`，用于隔离 profile/task objective 本身；`profile_teacher_retention_probe` 在 task-only 设置上加入 `teacher_policy_retention_coef=0.25`，用冻结 warm-start policy 的动作均值约束减缓 fine-tune 遗忘。由于 Jun17 source checkpoint 内部 `iter=4000`，`--max_iterations=8000` 对应的主要末端 checkpoint 预期约为 `model_12000.pt`。
 
 ### 2.3 回放链路
 
@@ -786,17 +789,20 @@ README 中通过 `pip install -e rsl_rl` 安装这个包。
 
 关键类 `PPO`：
 
-- `__init__`：保存 PPO 超参，创建 `AdamW` 优化器，持有 `ActorCritic`。
+- `__init__`：保存 PPO 超参，创建 `AdamW` 优化器，持有 `ActorCritic`；`teacher_policy_retention_coef` 默认为 `0.0`，大于 0 时表示后续 resume fine-tune 需要启用 teacher retention。
 - `init_storage`：创建 `RolloutStorage`。
 - `act`：采样动作并记录 value、log prob、action mean/std、obs。
 - `process_env_step`：处理 reward/done/timeouts，把 transition 写入 storage。
 - `compute_returns`：用 critic 估计 last value，调用 storage 计算 GAE。
-- `update`：计算 clipped surrogate loss、value loss、entropy bonus、可选 adaptation loss、可选 symmetry loss，并优化网络。
+- `capture_teacher_policy`：在 checkpoint load 完成后深拷贝当前 `actor_critic`，冻结参数并切到 eval 模式；这样 teacher 是实际加载的 warm-start policy，而不是训练过程中的滚动快照。
+- `_teacher_retention_loss`：用冻结 teacher 在同一 mini-batch obs/privileged obs/mask 上调用 `act_inference()`，对当前 policy action mean 与 teacher action mean 做 MSE；无 teacher 或系数为 0 时返回零损失并记录 skipped。
+- `update`：计算 clipped surrogate loss、value loss、entropy bonus、可选 adaptation loss、可选 symmetry loss、可选 teacher retention loss，并优化网络。
 
 特别点：
 
 - `sync_update=True` 时会训练 actor 内部的 privileged reconstruction。
 - `use_wbc_sym_loss=True` 时使用配置化镜像一致性损失：`pi(obs)` 与 `mirror_action(pi(mirror_obs))` 做 MSE。R2 当前使用 26 维 action map、base 95 维 obs map、interrupt/r2amp 96 维 obs map；旧 HugWBC/H1 19/76 维硬编码已不再作为 PPO 默认路径。
+- `teacher_policy_retention_coef>0` 只在 `OnPolicyRunner.load()` 后捕获 teacher；从头训练时没有加载 teacher，loss 会保持 skipped。这个设计刻意服务于 warm-start 保持问题，不改变普通 from-scratch PPO/AMP 训练。
 - recurrent 分支接口存在，但当前 storage 没有对应 generator，默认 `ActorCritic.is_recurrent=False`。
 
 #### `amp_ppo.py`
@@ -884,7 +890,7 @@ AMP 判别器。
 - `log`：写 TensorBoard 和 `train.log`。
 - `_maybe_save_best_checkpoints`：保存 `model_best_task.pt`，并按 `save_top_task_checkpoints` 维护 `model_top_task_{it}.pt`。
 - `_init_amp`：读取 `amp_observation_space`、`amp_expert_names` 和 `expert_style_enabled`，为每个专家创建独立 `AMPDiscriminator`、`AMPReplayBuffer` 和优化器入口；这样 hard gate 的每类 motion prior 有自己的真假判别边界。
-- `save/load`：保存/加载模型、optimizer、AMP discriminator；多专家 checkpoint 使用 `discriminator_state_dicts` 和 `disc_optimizer_state_dicts` 保存每个专家状态。
+- `save/load`：保存/加载模型、optimizer、AMP discriminator；多专家 checkpoint 使用 `discriminator_state_dicts` 和 `disc_optimizer_state_dicts` 保存每个专家状态。`load()` 完成后如果算法提供 `capture_teacher_policy()`，会捕获刚加载的 warm-start policy 作为 teacher retention 参考。
 - `get_inference_policy`：返回 eval 模式 policy。
 
 ### `rsl_rl/rsl_rl/storage/`
@@ -1286,7 +1292,7 @@ AMP 任务实验输出。
 
 ### `tests/`
 
-当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint、多专家 AMP 接线、interrupt disturb release 开关、staged disturb release、run-only disturb sweep helper、eval-manifold/profile-aware staged gate、conservative eval-manifold JSON 合同、selective-walk conservative eval-manifold follow-up JSON 合同、follow-up checkpoint 标准评估命令生成合同、follow-up 评估输出汇总/缺失检查合同、follow-up 训练/评估 readiness audit 合同，以及 `evaluate.py` checkpoint 加载时禁用训练式 `log_dir` 且 `task_registry.make_alg_runner()` 仍保留默认 resume lookup root 的合同。完整训练验证仍主要依赖：
+当前仓库包含轻量级合约测试 `tests/test_amp_training_contracts.py`，用于不启动 IsaacGym 的情况下验证 AMP reward schedule/gate、runner top-k checkpoint、多专家 AMP 接线、interrupt disturb release 开关、staged disturb release、run-only disturb sweep helper、eval-manifold/profile-aware staged gate、conservative eval-manifold JSON 合同、selective-walk conservative eval-manifold follow-up JSON 合同、teacher-retention PPO hook/行为、三组 selective-walk 8000-iteration probe JSON 合同、follow-up checkpoint 标准评估命令生成合同、follow-up 评估输出汇总/缺失检查合同、follow-up 训练/评估 readiness audit 合同，以及 `evaluate.py` checkpoint 加载时禁用训练式 `log_dir` 且 `task_registry.make_alg_runner()` 仍保留默认 resume lookup root 的合同。完整训练验证仍主要依赖：
 
 - 能否创建环境。
 - 能否启动训练。

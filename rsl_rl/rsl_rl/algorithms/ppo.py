@@ -32,6 +32,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import copy
 from collections import defaultdict
 
 from rsl_rl.modules import ActorCritic
@@ -58,6 +59,7 @@ class PPO:
                  symmetry_action_signs=None,
                  symmetry_obs_indices=None,
                  symmetry_obs_signs=None,
+                 teacher_policy_retention_coef=0.0,
                  sync_update=False,
                  schedule="fixed",
                  desired_kl=0.01,
@@ -77,6 +79,10 @@ class PPO:
         self.symmetry_action_signs = self._symmetry_tensor(symmetry_action_signs)
         self.symmetry_obs_indices = self._symmetry_tensor(symmetry_obs_indices, dtype=torch.long)
         self.symmetry_obs_signs = self._symmetry_tensor(symmetry_obs_signs)
+        self.teacher_policy_retention_coef = float(teacher_policy_retention_coef)
+        if self.teacher_policy_retention_coef < 0.0:
+            raise ValueError("teacher_policy_retention_coef must be non-negative")
+        self.teacher_actor_critic = None
         self.sync_update = sync_update
 
         # PPO components
@@ -125,6 +131,18 @@ class PPO:
         if int(torch.min(self.symmetry_action_indices)) < 0 or int(torch.max(self.symmetry_action_indices)) >= action_dim:
             raise ValueError("symmetry_action_indices contains an index outside the action dimension")
 
+    def capture_teacher_policy(self):
+        if self.teacher_policy_retention_coef <= 0.0:
+            return False
+        # Freeze the warm-start policy for a Learning without Forgetting style
+        # action-retention loss (Li & Hoiem 2016) during PPO fine-tuning.
+        self.teacher_actor_critic = copy.deepcopy(self.actor_critic)
+        self.teacher_actor_critic.to(self.device)
+        self.teacher_actor_critic.eval()
+        for parameter in self.teacher_actor_critic.parameters():
+            parameter.requires_grad_(False)
+        return True
+
     def _mirror_tensor(self, tensor, indices, signs, name):
         if tensor.shape[-1] != len(indices):
             raise ValueError(f"{name} mirror map length {len(indices)} does not match tensor dim {tensor.shape[-1]}")
@@ -133,6 +151,22 @@ class PPO:
         sign_shape = [1] * tensor.dim()
         sign_shape[-1] = len(signs)
         return tensor.index_select(-1, indices) * signs.view(*sign_shape)
+
+    def _teacher_retention_loss(self, obs_batch, critic_obs_batch, masks_batch, current_action_mean):
+        if self.teacher_policy_retention_coef <= 0.0 or self.teacher_actor_critic is None:
+            return current_action_mean.new_tensor(0.0), True
+        with torch.no_grad():
+            teacher_action_mean, _ = self.teacher_actor_critic.act_inference(
+                obs_batch,
+                masks=masks_batch,
+                privileged_obs=critic_obs_batch,
+            )
+        if teacher_action_mean.shape != current_action_mean.shape:
+            raise ValueError(
+                "teacher policy action shape does not match current policy action shape"
+            )
+        raw_mse = (current_action_mean - teacher_action_mean).pow(2).mean()
+        return self.teacher_policy_retention_coef * raw_mse, False
 
     def init_storage(self, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape):
         self.storage = RolloutStorage(num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, action_shape, self.device)
@@ -249,10 +283,30 @@ class PPO:
 
                     sym_loss = self.symmetry_loss_coef * (origin_act.detach() - recovery_act).pow(2).mean()
 
+                teacher_retention_loss, teacher_retention_skipped = self._teacher_retention_loss(
+                    obs_batch,
+                    critic_obs_batch,
+                    masks_batch,
+                    mu_batch,
+                )
+
                 if self.sync_update:
-                    loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + sym_loss + adaptation_loss
+                    loss = (
+                        surrogate_loss
+                        + self.value_loss_coef * value_loss
+                        - self.entropy_coef * entropy_batch.mean()
+                        + sym_loss
+                        + adaptation_loss
+                        + teacher_retention_loss
+                    )
                 else:
-                    loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() + sym_loss
+                    loss = (
+                        surrogate_loss
+                        + self.value_loss_coef * value_loss
+                        - self.entropy_coef * entropy_batch.mean()
+                        + sym_loss
+                        + teacher_retention_loss
+                    )
 
                 # Gradient step
                 self.optimizer.zero_grad()
@@ -264,6 +318,8 @@ class PPO:
                 metrics['surrogate'] += surrogate_loss.item()
                 metrics['actor_sample_ratio'] += ratio.mean().item()
                 metrics['sym_loss'] += sym_loss.item()
+                metrics['teacher_policy_retention_loss'] += teacher_retention_loss.item()
+                metrics['teacher_policy_retention_skipped'] += float(teacher_retention_skipped)
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         

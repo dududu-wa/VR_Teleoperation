@@ -16,6 +16,7 @@ isaacgym_torch_utils_stub = types.ModuleType("isaacgym.torch_utils")
 sys.modules.setdefault("isaacgym", isaacgym_stub)
 sys.modules.setdefault("isaacgym.torch_utils", isaacgym_torch_utils_stub)
 
+from rsl_rl.algorithms.ppo import PPO
 from rsl_rl.algorithms.amp_ppo import AMPPPO
 from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 import rsl_rl.runners.on_policy_runner as runner_module
@@ -214,6 +215,61 @@ def test_amp_ppo_routes_by_expert_id():
     assert "expert_style_enabled" in source
     assert "style_reward_contrib/" in source
     assert "disc_update_skipped/" in source
+
+
+def test_ppo_supports_teacher_policy_retention_loss():
+    ppo_source = (ROOT_DIR / "rsl_rl/rsl_rl/algorithms/ppo.py").read_text(
+        encoding="utf-8"
+    )
+    runner_source = (
+        ROOT_DIR / "rsl_rl/rsl_rl/runners/on_policy_runner.py"
+    ).read_text(encoding="utf-8")
+
+    assert "teacher_policy_retention_coef" in ppo_source
+    assert "capture_teacher_policy" in ppo_source
+    assert "_teacher_retention_loss" in ppo_source
+    assert "teacher_policy_retention_loss" in ppo_source
+    assert "teacher_policy_retention_skipped" in ppo_source
+    assert "copy.deepcopy" in ppo_source
+    assert "Learning without Forgetting" in ppo_source
+    assert "capture_teacher_policy()" in runner_source
+
+
+class _FixedTeacherPolicy:
+    def __init__(self, action_mean):
+        self.action_mean = action_mean
+
+    def act_inference(self, observations, masks=None, privileged_obs=None):
+        assert privileged_obs is not None
+        return self.action_mean, None
+
+
+def test_teacher_retention_loss_matches_action_mean_mse():
+    alg = object.__new__(PPO)
+    alg.teacher_policy_retention_coef = 0.25
+    current_mean = torch.tensor([[2.0, -1.0], [0.5, 3.0]])
+    teacher_mean = torch.tensor([[1.0, 1.0], [0.5, -1.0]])
+    alg.teacher_actor_critic = _FixedTeacherPolicy(teacher_mean)
+
+    loss, skipped = alg._teacher_retention_loss(
+        torch.zeros(2, 3),
+        torch.zeros(2, 4),
+        None,
+        current_mean,
+    )
+
+    assert skipped is False
+    assert torch.allclose(loss, 0.25 * (current_mean - teacher_mean).pow(2).mean())
+
+    alg.teacher_actor_critic = None
+    loss, skipped = alg._teacher_retention_loss(
+        torch.zeros(2, 3),
+        torch.zeros(2, 4),
+        None,
+        current_mean,
+    )
+    assert skipped is True
+    assert torch.allclose(loss, torch.tensor(0.0))
 
 
 def test_amp_ppo_resolves_expert_ids_before_collector_mutation():
@@ -634,6 +690,49 @@ def test_selective_walk_eval_manifold_conservative_disturb_release_json_contract
     assert env_style == {"walk": True, "run": False, "jump": False}
     assert train_style == {"walk": True, "run": False, "jump": False}
     assert payload["env"]["amp"]["default_motion_expert"] == "walk"
+
+
+def test_selective_walk_retention_probe_json_contracts():
+    ablation_dir = ROOT_DIR / "configs/ablation"
+    expected = {
+        "selective_walk_resume_null_control.json",
+        "selective_walk_profile_task_only_probe.json",
+        "selective_walk_profile_teacher_retention_probe.json",
+    }
+    payloads = {}
+    for filename in expected:
+        path = ablation_dir / filename
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payloads[filename] = payload
+        assert isinstance(payload.get("notes"), str) and payload["notes"]
+        assert payload["train"]["runner"]["max_iterations"] == 8000
+        assert payload["train"]["runner"]["save_top_task_checkpoints"] == 3
+        assert "selective_walk" in payload["train"]["runner"]["run_name"]
+        assert payload["env"]["amp"]["expert_style_enabled"] == {
+            "walk": True,
+            "run": False,
+            "jump": False,
+        }
+        assert payload["train"]["amp"]["expert_style_enabled"] == {
+            "walk": True,
+            "run": False,
+            "jump": False,
+        }
+
+    null_control = payloads["selective_walk_resume_null_control.json"]
+    assert "profile_mixture" not in null_control["env"]["commands"]
+    assert null_control["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.0
+
+    task_only = payloads["selective_walk_profile_task_only_probe.json"]
+    assert task_only["env"]["commands"]["profile_mixture"]
+    assert task_only["train"]["amp"]["style_reward_weight"] == 0.0
+    assert task_only["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.0
+
+    retention = payloads["selective_walk_profile_teacher_retention_probe.json"]
+    assert retention["env"]["commands"]["profile_mixture"]
+    assert retention["train"]["amp"]["style_reward_weight"] == 0.0
+    assert retention["train"]["algorithm"]["teacher_policy_retention_coef"] > 0.0
+    assert retention["train"]["algorithm"]["teacher_policy_retention_coef"] <= 1.0
 
 
 def test_run_disturb_sweep_helper_contract():

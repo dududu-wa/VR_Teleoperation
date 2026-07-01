@@ -570,6 +570,9 @@ class OnPolicyRunner:
                 disc_optimizer = getattr(self.alg, "disc_optimizer", None)
                 if disc_optimizer is not None:
                     disc_optimizer.load_state_dict(loaded_dict['disc_optimizer_state_dict'])
+        if hasattr(self.alg, "capture_teacher_policy"):
+            # Capture after checkpoint load so retention anchors to the warm-start policy.
+            self.alg.capture_teacher_policy()
         return loaded_dict['infos']
 
     def get_inference_policy(self, device=None):

@@ -1,6 +1,6 @@
 ﻿# R2 AMP Experiment Progress
 
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -2807,7 +2807,7 @@ Conclusion:
 - The only current source files without top-task metrics are verified duplicate or non-checkpoint artifacts and should remain excluded rather than forced through `evaluate.py`.
 - The remaining work is not another local evaluation run; it is the not-yet-trained follow-up config above, which requires training budget before it can produce new checkpoints to evaluate.
 
-Current open-item ledger after this audit:
+Current open-item ledger after this audit (historical June30 state; the selective-walk follow-up rows are superseded by the July01 formal-run evaluation below):
 
 | item | status after audit | reason |
 |---|---|---|
@@ -2821,6 +2821,139 @@ Current open-item ledger after this audit:
 | Documented `outputs/eval/...` references | closed | `documented_eval_output_paths_summary.json` reports 213 concrete documented paths and 0 missing concrete paths; the only non-concrete reference is the intentional wildcard prose `outputs/eval/June30_Jun*`. |
 | Follow-up readiness audit | pending training | `outputs/eval/June30_selective_walk_followup_readiness_audit/readiness_audit.json` finds 15 matching transient run directories, all classified as `load_only_no_training_progress` with 265-byte loading-only `train.log` files, and all 15 carry `artifact_source="evaluate_checkpoint_load_log_dir"`; there are still 0 checkpoints. These are historical `evaluate.py` checkpoint-load artifacts from the old default runner `log_root`, not trained runs. `evaluate.py` now uses `log_root=None` for checkpoint evaluation, and the regression smoke at `outputs/eval/June30_evaluate_log_root_none_smoke` confirmed checkpoint loading still works while the matching transient-directory count remains 15. The audit exposes `recommended_checkpoint`, `recommended_load_run`, and `recommended_eval_plan`; current values are `null`, `null`, and an empty list because no real checkpoint exists. `scripts/plan_selective_walk_followup_train.py` prints the reviewed formal warm-start command with `--max_iterations=4000`, because the source checkpoint is `iter=4000` and the target is `model_8000.pt`; the long formal training job has not been launched in this local no-large-training pass. `scripts/run_selective_walk_followup_eval_plan.py` consumes the audit JSON; current dry-run prints `No recommended eval commands; run readiness audit after a real checkpoint exists.`, and `--execute` refuses for the same reason. Therefore `ready_for_evaluation=false` and `ready_for_completion=false`. |
 | `selective_walk_eval_manifold_conservative_disturb_release.json` | config/checkpoint smoke, old-checkpoint full7 baseline, and formal-size forced-disturb diagnostics passed; `not trained` | The CPU smokes at `outputs/eval/June30_selective_walk_conservative_followup_smoke_jump`, `outputs/eval/June30_selective_walk_conservative_followup_smoke_run`, `outputs/eval/June30_selective_walk_conservative_followup_smoke_jump_disturb075`, and `outputs/eval/June30_selective_walk_conservative_followup_smoke_run_disturb075` prove the config and Jun17 best checkpoint load together for both key presets at no forced disturbance and forced `0.75` disturbance. The full-shape baseline at `outputs/eval/June30_selective_walk_conservative_followup_baseline_full7` adds a 7-preset / 64-episode compatibility baseline for the old warm-start checkpoint; `outputs/eval/June30_selective_walk_conservative_followup_jump_run_disturb075_formal` adds 64-episode `jump/run` diagnostics at forced `0.75`; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb075` extends forced `0.75` to all seven fixed presets; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090` shows the same checkpoint is still broadly stable at forced `0.9` and `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb090_failure_diagnostics` confirms low-rate failures with timeout rates above `0.92`; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925` identifies the onset of degradation and `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb0925_failure_diagnostics` attributes onset mainly to low-rate `base_link` contact; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095` identifies the transition zone and `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb095_failure_diagnostics` shows contact spreading plus a secondary `run` orientation path; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100` shows full-disturb `1.0` broadly collapses the same old checkpoint; `outputs/eval/June30_selective_walk_conservative_followup_full7_disturb100_failure_diagnostics` attributes the worst-preset collapse mainly to early `base_link` contact; `outputs/eval/June30_selective_walk_conservative_followup_boundary_analysis` aggregates the ratio, preset, failure, and adjacent-delta evidence into machine-readable CSV/JSON tables. Formal follow-up evaluation still must wait until a training run creates follow-up checkpoints. |
+
+### July01 Formal Selective-Walk Follow-up Training Evaluation
+
+Hypothesis: the selective-walk prior plus eval-manifold command mixture and conservative staged disturbance cap would preserve the Jun17 warm-start checkpoint's partial-disturbance robustness while improving the seven-preset command manifold.
+
+Training artifact:
+
+```text
+logs/r2_amp/Jun30_17-05-30_selective_walk_eval_manifold_conservative_disturb_release
+configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json
+```
+
+Checkpoint facts:
+
+- The run contains `model_4000.pt`, `model_6000.pt`, `model_8000.pt`, `model_10000.pt`, `model_12000.pt`, `model_best_task.pt`, and top-task checkpoints `model_top_task_4088.pt`, `model_top_task_4093.pt`, `model_top_task_4100.pt`.
+- This is a real trained run, not one of the older evaluate-only transient directories: `outputs/eval/July01_selective_walk_followup_readiness_audit.json` reports `runs_found=1`, `checkpoint_count=9`, `ready_for_evaluation=true`, and `recommended_checkpoint=8000`.
+- The run overshot the intended formal target: the reviewed handoff expected an additional `--max_iterations=4000` from source iteration `4000` to target `model_8000.pt`, but this run produced `model_12000.pt` and `train.log` reaches `Learning iteration 11999/12000`. This means the effective resume budget behaved like an additional `8000` iterations.
+- Late training never released staged disturbance: the tail of `train.log` keeps `Mean episode staged_disturb_level: 0.0000`; the final iteration reports `Mean task reward: -4.50`, `staged_disturb_window_task_return: -16.7981`, `staged_disturb_window_fall_rate: 0.1442`, and `Best task reward: 37.14`.
+
+Evaluation protocol:
+
+- WSL CPU PhysX / CPU policy eval through `legged_gym/scripts/evaluate.py`.
+- Task/config: `--task=r2amp`, `--cfg_override_json configs/ablation/selective_walk_eval_manifold_conservative_disturb_release.json`.
+- Default seven fixed presets, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- `model_8000.pt` was also evaluated at forced `--eval_disturb_ratio=0.75`.
+- The planned 9-output eval was intentionally stopped after the `8000` baseline and `0.75` full7 evaluation, because those already show broad collapse. Attempting to continue the original batch to `0.9` failed with WSL `exit status 137` after memory/swap exhaustion; WSL was restarted before the subsequent focused baseline checks.
+
+Evaluation outputs:
+
+```text
+outputs/eval/July01_selective_walk_followup_best_task_baseline_full7
+outputs/eval/July01_selective_walk_followup_baseline_full7
+outputs/eval/July01_selective_walk_followup_full7_disturb075
+outputs/eval/July01_selective_walk_followup_12000_baseline_full7
+outputs/eval/July01_selective_walk_followup_summary
+```
+
+Aggregate result:
+
+| checkpoint / reference | protocol | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | action-rate L2 | worst task preset | worst task return | worst fall preset | worst fall rate |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| Jun17 warm-start reference | baseline full7 | 7 | 28.03 | 0.038 | 9.76 | 0.339 | 0.485 | 2.59 | `run` | 11.80 | `stand` | 0.109 |
+| `model_best_task.pt` | baseline full7 | 7 | 22.78 | 0.078 | 9.43 | 0.404 | 0.580 | 2.70 | `run` | 0.46 | `run` | 0.281 |
+| `model_8000.pt` | baseline full7 | 7 | 14.01 | 0.406 | 6.45 | 0.432 | 0.631 | 5.77 | `jump` | -3.76 | `stand` | 1.000 |
+| `model_8000.pt` | forced disturb `0.75` full7 | 7 | 7.97 | 0.493 | 6.25 | 0.700 | 0.815 | 4.11 | `jump` | -9.71 | `stand` | 1.000 |
+| `model_12000.pt` | baseline full7 | 7 | 21.66 | 0.330 | 7.20 | 0.426 | 0.697 | 18.47 | `run` | -6.18 | `run` | 1.000 |
+
+Selected per-preset facts:
+
+- `model_best_task.pt` is already weaker than the Jun17 warm-start reference: `run` drops to `task_return=0.46`, `fall_rate=0.281`, `survival=7.64s`.
+- `model_8000.pt` has broad no-forced-disturbance collapse: `stand` has `task_return=-1.31`, `fall_rate=1.000`, `survival=1.90s`; `jump` has `task_return=-3.76`, `fall_rate=1.000`, `survival=0.27s`.
+- `model_8000.pt` under forced `0.75` disturbance is worse, not more robust: `stand` remains `fall_rate=1.000`, `jump` remains `fall_rate=1.000`, and average task return falls to `7.97`.
+- `model_12000.pt` partially recovers stand/walk/turn/strafe task return, but it is not a usable recovery checkpoint: `run` and `jump` both have `fall_rate=1.000`, and action-rate L2 rises sharply to `18.47`.
+
+Interpretation:
+
+- This formal follow-up did not validate the hypothesis. It underperforms the old Jun17 warm-start checkpoint before forced disturbance, and the planned target `model_8000.pt` fails the basic full7 baseline.
+- The failure is not caused by the staged disturbance cap being too aggressive in late training, because the training log reports `staged_disturb_level=0.0000` at the tail. The supported diagnosis is that the fine-tuning objective/command-profile mixture already destabilizes the warm-start policy before staged disturbance ever becomes active.
+- The `model_12000.pt` overshoot should not be used as a candidate: it recovers some easy presets but catastrophically fails `run` and `jump` and has much higher action-rate L2.
+
+Decision:
+
+- Do not continue from `model_8000.pt` or `model_12000.pt`.
+- Keep the Jun17 selective-walk best checkpoint as the stronger robustness reference.
+- The next experiment should be a controlled warm-start fine-tune from the Jun17 checkpoint with a less destabilizing training contract before reintroducing the full eval-manifold disturbance release. The probe budget was later standardized to `--max_iterations=8000` for all three July01 retention configs; because the source checkpoint is internally `iter=4000`, the main terminal checkpoint is expected around `model_12000.pt`.
+
+### July01 Warm-Start Retention Probe Configs
+
+Hypothesis: the Jun30/July01 follow-up failed before staged disturbance release, so the next evidence should isolate whether resume itself, the seven-profile command mixture, or forgetting during fine-tune is the destabilizing factor.
+
+Training decision:
+
+- Use warm-start from `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`.
+- Do not train from scratch for this batch. From-scratch training would test a different question and would not isolate preservation of the already-strong Jun17 policy.
+- Run three matched 8000-additional-iteration probes. If the null control degrades, the resume/training budget is suspect; if only the profile probes degrade, the command-profile/task objective is suspect; if teacher retention helps, the failure is consistent with fine-tune forgetting. With the Jun17 source checkpoint at internal `iter=4000`, this budget should produce a terminal checkpoint around `model_12000.pt`.
+
+Reference basis:
+
+- PPO remains the optimizer backbone, following the clipped surrogate / multi-epoch minibatch update design in Schulman et al. 2017, `arXiv:1707.06347`.
+- The new retention term is a Learning without Forgetting-style preservation constraint, following the idea of using new-task data while preserving old behavior from Li and Hoiem 2016, `arXiv:1606.09282`. In this repo the preserved output is the action mean of the loaded warm-start policy on current rollout mini-batches.
+- The failure mode being tested is catastrophic forgetting during sequential fine-tuning; Kirkpatrick et al. 2017, `PNAS 114(13):3521-3526`, is the reference motivation for treating old-skill preservation as a first-class constraint.
+
+Implemented code/config artifacts:
+
+| artifact | status | purpose |
+|---|---|---|
+| `rsl_rl/rsl_rl/algorithms/ppo.py` | implemented | Adds `teacher_policy_retention_coef`, `capture_teacher_policy()`, `_teacher_retention_loss()`, and logs `teacher_policy_retention_loss` / `teacher_policy_retention_skipped`. |
+| `rsl_rl/rsl_rl/runners/on_policy_runner.py` | implemented | Calls `capture_teacher_policy()` immediately after checkpoint `load()`, so the teacher is the loaded Jun17 warm-start policy. |
+| `configs/ablation/selective_walk_resume_null_control.json` | implemented, not trained | 8000-additional-iteration warm-start null control: selective-walk AMP routing, no `profile_mixture`, no teacher retention. |
+| `configs/ablation/selective_walk_profile_task_only_probe.json` | implemented, not trained | 8000-additional-iteration warm-start profile probe: seven eval-like `profile_mixture`, `train.amp.style_reward_weight=0.0`, no teacher retention. |
+| `configs/ablation/selective_walk_profile_teacher_retention_probe.json` | implemented, not trained | Same task-only profile probe plus `teacher_policy_retention_coef=0.25` to test whether teacher retention reduces early fine-tune forgetting. |
+| `tests/test_amp_training_contracts.py` | implemented | Contract coverage for teacher-retention hooks and the three 8000-iteration probe JSONs. |
+
+Recommended training commands:
+
+```bash
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py \
+  --task=r2amp --headless --seed=0 \
+  --resume \
+  --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk \
+  --checkpoint=-2 \
+  --cfg_override_json configs/ablation/selective_walk_resume_null_control.json \
+  --run_name selective_walk_resume_null_control \
+  --max_iterations=8000
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py \
+  --task=r2amp --headless --seed=0 \
+  --resume \
+  --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk \
+  --checkpoint=-2 \
+  --cfg_override_json configs/ablation/selective_walk_profile_task_only_probe.json \
+  --run_name selective_walk_profile_task_only_probe \
+  --max_iterations=8000
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py \
+  --task=r2amp --headless --seed=0 \
+  --resume \
+  --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk \
+  --checkpoint=-2 \
+  --cfg_override_json configs/ablation/selective_walk_profile_teacher_retention_probe.json \
+  --run_name selective_walk_profile_teacher_retention_probe \
+  --max_iterations=8000
+```
+
+Evaluation plan after each 8000-iteration probe:
+
+- First evaluate `model_best_task.pt` and the expected terminal resumed checkpoint around `model_12000.pt` under the no-forced-disturbance full7 protocol.
+- Only if a probe preserves no-disturb full7 performance should it receive forced `0.75` full7 disturbance evaluation.
+- Stop the batch early if the null control already falls below the Jun17 warm-start reference (`avg task return 28.03`, `avg fall rate 0.038`) by a large margin; that would make the profile/retention comparison ambiguous until the resume budget and PPO learning-rate settings are rechecked.
 
 ## Maintenance Rules
 
