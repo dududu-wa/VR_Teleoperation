@@ -254,7 +254,7 @@ class R2Cfg(LeggedRobotCfg):
 基础默认配置文件。
 
 - `LeggedRobotCfg`：环境数量、观测维度、地形、命令、初始姿态、控制参数、asset、domain randomization、reward、normalization、noise、viewer、sim 默认值。
-- `LeggedRobotCfgPPO`：PPO 默认训练配置，包括 runner class、policy 网络、algorithm 超参、保存/恢复参数。
+- `LeggedRobotCfgPPO`：PPO 默认训练配置，包括 runner class、policy 网络、algorithm 超参、保存/恢复参数。`algorithm.teacher_policy_retention_coef=0.0` 是 warm-start retention 的 schema 默认值；没有这个字段时 `cfg_override_json` 的 strict merge 会拒绝 selective-walk retention probe JSON。
 
 R2 的配置都继承并覆盖这里。
 

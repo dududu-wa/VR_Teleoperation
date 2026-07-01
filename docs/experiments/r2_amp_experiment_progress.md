@@ -2907,12 +2907,19 @@ Implemented code/config artifacts:
 
 | artifact | status | purpose |
 |---|---|---|
+| `legged_gym/envs/base/legged_robot_config.py` | implemented | Adds `algorithm.teacher_policy_retention_coef=0.0` to the base PPO config schema so `cfg_override_json` accepts the retention probe JSONs; default 0.0 keeps existing PPO/AMP runs unchanged. |
 | `rsl_rl/rsl_rl/algorithms/ppo.py` | implemented | Adds `teacher_policy_retention_coef`, `capture_teacher_policy()`, `_teacher_retention_loss()`, and logs `teacher_policy_retention_loss` / `teacher_policy_retention_skipped`. |
 | `rsl_rl/rsl_rl/runners/on_policy_runner.py` | implemented | Calls `capture_teacher_policy()` immediately after checkpoint `load()`, so the teacher is the loaded Jun17 warm-start policy. |
 | `configs/ablation/selective_walk_resume_null_control.json` | implemented, not trained | 8000-additional-iteration warm-start null control: selective-walk AMP routing, no `profile_mixture`, no teacher retention. |
 | `configs/ablation/selective_walk_profile_task_only_probe.json` | implemented, not trained | 8000-additional-iteration warm-start profile probe: seven eval-like `profile_mixture`, `train.amp.style_reward_weight=0.0`, no teacher retention. |
 | `configs/ablation/selective_walk_profile_teacher_retention_probe.json` | implemented, not trained | Same task-only profile probe plus `teacher_policy_retention_coef=0.25` to test whether teacher retention reduces early fine-tune forgetting. |
-| `tests/test_amp_training_contracts.py` | implemented | Contract coverage for teacher-retention hooks and the three 8000-iteration probe JSONs. |
+| `tests/test_amp_training_contracts.py` | implemented | Contract coverage for teacher-retention hooks, the three 8000-iteration probe JSONs, and the base PPO config schema fields needed by strict JSON merge. |
+
+Training-machine failure note:
+
+- A launch that only had the JSON side of this change failed before environment creation with `AttributeError: Unknown config field 'train.algorithm.teacher_policy_retention_coef'`.
+- Root cause: `cfg_override_json` uses strict recursive merge and rejects any key not declared on the config object. `PPO.__init__` already accepted `teacher_policy_retention_coef`, but the base train config schema did not yet expose `algorithm.teacher_policy_retention_coef`.
+- Required fix on the training machine: sync the commit that adds `LeggedRobotCfgPPO.algorithm.teacher_policy_retention_coef = 0.0`, or manually add that one default field before launching the retention JSONs.
 
 Recommended training commands:
 

@@ -207,6 +207,9 @@ class LeggedRobotCfgPPO(BaseConfig):
         lam = 0.95
         desired_kl = 0.01
         max_grad_norm = 1.
+        # Optional Learning without Forgetting-style warm-start retention loss
+        # in PPO; 0.0 keeps existing from-scratch and resume runs unchanged.
+        teacher_policy_retention_coef = 0.0
 
     class runner:
         policy_class_name = 'ActorCritic'

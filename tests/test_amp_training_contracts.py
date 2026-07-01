@@ -10,6 +10,7 @@ from pathlib import Path
 import torch
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
 sys.path.insert(0, str(ROOT_DIR / "rsl_rl"))
 isaacgym_stub = types.ModuleType("isaacgym")
 isaacgym_torch_utils_stub = types.ModuleType("isaacgym.torch_utils")
@@ -733,6 +734,40 @@ def test_selective_walk_retention_probe_json_contracts():
     assert retention["train"]["amp"]["style_reward_weight"] == 0.0
     assert retention["train"]["algorithm"]["teacher_policy_retention_coef"] > 0.0
     assert retention["train"]["algorithm"]["teacher_policy_retention_coef"] <= 1.0
+
+
+def test_selective_walk_retention_probe_algorithm_keys_exist_in_cfg_schema():
+    source = ast.parse(
+        (ROOT_DIR / "legged_gym/envs/base/legged_robot_config.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    ppo_class = next(
+        node
+        for node in source.body
+        if isinstance(node, ast.ClassDef) and node.name == "LeggedRobotCfgPPO"
+    )
+    algorithm_class = next(
+        node
+        for node in ppo_class.body
+        if isinstance(node, ast.ClassDef) and node.name == "algorithm"
+    )
+    schema_keys = {
+        target.id
+        for node in algorithm_class.body
+        if isinstance(node, ast.Assign)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    ablation_dir = ROOT_DIR / "configs/ablation"
+    for filename in (
+        "selective_walk_resume_null_control.json",
+        "selective_walk_profile_task_only_probe.json",
+        "selective_walk_profile_teacher_retention_probe.json",
+    ):
+        payload = json.loads((ablation_dir / filename).read_text(encoding="utf-8"))
+        for key in payload["train"]["algorithm"]:
+            assert key in schema_keys, f"{filename}: train.algorithm.{key}"
 
 
 def test_run_disturb_sweep_helper_contract():
