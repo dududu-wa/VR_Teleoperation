@@ -699,6 +699,8 @@ def test_selective_walk_retention_probe_json_contracts():
         "selective_walk_resume_null_control.json",
         "selective_walk_profile_task_only_probe.json",
         "selective_walk_profile_teacher_retention_probe.json",
+        "selective_walk_profile_teacher_retention_coef010_probe.json",
+        "selective_walk_profile_teacher_retention_disturb075_probe.json",
     }
     payloads = {}
     for filename in expected:
@@ -735,6 +737,33 @@ def test_selective_walk_retention_probe_json_contracts():
     assert retention["train"]["algorithm"]["teacher_policy_retention_coef"] > 0.0
     assert retention["train"]["algorithm"]["teacher_policy_retention_coef"] <= 1.0
 
+    # Keep the July05 follow-up configs as adjacent controls: one changes only
+    # retention strength, the other keeps retention strength and releases disturb.
+    weak_retention = payloads["selective_walk_profile_teacher_retention_coef010_probe.json"]
+    assert weak_retention["train"]["runner"]["run_name"] == (
+        "selective_walk_profile_teacher_retention_coef010_probe"
+    )
+    assert weak_retention["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.10
+    assert weak_retention["env"]["disturb"]["stage_levels"] == [0.0]
+    assert weak_retention["train"]["amp"]["style_reward_weight"] == 0.0
+
+    disturb_probe = payloads["selective_walk_profile_teacher_retention_disturb075_probe.json"]
+    assert disturb_probe["train"]["runner"]["run_name"] == (
+        "selective_walk_profile_teacher_retention_disturb075_probe"
+    )
+    assert disturb_probe["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.25
+    assert disturb_probe["env"]["disturb"]["stage_levels"] == [0.0, 0.15, 0.3, 0.5, 0.75]
+    assert disturb_probe["env"]["disturb"]["stage_monitor_profiles"] == [
+        "stand",
+        "walk_slow",
+        "walk_fast",
+        "run",
+        "jump",
+        "turn_left",
+        "strafe_right",
+    ]
+    assert disturb_probe["train"]["amp"]["style_reward_weight"] == 0.0
+
 
 def test_selective_walk_retention_probe_algorithm_keys_exist_in_cfg_schema():
     source = ast.parse(
@@ -764,6 +793,8 @@ def test_selective_walk_retention_probe_algorithm_keys_exist_in_cfg_schema():
         "selective_walk_resume_null_control.json",
         "selective_walk_profile_task_only_probe.json",
         "selective_walk_profile_teacher_retention_probe.json",
+        "selective_walk_profile_teacher_retention_coef010_probe.json",
+        "selective_walk_profile_teacher_retention_disturb075_probe.json",
     ):
         payload = json.loads((ablation_dir / filename).read_text(encoding="utf-8"))
         for key in payload["train"]["algorithm"]:

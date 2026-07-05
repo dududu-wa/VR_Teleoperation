@@ -1,6 +1,6 @@
 ﻿# R2 AMP Experiment Progress
 
-Last updated: 2026-07-01
+Last updated: 2026-07-05
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -2910,9 +2910,9 @@ Implemented code/config artifacts:
 | `legged_gym/envs/base/legged_robot_config.py` | implemented | Adds `algorithm.teacher_policy_retention_coef=0.0` to the base PPO config schema so `cfg_override_json` accepts the retention probe JSONs; default 0.0 keeps existing PPO/AMP runs unchanged. |
 | `rsl_rl/rsl_rl/algorithms/ppo.py` | implemented | Adds `teacher_policy_retention_coef`, `capture_teacher_policy()`, `_teacher_retention_loss()`, and logs `teacher_policy_retention_loss` / `teacher_policy_retention_skipped`. |
 | `rsl_rl/rsl_rl/runners/on_policy_runner.py` | implemented | Calls `capture_teacher_policy()` immediately after checkpoint `load()`, so the teacher is the loaded Jun17 warm-start policy. |
-| `configs/ablation/selective_walk_resume_null_control.json` | implemented, not trained | 8000-additional-iteration warm-start null control: selective-walk AMP routing, no `profile_mixture`, no teacher retention. |
-| `configs/ablation/selective_walk_profile_task_only_probe.json` | implemented, not trained | 8000-additional-iteration warm-start profile probe: seven eval-like `profile_mixture`, `train.amp.style_reward_weight=0.0`, no teacher retention. |
-| `configs/ablation/selective_walk_profile_teacher_retention_probe.json` | implemented, not trained | Same task-only profile probe plus `teacher_policy_retention_coef=0.25` to test whether teacher retention reduces early fine-tune forgetting. |
+| `configs/ablation/selective_walk_resume_null_control.json` | trained/evaluated in the Jul01 probe batch | 8000-additional-iteration warm-start null control: selective-walk AMP routing, no `profile_mixture`, no teacher retention. |
+| `configs/ablation/selective_walk_profile_task_only_probe.json` | trained/evaluated in the Jul01 probe batch | 8000-additional-iteration warm-start profile probe: seven eval-like `profile_mixture`, `train.amp.style_reward_weight=0.0`, no teacher retention. |
+| `configs/ablation/selective_walk_profile_teacher_retention_probe.json` | trained/evaluated in the Jul01 probe batch | Same task-only profile probe plus `teacher_policy_retention_coef=0.25` to test whether teacher retention reduces early fine-tune forgetting. |
 | `tests/test_amp_training_contracts.py` | implemented | Contract coverage for teacher-retention hooks, the three 8000-iteration probe JSONs, and the base PPO config schema fields needed by strict JSON merge. |
 
 Training-machine failure note:
@@ -2961,6 +2961,105 @@ Evaluation plan after each 8000-iteration probe:
 - First evaluate `model_best_task.pt` and the expected terminal resumed checkpoint around `model_12000.pt` under the no-forced-disturbance full7 protocol.
 - Only if a probe preserves no-disturb full7 performance should it receive forced `0.75` full7 disturbance evaluation.
 - Stop the batch early if the null control already falls below the Jun17 warm-start reference (`avg task return 28.03`, `avg fall rate 0.038`) by a large margin; that would make the profile/retention comparison ambiguous until the resume budget and PPO learning-rate settings are rechecked.
+
+### July05 Evaluation of July01 Warm-Start Retention Probes
+
+Hypothesis: if the Jun30/July01 follow-up failed because the profile fine-tune forgot the Jun17 warm-start behavior, then the teacher-retention profile probe should preserve or improve the no-disturb seven-preset baseline better than the task-only profile probe.
+
+Training artifacts:
+
+| experiment | config | run directory | evaluated checkpoints | status |
+|---|---|---|---|---|
+| `selective_walk_resume_null_control` | `configs/ablation/selective_walk_resume_null_control.json` | `logs/r2_amp/Jul01/Jul01_15-06-31_selective_walk_resume_null_control` | `model_best_task.pt`, `model_12000.pt` | evaluated |
+| `selective_walk_profile_teacher_retention_probe` | `configs/ablation/selective_walk_profile_teacher_retention_probe.json` | `logs/r2_amp/Jul01/Jul01_15-14-48_selective_walk_profile_teacher_retention_probe` | `model_best_task.pt`, `model_12000.pt`; `model_12000.pt` also evaluated at forced `0.75` disturbance | evaluated |
+| `selective_walk_profile_task_only_probe` | `configs/ablation/selective_walk_profile_task_only_probe.json` | `logs/r2_amp/Jul01/Jul02_07-06-46_selective_walk_profile_task_only_probe` | `model_best_task.pt`, `model_12000.pt` | evaluated |
+
+Evaluation protocol:
+
+- WSL CPU PhysX / CPU policy via `legged_gym/scripts/evaluate.py`.
+- `--task=r2amp`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default seven fixed presets; DTW was not enabled.
+- Forced-disturbance follow-up was run only for the strongest no-disturb candidate, `selective_walk_profile_teacher_retention_probe/model_12000.pt`, with `--eval_disturb_ratio=0.75`.
+
+Evaluation outputs:
+
+```text
+outputs/eval/July01_selective_walk_resume_null_control_best_task_baseline_full7
+outputs/eval/July01_selective_walk_resume_null_control_12000_baseline_full7
+outputs/eval/July01_selective_walk_profile_teacher_retention_probe_best_task_baseline_full7
+outputs/eval/July01_selective_walk_profile_teacher_retention_probe_12000_baseline_full7
+outputs/eval/July01_selective_walk_profile_teacher_retention_probe_12000_full7_disturb075
+outputs/eval/July01_selective_walk_profile_task_only_probe_best_task_baseline_full7
+outputs/eval/July01_selective_walk_profile_task_only_probe_12000_baseline_full7
+outputs/eval/July01_selective_walk_probe_summary
+```
+
+Aggregate result:
+
+| checkpoint / protocol | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | action-rate L2 | worst task preset | worst task return | worst fall preset | worst fall rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `resume_null_control/model_best_task.pt`, baseline full7 | 7 | 28.97 | 0.025 | 9.84 | 0.317 | 0.450 | 2.61 | `run` | 14.01 | `run` | 0.047 |
+| `resume_null_control/model_12000.pt`, baseline full7 | 7 | 26.01 | 0.103 | 9.13 | 0.355 | 0.519 | 7.30 | `run` | 4.20 | `run` | 0.484 |
+| `profile_teacher_retention/model_best_task.pt`, baseline full7 | 7 | 28.72 | 0.042 | 9.77 | 0.313 | 0.466 | 2.71 | `run` | 16.58 | `stand` | 0.156 |
+| `profile_teacher_retention/model_12000.pt`, baseline full7 | 7 | 33.46 | 0.022 | 9.89 | 0.277 | 0.370 | 2.37 | `run` | 21.67 | `stand` | 0.078 |
+| `profile_teacher_retention/model_12000.pt`, forced `0.75` full7 | 7 | 31.83 | 0.029 | 9.83 | 0.334 | 0.415 | 2.56 | `run` | 18.11 | `run` | 0.078 |
+| `profile_task_only/model_best_task.pt`, baseline full7 | 7 | 27.64 | 0.074 | 9.55 | 0.332 | 0.477 | 2.80 | `run` | 18.45 | `stand` | 0.281 |
+| `profile_task_only/model_12000.pt`, baseline full7 | 7 | -9.93 | 1.000 | 0.05 | 0.861 | 2.801 | 5100.84 | `strafe_right` | -22.77 | `jump` | 1.000 |
+
+Selected per-preset facts:
+
+- `profile_teacher_retention/model_12000.pt` under forced `0.75` disturbance remained usable across all seven presets: the worst task preset was `run` with `task_return=18.11`, `fall_rate=0.078`, and `survival=9.41s`; `stand` also had `fall_rate=0.078`.
+- `profile_task_only/model_12000.pt` collapsed across the entire command manifold: all seven presets had `fall_rate=1.000`, with survival between `0.04s` and `0.09s`.
+- `resume_null_control/model_best_task.pt` stayed close to or slightly above the Jun17 warm-start reference (`28.03` avg task return, `0.038` fall rate), but `resume_null_control/model_12000.pt` regressed mainly on `run` (`fall_rate=0.484`).
+
+Interpretation:
+
+- The teacher-retention probe validates the forgetting hypothesis better than the task-only profile probe. Adding `teacher_policy_retention_coef=0.25` preserved the warm-start behavior while still allowing the seven-profile objective to improve the no-disturb full7 aggregate.
+- `selective_walk_profile_teacher_retention_probe/model_12000.pt` is the current best candidate in this branch because it improves over the Jun17 warm-start reference under no-disturb evaluation and remains stable under forced `0.75` full7 disturbance.
+- The task-only profile objective without teacher retention is not safe at the 12000 resumed checkpoint. Its late collapse is stronger evidence for fine-tune forgetting than for staged-disturbance pressure, because these probes still show `staged_disturb_level=0.0000` in the training-tail logs.
+- The null control shows that resume alone can keep a good early checkpoint, but the terminal checkpoint still drifts on `run`; therefore the next useful comparison is not more task-only training, but focused robustness diagnostics and possibly a retention-coefficient sweep around the teacher-retention candidate.
+
+### July05 Next Warm-Start Probe Configs
+
+Hypothesis: after `selective_walk_profile_teacher_retention_probe/model_12000.pt` improved the no-disturb full7 aggregate and stayed stable under forced `0.75` disturbance, the next two experiments should separately test teacher-retention strength and whether a retention-stabilized policy can learn a staged disturbance curriculum during training.
+
+Implemented code/config artifacts:
+
+| artifact | status | purpose |
+|---|---|---|
+| `configs/ablation/selective_walk_profile_teacher_retention_coef010_probe.json` | implemented, not trained | Same seven-profile warm-start probe as the successful `0.25` teacher-retention run, but lowers `teacher_policy_retention_coef` to `0.10` and keeps staged disturbance at `[0.0]`; tests whether weaker Learning without Forgetting action-mean retention is sufficient. |
+| `configs/ablation/selective_walk_profile_teacher_retention_disturb075_probe.json` | implemented, not trained | Keeps `teacher_policy_retention_coef=0.25`, `style_reward_weight=0.0`, and the same seven profiles, but releases staged disturbance through `0.0 -> 0.15 -> 0.3 -> 0.5 -> 0.75`; tests whether the retention-stabilized policy can learn the disturbance curriculum instead of only surviving forced-disturb evaluation. |
+| `tests/test_amp_training_contracts.py` | implemented | Extends the selective-walk retention probe contract so the two new configs must keep the intended run names, retention coefficients, style weight, staged disturbance levels, and all-profile staged monitoring. |
+
+Training decision:
+
+- Both configs are warm-start probes from `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`; do not train them from scratch.
+- Both should use `--max_iterations=8000`; because the Jun17 source checkpoint is internally `iter=4000`, the main terminal checkpoint should again be around `model_12000.pt`.
+- Evaluate `model_best_task.pt` and `model_12000.pt` with the no-disturb full7 protocol first. Run forced `0.75` full7 evaluation only for checkpoints that preserve no-disturb full7 quality.
+
+Recommended training commands:
+
+```bash
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py \
+  --task=r2amp --headless --seed=0 \
+  --resume \
+  --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk \
+  --checkpoint=-2 \
+  --cfg_override_json configs/ablation/selective_walk_profile_teacher_retention_coef010_probe.json \
+  --run_name selective_walk_profile_teacher_retention_coef010_probe \
+  --max_iterations=8000
+```
+
+```bash
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py \
+  --task=r2amp --headless --seed=0 \
+  --resume \
+  --load_run Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk \
+  --checkpoint=-2 \
+  --cfg_override_json configs/ablation/selective_walk_profile_teacher_retention_disturb075_probe.json \
+  --run_name selective_walk_profile_teacher_retention_disturb075_probe \
+  --max_iterations=8000
+```
 
 ## Maintenance Rules
 

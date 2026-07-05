@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.test_tmp/
 .mypy_cache/
 
 # Training outputs
