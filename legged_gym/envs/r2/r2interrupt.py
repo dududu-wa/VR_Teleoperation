@@ -113,6 +113,9 @@ class R2InterruptRobot(R2Robot):
         self.obs_executed_actions_in_privilege = cfg.disturb.obs_executed_actions_in_privilege
         self.start_disturb_by_curriculum = cfg.disturb.start_by_curriculum
         self.staged_disturb_release = getattr(cfg.disturb, "staged_release", False)
+        self.staged_disturb_init_curriculum_to_level = bool(
+            getattr(cfg.disturb, "stage_init_curriculum_to_level", False)
+        )
         self.staged_disturb_levels = torch.tensor(
             getattr(cfg.disturb, "stage_levels", [0.0, 0.25, 0.5, 0.75, 1.0]),
             dtype=torch.float,
@@ -175,7 +178,21 @@ class R2InterruptRobot(R2Robot):
         self.staged_disturb_return_sum = 0.0
         self.staged_disturb_fall_sum = 0.0
         if cfg.disturb.disturb_rad_curriculum:
-            self.disturb_rad_curriculum = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
+            init_curriculum = (
+                self._current_staged_disturb_level()
+                if self.staged_disturb_release and self.staged_disturb_init_curriculum_to_level
+                else 0.0
+            )
+            # Later-stage resume experiments can start at the current staged
+            # cap instead of relearning easy disturbance levels; see Bengio
+            # et al. 2009 and OpenAI et al. 2019 automatic domain randomization.
+            self.disturb_rad_curriculum = torch.full(
+                (self.num_envs,),
+                init_curriculum,
+                dtype=torch.float,
+                device=self.device,
+                requires_grad=False,
+            )
         else:
             self.disturb_rad_curriculum = torch.ones(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self._cap_staged_disturb_curriculum()

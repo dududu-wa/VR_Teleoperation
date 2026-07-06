@@ -562,6 +562,9 @@ def test_eval_manifold_staged_disturb_release_uses_command_profile_mixture():
     config_source = (ROOT_DIR / "legged_gym/envs/r2/r2_config.py").read_text(
         encoding="utf-8"
     )
+    interrupt_config_source = (
+        ROOT_DIR / "legged_gym/envs/r2/r2interrupt_config.py"
+    ).read_text(encoding="utf-8")
     interrupt_source = (ROOT_DIR / "legged_gym/envs/r2/r2interrupt.py").read_text(
         encoding="utf-8"
     )
@@ -584,6 +587,9 @@ def test_eval_manifold_staged_disturb_release_uses_command_profile_mixture():
     assert "command_profile_ids" in interrupt_source
     assert "stage_monitor_profiles" in interrupt_source
     assert "staged_disturb_failure_windows" in interrupt_source
+    assert "stage_init_curriculum_to_level = False" in interrupt_config_source
+    assert "staged_disturb_init_curriculum_to_level" in interrupt_source
+    assert "torch.full(" in interrupt_source
     assert payload["train"]["runner"]["run_name"] == "command_hold_eval_manifold_staged_disturb_release"
     assert payload["train"]["runner"]["max_iterations"] == 8000
     assert names == {
@@ -695,20 +701,21 @@ def test_selective_walk_eval_manifold_conservative_disturb_release_json_contract
 
 def test_selective_walk_retention_probe_json_contracts():
     ablation_dir = ROOT_DIR / "configs/ablation"
-    expected = {
-        "selective_walk_resume_null_control.json",
-        "selective_walk_profile_task_only_probe.json",
-        "selective_walk_profile_teacher_retention_probe.json",
-        "selective_walk_profile_teacher_retention_coef010_probe.json",
-        "selective_walk_profile_teacher_retention_disturb075_probe.json",
+    expected_max_iterations = {
+        "selective_walk_resume_null_control.json": 8000,
+        "selective_walk_profile_task_only_probe.json": 8000,
+        "selective_walk_profile_teacher_retention_probe.json": 8000,
+        "selective_walk_profile_teacher_retention_coef010_probe.json": 8000,
+        "selective_walk_profile_teacher_retention_disturb075_probe.json": 8000,
+        "selective_walk_profile_teacher_retention_disturb100_probe.json": 4000,
     }
     payloads = {}
-    for filename in expected:
+    for filename, expected_iterations in expected_max_iterations.items():
         path = ablation_dir / filename
         payload = json.loads(path.read_text(encoding="utf-8"))
         payloads[filename] = payload
         assert isinstance(payload.get("notes"), str) and payload["notes"]
-        assert payload["train"]["runner"]["max_iterations"] == 8000
+        assert payload["train"]["runner"]["max_iterations"] == expected_iterations
         assert payload["train"]["runner"]["save_top_task_checkpoints"] == 3
         assert "selective_walk" in payload["train"]["runner"]["run_name"]
         assert payload["env"]["amp"]["expert_style_enabled"] == {
@@ -764,6 +771,26 @@ def test_selective_walk_retention_probe_json_contracts():
     ]
     assert disturb_probe["train"]["amp"]["style_reward_weight"] == 0.0
 
+    # Continue the successful July05 disturbance-trained checkpoint instead of
+    # restarting the curriculum from the original Jun17 warm-start.
+    disturb100_probe = payloads["selective_walk_profile_teacher_retention_disturb100_probe.json"]
+    assert disturb100_probe["train"]["runner"]["run_name"] == (
+        "selective_walk_profile_teacher_retention_disturb100_probe"
+    )
+    assert disturb100_probe["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.25
+    assert disturb100_probe["env"]["disturb"]["stage_init_curriculum_to_level"] is True
+    assert disturb100_probe["env"]["disturb"]["stage_levels"] == [0.75, 0.85, 0.925, 1.0]
+    assert disturb100_probe["env"]["disturb"]["stage_min_task_return"] == [20.0, 22.0, 24.0, 25.0]
+    assert disturb100_probe["env"]["disturb"]["stage_max_fall_rate"] == [0.18, 0.14, 0.10, 0.08]
+    assert disturb100_probe["env"]["disturb"]["stage_monitor_profiles"] == (
+        disturb_probe["env"]["disturb"]["stage_monitor_profiles"]
+    )
+    assert disturb100_probe["train"]["amp"]["style_reward_weight"] == 0.0
+    assert "Jul05_16-01-08_selective_walk_profile_teacher_retention_disturb075_probe" in (
+        disturb100_probe["notes"]
+    )
+    assert "model_12000.pt" in disturb100_probe["notes"]
+
 
 def test_selective_walk_retention_probe_algorithm_keys_exist_in_cfg_schema():
     source = ast.parse(
@@ -795,6 +822,7 @@ def test_selective_walk_retention_probe_algorithm_keys_exist_in_cfg_schema():
         "selective_walk_profile_teacher_retention_probe.json",
         "selective_walk_profile_teacher_retention_coef010_probe.json",
         "selective_walk_profile_teacher_retention_disturb075_probe.json",
+        "selective_walk_profile_teacher_retention_disturb100_probe.json",
     ):
         payload = json.loads((ablation_dir / filename).read_text(encoding="utf-8"))
         for key in payload["train"]["algorithm"]:

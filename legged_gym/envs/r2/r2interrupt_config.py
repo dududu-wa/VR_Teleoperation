@@ -120,6 +120,11 @@ class R2InterruptCfg(R2Cfg):
         # from no interrupt to full interrupt.
         staged_release = False
         stage_levels = [0.0, 0.25, 0.5, 0.75, 1.0]
+        # Resume-only option: keep False by default so fresh staged curricula
+        # still start easy; later-stage continuation runs can initialize the
+        # curriculum at the current cap. This follows the same easy-to-hard
+        # curriculum idea as Bengio et al. 2009 without silently changing old runs.
+        stage_init_curriculum_to_level = False
         stage_min_episodes = 512
         # Scalars keep the same gate at every stage; ablation JSONs may pass
         # per-stage lists matching stage_levels. This follows curriculum

@@ -1,6 +1,6 @@
 ﻿# R2 AMP Experiment Progress
 
-Last updated: 2026-07-05
+Last updated: 2026-07-06
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -3027,8 +3027,8 @@ Implemented code/config artifacts:
 
 | artifact | status | purpose |
 |---|---|---|
-| `configs/ablation/selective_walk_profile_teacher_retention_coef010_probe.json` | implemented, not trained | Same seven-profile warm-start probe as the successful `0.25` teacher-retention run, but lowers `teacher_policy_retention_coef` to `0.10` and keeps staged disturbance at `[0.0]`; tests whether weaker Learning without Forgetting action-mean retention is sufficient. |
-| `configs/ablation/selective_walk_profile_teacher_retention_disturb075_probe.json` | implemented, not trained | Keeps `teacher_policy_retention_coef=0.25`, `style_reward_weight=0.0`, and the same seven profiles, but releases staged disturbance through `0.0 -> 0.15 -> 0.3 -> 0.5 -> 0.75`; tests whether the retention-stabilized policy can learn the disturbance curriculum instead of only surviving forced-disturb evaluation. |
+| `configs/ablation/selective_walk_profile_teacher_retention_coef010_probe.json` | trained/evaluated in the Jul05 probe batch | Same seven-profile warm-start probe as the successful `0.25` teacher-retention run, but lowers `teacher_policy_retention_coef` to `0.10` and keeps staged disturbance at `[0.0]`; tests whether weaker Learning without Forgetting action-mean retention is sufficient. |
+| `configs/ablation/selective_walk_profile_teacher_retention_disturb075_probe.json` | trained/evaluated in the Jul05 probe batch | Keeps `teacher_policy_retention_coef=0.25`, `style_reward_weight=0.0`, and the same seven profiles, but releases staged disturbance through `0.0 -> 0.15 -> 0.3 -> 0.5 -> 0.75`; tests whether the retention-stabilized policy can learn the disturbance curriculum instead of only surviving forced-disturb evaluation. |
 | `tests/test_amp_training_contracts.py` | implemented | Extends the selective-walk retention probe contract so the two new configs must keep the intended run names, retention coefficients, style weight, staged disturbance levels, and all-profile staged monitoring. |
 
 Training decision:
@@ -3059,6 +3059,102 @@ CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym
   --cfg_override_json configs/ablation/selective_walk_profile_teacher_retention_disturb075_probe.json \
   --run_name selective_walk_profile_teacher_retention_disturb075_probe \
   --max_iterations=8000
+```
+
+### July06 Evaluation of Jul05 Warm-Start Probes
+
+Hypothesis: if `teacher_policy_retention_coef=0.25` was only stronger than needed, the `0.10` probe should still preserve the seven-preset baseline; if the retention-stabilized policy can learn staged disturbance during training, the `disturb075` probe should reach `staged_disturb_level=0.75` without losing no-disturb or forced-disturbance full7 performance.
+
+Training root:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_amp\Jul05
+```
+
+Training artifacts:
+
+| experiment | config | run directory | evaluated checkpoints | tail staged disturbance | status |
+|---|---|---|---|---:|---|
+| `selective_walk_profile_teacher_retention_coef010_probe` | `configs/ablation/selective_walk_profile_teacher_retention_coef010_probe.json` | `logs/r2_amp/Jul05/Jul05_15-54-09_selective_walk_profile_teacher_retention_coef010_probe` | `model_best_task.pt`, `model_12000.pt`; `model_12000.pt` also evaluated at forced `0.75` disturbance | `0.0000` | evaluated |
+| `selective_walk_profile_teacher_retention_disturb075_probe` | `configs/ablation/selective_walk_profile_teacher_retention_disturb075_probe.json` | `logs/r2_amp/Jul05/Jul05_16-01-08_selective_walk_profile_teacher_retention_disturb075_probe` | `model_best_task.pt`, `model_12000.pt`; `model_12000.pt` also evaluated at forced `0.75` disturbance | `0.7500` | evaluated |
+
+Training-tail facts from `train.log`:
+
+- `coef010` ended at learning iteration `11999/12000` with `Mean task reward: 39.35`, `Best task reward: 43.96`, `staged_disturb_level=0.0000`, `staged_disturb_window_task_return=42.4119`, and `staged_disturb_window_fall_rate=0.0125`.
+- `disturb075` ended at learning iteration `11999/12000` with `Mean task reward: 37.22`, `Best task reward: 42.62`, `staged_disturb_level=0.7500`, `staged_disturb_window_task_return=35.8273`, and `staged_disturb_window_fall_rate=0.1092`.
+
+Evaluation protocol:
+
+- WSL CPU PhysX / CPU policy via `legged_gym/scripts/evaluate.py`.
+- `--task=r2amp`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default seven fixed presets; DTW was not enabled.
+- Forced-disturbance follow-up was run for both `model_12000.pt` checkpoints because both preserved no-disturb full7 quality.
+
+Evaluation outputs:
+
+```text
+outputs/eval/July05_selective_walk_profile_teacher_retention_coef010_probe_best_task_baseline_full7
+outputs/eval/July05_selective_walk_profile_teacher_retention_coef010_probe_12000_baseline_full7
+outputs/eval/July05_selective_walk_profile_teacher_retention_coef010_probe_12000_full7_disturb075
+outputs/eval/July05_selective_walk_profile_teacher_retention_disturb075_probe_best_task_baseline_full7
+outputs/eval/July05_selective_walk_profile_teacher_retention_disturb075_probe_12000_baseline_full7
+outputs/eval/July05_selective_walk_profile_teacher_retention_disturb075_probe_12000_full7_disturb075
+```
+
+Aggregate result:
+
+| checkpoint / protocol | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | action-rate L2 | worst task preset | worst task return | worst fall preset | worst fall rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `coef010/model_best_task.pt`, baseline full7 | 7 | 29.16 | 0.025 | 9.88 | 0.301 | 0.458 | 2.68 | `run` | 19.31 | `stand` | 0.156 |
+| `coef010/model_12000.pt`, baseline full7 | 7 | 35.00 | 0.058 | 9.70 | 0.268 | 0.335 | 2.51 | `jump` | 29.04 | `jump` | 0.219 |
+| `coef010/model_12000.pt`, forced `0.75` full7 | 7 | 32.57 | 0.051 | 9.70 | 0.322 | 0.426 | 2.65 | `jump` | 24.46 | `jump` | 0.219 |
+| `disturb075/model_best_task.pt`, baseline full7 | 7 | 30.57 | 0.022 | 9.87 | 0.290 | 0.434 | 2.67 | `run` | 23.12 | `stand` | 0.109 |
+| `disturb075/model_12000.pt`, baseline full7 | 7 | 34.53 | 0.049 | 9.65 | 0.287 | 0.339 | 2.46 | `run` | 22.07 | `run` | 0.109 |
+| `disturb075/model_12000.pt`, forced `0.75` full7 | 7 | 34.11 | 0.025 | 9.88 | 0.305 | 0.376 | 2.51 | `run` | 26.43 | `stand` | 0.141 |
+
+Selected per-preset facts:
+
+- `coef010/model_12000.pt` improved the no-disturb aggregate over its early best checkpoint (`35.00` vs `29.16` avg task return), and forced `0.75` disturbance still kept avg task return at `32.57`; its weakest preset in both 12000 evaluations was `jump`, with forced-disturbance `task_return=24.46` and `fall_rate=0.219`.
+- `disturb075/model_12000.pt` reached the trained staged-disturbance target (`staged_disturb_level=0.7500`) and preserved performance: no-disturb avg task return was `34.53`, forced `0.75` avg task return was `34.11`, and the forced-disturbance worst task preset was `run` at `26.43`.
+- Both Jul05 `model_12000.pt` checkpoints remain above the prior Jun17 warm-start reference (`28.03` avg task return, `0.038` fall rate) and the July05 `0.25` teacher-retention reference under forced `0.75` (`31.83` avg task return, `0.029` fall rate), although `coef010` has a higher worst-preset fall rate on `jump`.
+
+Interpretation:
+
+- The `0.10` retention coefficient is sufficient for this batch: it preserved and improved no-disturb full7 performance and survived forced `0.75` disturbance. This weakens the idea that the earlier success required a very strong `0.25` retention penalty.
+- The `disturb075` probe is the cleaner continuation candidate because it learned the staged disturbance curriculum during training and had the strongest forced `0.75` aggregate among the Jul05 probes (`34.11` avg task return, `0.025` avg fall rate).
+- The next useful evaluation should stress `disturb075/model_12000.pt` at higher forced-disturbance ratios or with targeted diagnostics on the remaining weakest presets, rather than returning to task-only profile fine-tuning.
+
+### July06 Next Disturbance-Continuation Config
+
+Hypothesis: because `selective_walk_profile_teacher_retention_disturb075_probe/model_12000.pt` already learned the staged disturbance curriculum up to `0.75` and stayed stable under forced `0.75`, the next training should continue from that checkpoint and push the staged cap toward `1.0` without changing teacher retention or the command-profile manifold.
+
+Implemented code/config artifacts:
+
+| artifact | status | purpose |
+|---|---|---|
+| `legged_gym/envs/r2/r2interrupt_config.py` | implemented | Adds `disturb.stage_init_curriculum_to_level=False` as a default-off resume-only schema field, so existing staged curricula still initialize `disturb_rad_curriculum` at `0.0`. |
+| `legged_gym/envs/r2/r2interrupt.py` | implemented | Consumes `stage_init_curriculum_to_level`; when a staged resume config sets it to `true`, `R2InterruptRobot.__init__()` initializes `disturb_rad_curriculum` to the current stage cap instead of zero. This is needed because `stage_levels` are caps, not saved environment state. |
+| `configs/ablation/selective_walk_profile_teacher_retention_disturb100_probe.json` | implemented, not trained | Continues from the Jul05 `disturb075/model_12000.pt` checkpoint, keeps `teacher_policy_retention_coef=0.25`, seven eval-like profiles, and `style_reward_weight=0.0`, then trains staged disturbance through `0.75 -> 0.85 -> 0.925 -> 1.0`. |
+| `tests/test_amp_training_contracts.py` | implemented | Locks the new resume-only initialization switch and the `disturb100` JSON contract, including the continuation checkpoint note, stage gates, all-profile monitoring, and 4000-additional-iteration budget. |
+
+Training decision:
+
+- Resume from `logs/r2_amp/Jul05/Jul05_16-01-08_selective_walk_profile_teacher_retention_disturb075_probe/model_12000.pt`, not from the old Jun17 warm-start.
+- Keep teacher retention at `0.25` and AMP style reward at `0.0`, so the only material training change is higher staged disturbance.
+- Use `--max_iterations=4000`; because the source checkpoint is internally `iter=12000`, the expected terminal checkpoint is `model_16000.pt`.
+- Evaluate `model_best_task.pt` and `model_16000.pt` with no-disturb full7 first. If the no-disturb full7 aggregate is preserved, run forced `0.75`, `0.925`, and `1.0` full7 diagnostics.
+
+Recommended training command:
+
+```bash
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py \
+  --task=r2amp --headless --seed=0 \
+  --resume \
+  --load_run Jul05/Jul05_16-01-08_selective_walk_profile_teacher_retention_disturb075_probe \
+  --checkpoint=12000 \
+  --cfg_override_json configs/ablation/selective_walk_profile_teacher_retention_disturb100_probe.json \
+  --run_name selective_walk_profile_teacher_retention_disturb100_probe \
+  --max_iterations=4000
 ```
 
 ## Maintenance Rules
