@@ -16,6 +16,7 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `rsl_rl/rsl_rl/storage/amp_storage.py`：策略生成的 AMP observation replay buffer。给 discriminator 提供 agent 样本。
 - `configs/ablation/*.json`：AMP 消融配置覆盖文件。通过 `--cfg_override_json` 参数覆盖 `r2amp` 的 env/train 配置，不再为每个消融单独注册 task。
 - `legged_gym/scripts/evaluate.py`：AMP/普通 PPO checkpoint 的参数化评估入口。复用现有 task registry 和 runner 加载路径，按固定 command preset 导出 `metrics.json` / `metrics.csv`；默认评估会清空 interrupt/disturb mask 以保持无扰动 rollout，但保留 `R2InterruptRobot` 训练时的 reward masking 语义；显式加 `--record_reward_terms` 时额外导出 `reward_terms.json` / `reward_terms.csv`，用于逐 preset 诊断 reward 分项；显式加 `--record_termination_reasons` 时额外导出 `termination_reasons.json` / `termination_reasons.csv`，用于区分 timeout、contact、orientation 等终止来源以及 contact body；显式加 `--record_state_trace` 时额外导出 episode 末尾状态窗口，用于 headless 诊断接触前高度、姿态和速度误差。
+- `legged_gym/envs/r2/staged_disturb_gate.py`：不依赖 Isaac Gym/PyTorch 的 staged-disturb 门控策略。默认保持 aggregate 窗口语义；opt-in 严格模式要求每个命名 profile 都积累足够 episode，并分别通过当前 stage 的 task-return/fall-rate gate，避免强 profile 的均值掩盖弱 profile。
 - `legged_gym/scripts/retarget_motion.py`：把外部 G1 `.npz` motion 转成 R2 AMP `.npz` 格式。
 - `scripts/convert_lafan1_to_amp.py`：把 LaFAN1 风格 R2V2 `.npz` 转成当前项目 AMP motion 格式，保留 `base_link`、左右 `arm_yaw_link`、左右 `ankle_roll_link` 等 AMP key body。
 - `scripts/plan_selective_walk_followup_eval.py`：为 selective-walk conservative eval-manifold follow-up checkpoint 生成标准 WSL CPU 评估命令，覆盖 no-disturb full7、`0.75/0.9/0.925/0.95/1.0` forced-disturb full7，以及 `0.925/0.95/1.0` failure diagnostics；它只打印命令，不启动长时间评估。
@@ -23,6 +24,8 @@ AMP 是本项目在普通 PPO 任务外加入参考 motion 判别器的训练路
 - `scripts/summarize_selective_walk_followup_eval.py`：读取上述 follow-up 评估输出目录，汇总每个 label 的 `metrics.csv` 行数、平均 task/fall/survival 和最弱 preset，并显式报告缺失目录，避免把未跑完的评估误当成完整结论。
 - `scripts/audit_selective_walk_followup_readiness.py`：扫描 `logs/r2_amp` 中 selective-walk follow-up run 和 checkpoint，再检查计划评估输出是否齐全；用于区分“已有 transient run 目录但尚无 checkpoint”和“checkpoint 已可评估”。当真实 checkpoint 存在时，它还会输出推荐的 `load_run`、checkpoint id 和 9 条正式评估命令。
 - `scripts/run_selective_walk_followup_eval_plan.py`：消费 readiness audit 中的 `recommended_eval_plan`。默认 dry-run 只打印命令；只有显式 `--execute` 才按顺序运行，且没有真实 checkpoint/推荐命令时拒绝执行。
+- `scripts/run_jul08_disturb100_diagnostics.py`：固定 Jul08_12 `model_16000.pt`、`jump/stand`、forced `1.0` disturbance 和 termination/state-trace 参数的 WSL CPU 诊断入口；默认只打印 argv-safe 命令，显式 `--execute` 才运行。
+- `scripts/summarize_failure_diagnostics.py`：读取一个 diagnostic eval 目录的 `metrics.csv`、`termination_reasons.csv` 和 `state_trace.csv`，只使用 `steps_until_done=0` 的终止前状态，输出 `failure_diagnostics_summary.csv/json`。
 - `legged_gym/scripts/train.py`：启动 AMP 训练的入口，典型命令是 `python legged_gym/scripts/train.py --task=r2amp --headless`。
 - `legged_gym/scripts/play.py`：回放 AMP checkpoint 的入口，支持 `--checkpoint -3` 加载 `model_best_mixed.pt`。
 
@@ -157,6 +160,8 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 
 `selective_walk_resume_null_control.json`、`selective_walk_profile_task_only_probe.json` 和 `selective_walk_profile_teacher_retention_probe.json` 是 July01 失败 follow-up 后的 8000 追加轮诊断配置，三者都应从 Jun17 `expert_hard_gate_selective_walk/model_best_task.pt` 热启动，而不是从头训练。`resume_null_control` 不启用 `profile_mixture`，用于测量单纯 resume 8000 iteration 是否破坏参考策略；`profile_task_only_probe` 启用七 preset `profile_mixture` 但把 `train.amp.style_reward_weight=0.0`，用于隔离 profile/task objective 本身；`profile_teacher_retention_probe` 在 task-only 设置上加入 `teacher_policy_retention_coef=0.25`，用冻结 warm-start policy 的动作均值约束减缓 fine-tune 遗忘。`selective_walk_profile_teacher_retention_coef010_probe.json` 和 `selective_walk_profile_teacher_retention_disturb075_probe.json` 是 July05 评估后的相邻后续配置：前者只把 retention 系数降到 `0.10`，测试弱一点的 Learning without Forgetting 动作均值约束是否足够；后者保留成功的 `0.25` retention，并把 staged disturbance 从 `[0.0]` 保守释放到 `0.0 -> 0.15 -> 0.3 -> 0.5 -> 0.75`，测试已稳定的 profile policy 能否在训练中真正学习扰动课程。由于 Jun17 source checkpoint 内部 `iter=4000`，这些 `--max_iterations=8000` warm-start probe 的主要末端 checkpoint 预期约为 `model_12000.pt`。
 `selective_walk_profile_teacher_retention_disturb100_probe.json` 是 July06 续训配置：它应从 `Jul05/Jul05_16-01-08_selective_walk_profile_teacher_retention_disturb075_probe` 的 `model_12000.pt` resume，而不是回到 Jun17 checkpoint；配置保持 `teacher_policy_retention_coef=0.25`、七 preset `profile_mixture` 和 `style_reward_weight=0.0`，但把 staged disturbance 继续推进为 `0.75 -> 0.85 -> 0.925 -> 1.0`，并设置 `stage_init_curriculum_to_level=true`，让新训练进程把 `disturb_rad_curriculum` 初始化到当前 stage cap。由于 source checkpoint 内部 `iter=12000`，该配置的 `train.runner.max_iterations=4000` 对齐预期 terminal checkpoint `model_16000.pt`。
+
+`selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery.json` 是 July10 forced `1.0` failure diagnostic 后的恢复配置，计划从 Jul08_12 正确续训 run 的 `model_16000.pt` resume。它不改 PPO、teacher retention、AMP style 或 reward scale，只把 `jump/stand` 权重各提高到 `0.25`，从 `0.925 -> 0.95 -> 0.975 -> 1.0` 重新释放 disturbance，并设置 `stage_monitor_profiles=["stand", "jump"]`、`stage_require_all_monitor_profiles=true`。`commands.resampling_time=30.0` 严格长于 20 秒 episode，保证一次 episode 不会在 termination 前切换 profile；每个 profile 都至少积累 `1024` 个 noise-disturb episode 且分别满足当前 return/fall gate 后才可晋级。追加 `4000` iteration 时预期 terminal checkpoint 为 `model_20000.pt`。
 
 ### 2.3 回放链路
 
@@ -422,15 +427,16 @@ reward 约定：
 
 关键方法：
 
-- `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等，并读取 `cfg.disturb.start_by_curriculum` 决定 disturb 是否等待 terrain/command curriculum release；同时读取 staged disturb release 的阶段列表、晋级门槛、`stage_monitor_expert` 专家过滤器、`stage_monitor_profiles` profile 过滤器以及 `stage_regress_on_failure/stage_regress_patience` 退档参数，默认关闭新行为以保持旧训练语义。
+- `initial_disturb`：初始化 disturb action、mask、interrupt mask、executed action、课程半径等，并读取 `cfg.disturb.start_by_curriculum` 决定 disturb 是否等待 terrain/command curriculum release；同时读取 staged disturb release 的阶段列表、晋级门槛、`stage_monitor_expert` 专家过滤器、`stage_monitor_profiles` profile 过滤器、`stage_require_all_monitor_profiles` 严格逐 profile gate，以及 `stage_regress_on_failure/stage_regress_patience` 退档参数。严格 gate 默认关闭；启用时会校验命名 profile 存在、无重复且训练权重为正，并要求 command resampling step 严格大于 max episode length，避免整个 episode 的 return 被归给中途切换后的最后一个 profile。
 - `_create_envs`：在父类创建 env 后，补充 disturb termination body 索引和 disturb mode mask。
 - `_resample_commands`：继承命令采样，并在需要时更新 disturb curriculum；当 `start_by_curriculum=False` 时，noise-disturb 子环境即使仍在 terrain curriculum mode 中也可更新 disturb 半径。若 `commands.profile_mixture` 非空，它会在基础矩形 sampler 完成后调用 `_apply_command_profile_mixture()`，让 profile 覆盖完整 command 向量并重新计算 `velocity_level`。
 - `_apply_command_profile_mixture`：默认不运行；当 JSON 提供 `commands.profile_mixture` 时，用 `torch.multinomial` 按 profile 权重采样每个 reset 环境，把 profile `command` 加均匀 jitter 写入 `env.commands`，记录 `command_profile_ids`，再按 `command_ranges` 裁剪。这个函数服务于 eval-manifold 消融：训练分布锚定 `evaluate.py` 的 `stand/walk_slow/walk_fast/run/jump/turn_left/strafe_right` 固定 preset，同时保留少量 jitter 以避免只记住单点命令。standing reward mask 默认清空，只有 profile 显式写 `standing=true` 才开启，因为固定 preset 评估会清掉 `standing_envs_mask`。
 - `_expand_staged_disturb_gate_values` / `_current_staged_disturb_gate`：把 scalar gate 扩展成每个 stage 一份，或校验 JSON 中的 per-stage gate list 长度与 `stage_levels` 一致；`_maybe_advance_staged_disturb_release` 用当前 stage 的 task-return/fall-rate gate 做晋级判断。
 - `_cap_staged_disturb_curriculum`：当 staged release 打开时，把所有环境的 `disturb_rad_curriculum` clamp 到当前阶段上限，保证原有成功/失败 curriculum 只能在阶段内微调。
 - `_staged_disturb_expert_mask`：复用 `R2Robot.get_amp_expert_ids()` 的 command 语义阈值，把 reset env 过滤为 walk/run/jump 监控窗口；July21 后 staged JSON 使用 `stage_monitor_expert="run"`，让 run episode 稳定后才释放下一档 disturb。
-- `_record_staged_disturb_episode_stats`：在 reset 前累计最近窗口内的环境 task return 和非 timeout fall 计数；默认只监控 noise-disturb 子环境，因为 staged release 的目标是约束噪声扰动释放；如果设置 `stage_monitor_expert`，还会只统计对应专家语义的 episode；如果设置 `stage_monitor_profiles`，则进一步按 `commands.profile_mixture` 的 profile 名称筛选，避免 run 窗口掩盖 stand/jump 等 eval profile 崩溃。
-- `_maybe_advance_staged_disturb_release` / `training_curriculum`：每轮训练 curriculum 更新后检查窗口统计，只有 episode 数、当前 stage 的平均 task return gate 和 fall-rate gate 同时达标才把阶段推进一档，并清空窗口重新累计；当 `stage_regress_on_failure=True` 时，若连续 `stage_regress_patience` 个窗口不达标且当前不在 stage 0，则降低一档 disturbance stage，防止满扰动后的退化长期停留在过难 curriculum。
+- `_record_staged_disturb_episode_stats`：在 reset 前累计最近窗口内的环境 task return 和非 timeout fall 计数；默认只监控 noise-disturb 子环境。`stage_monitor_expert` 和 `stage_monitor_profiles` 只负责筛选进入 aggregate 窗口的 episode；启用严格 gate 后，还会为每个命名 profile 独立累计 count/return/fall，解决单纯筛选后仍可能发生的跨 profile 均值掩盖。
+- `_reset_staged_disturb_window`：在一次 gate 决策后同时清空 aggregate 和逐 profile 的非重叠窗口，避免旧 stage 或旧难度数据污染下一次决策。
+- `_maybe_advance_staged_disturb_release` / `training_curriculum`：每轮训练 curriculum 更新后调用 `staged_disturb_window_ready/passes`。默认只检查 aggregate；严格模式先等待每个 profile 都达到 `stage_min_episodes`，再要求每个 profile 分别满足当前 task-return/fall-rate gate。通过后晋级或保持最终 stage，失败窗口可按 `stage_regress_on_failure/stage_regress_patience` 退档；`reset_idx` 还把逐 profile count/return/fall 写入训练 episode extras。
 - `calculate_action`：核心逻辑。先 clip policy action，再根据 disturb mask 替换或叠加 `cfg.disturb.disturb_action_indices` 指定的 R2 双臂动作，保存真实执行动作。
 - `random_switch_disturb`：按 `switch_prob` 切换 disturb mask；默认仍受 `~terrain_curriculum_mode` 门控，`start_by_curriculum=False` 时只保留 noise-disturb 分区门控。
 - `_preprocess_obs/add_other_privilege`：可把 interrupt flag、目标扰动、实际执行动作拼入观测或 privileged obs。
@@ -438,6 +444,14 @@ reward 约定：
 - reward override：中断时对肩部偏差、upper/lower action rate、碰撞、DOF limits/acc/vel 等做特殊处理。
 
 当前默认 `DISTURB_DIM=10`、`use_disturb=True`，因此 `r2int/r2amp` 默认使用完整双臂 interrupt/disturb 训练；R2 显式双臂索引 `[16, 17, 18, 19, 20, 21, 22, 23, 24, 25]` 由 `calculate_action()` 按 disturb mask 替换或融合，头部动作不再被误纳入 interrupt。`Uniform_disturb_resample()` 中旧 HugWBC 4+4 clipping 分支仅在 legacy 8 维合同下启用，避免 10 维 R2 双臂槽位被旧索引解释。
+
+##### `staged_disturb_gate.py`
+
+把 staged-disturb 晋级判断从 Isaac Gym 环境中拆成可单测的纯 Python 策略，环境只负责收集窗口统计：
+
+- `staged_disturb_window_ready(...)`：默认检查 aggregate episode 数；严格模式还要求每个命名 profile 都达到同一个 `stage_min_episodes`，样本不足时继续停留在当前 cap，不把它记作失败窗口。
+- `staged_disturb_window_passes(...)`：先检查 aggregate return/fall gate 以保持旧语义；严格模式再对每个 profile 应用相同的当前-stage 阈值。逐任务 competence gate 依据 Portelas et al. 2020 的 automatic curriculum survey 和 ADR 的能力边界调整原则，代码默认关闭以保证旧配置兼容。
+- `validate_profile_gate_resampling(...)`：严格模式下把 `commands.resampling_time / dt` 转为 step，并要求它大于 `max_episode_length`；非严格模式直接返回。该约束保证逐 profile accumulator 的整 episode return 归因成立。
 
 ### `legged_gym/utils/`
 
@@ -1200,6 +1214,23 @@ python scripts\plan_selective_walk_followup_train.py
 ```powershell
 python scripts\summarize_selective_walk_followup_eval.py --output_prefix <planned_eval_output_prefix> --output_dir <summary_output_dir>
 ```
+
+### `run_jul08_disturb100_diagnostics.py`
+
+把 July10 已批准的 failure diagnostic 固化为一个精确入口，避免再次手工拼错 resume run、checkpoint 或 WSL 动态库环境：
+
+- `build_diagnostic_command()`：返回 argv list，固定 `Jul08_12/...disturb100_probe/model_16000.pt`、原训练 JSON、CPU PhysX/CPU policy、64 env、每个 preset 64 episode、`jump/stand`、`--eval_disturb_ratio=1.0`、termination reason、50-step pre-reset state trace 和唯一输出目录。使用 argv 而不是 shell 字符串，是为了避免 PowerShell 到 WSL 的嵌套引号改变参数边界。
+- `run_diagnostic(execute, command_runner=subprocess.run)`：默认只返回命令；`execute=True` 时才以 `check=True` 运行，测试可注入 runner 验证执行合同而不启动 Isaac Gym。
+- `main()`：无参数时用 `subprocess.list2cmdline` 打印可审阅命令；显式 `--execute` 才执行长时间 WSL CPU rollout。
+
+### `summarize_failure_diagnostics.py`
+
+复用 `evaluate.py` 的标准输出 schema 生成紧凑 failure summary：
+
+- `_read_csv/_float/_mean`：校验三个必需 CSV 和关键数值字段；缺 artifact、空数值或某 preset 没有 terminal trace 时显式失败，不生成伪完整结果。
+- `_termination_key`：把 reason/detail 规范为 `contact:base_link`、`orientation:roll_pitch`、`timeout` 等稳定 key。
+- `summarize_failure_diagnostics(input_dir, output_dir=None)`：先要求 metrics、termination、state-trace 的 preset 集合一致，并验证每个 preset 的 termination count 等于 `num_episodes`、rate 总和为 1、terminal rows 对 episode id 一一对应；随后按 preset 汇总 metrics 和 termination count/rate/survival。state trace 只选 `steps_until_done == 0`，计算 terminal base height、绝对 roll/pitch、速度误差和最大接触力，并写出 `failure_diagnostics_summary.csv/json`；截断或重复 artifact 会显式失败而不是静默补 0。
+- `main()`：接收 `--input_dir` 和可选 `--output_dir`，写文件后把同一 JSON 打到 stdout，便于实验记录复核。
 
 ### `run_selective_walk_followup_eval_plan.py`
 

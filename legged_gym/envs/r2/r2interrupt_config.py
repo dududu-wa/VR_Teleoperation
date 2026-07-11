@@ -143,6 +143,11 @@ class R2InterruptCfg(R2Cfg):
         # broad AMP experts, so weak stand/jump profiles cannot be hidden by
         # stronger run windows.
         stage_monitor_profiles = None
+        # Opt-in task-wise competence guard. When enabled, every named monitor
+        # profile must independently satisfy the current return/fall gate;
+        # this follows competence-based curriculum learning (Portelas et al.,
+        # IJCAI 2020) and keeps aggregate success from hiding a weak profile.
+        stage_require_all_monitor_profiles = False
         # Adaptive staged curricula can back off when the current difficulty no
         # longer meets the gate, consistent with automatic curriculum methods
         # that adjust task difficulty to demonstrated competence.

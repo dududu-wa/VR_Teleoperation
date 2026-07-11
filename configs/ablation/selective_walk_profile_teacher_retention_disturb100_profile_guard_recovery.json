@@ -1,0 +1,112 @@
+{
+  "notes": "July10 evidence-based recovery continuation. Resume from logs/r2_amp/Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe/model_16000.pt after the forced-disturbance diagnostic found base_link contact terminations in 30/64 jump episodes and 29/64 stand episodes. Keep PPO, teacher_policy_retention_coef=0.25, style_reward_weight=0.0, command anchors, and reward scales unchanged; increase jump/stand sampling, hold each sampled profile for the full 20-second episode with resampling_time=30.0, and require both monitored profiles to independently pass each staged gate before disturbance advances. Use with --resume --load_run Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe --checkpoint=16000 --max_iterations=4000; the expected terminal checkpoint is model_20000.pt. References: PPO clipping follows Schulman et al. 2017; retention follows Li & Hoiem 2016; staged curriculum and domain randomization follow Bengio et al. 2009, Tobin et al. 2017, and OpenAI et al. 2019 ADR; task-wise competence gating follows Portelas et al. 2020.",
+  "env": {
+    "commands": {
+      "curriculum": false,
+      "resampling_time": 30.0,
+      "ranges": {
+        "lin_vel_x": [0.0, 1.7],
+        "lin_vel_y": [-0.35, 0.35],
+        "ang_vel_yaw": [-0.65, 0.65],
+        "gait_frequency": [1.5, 3.1],
+        "foot_swing_height": [0.08, 0.21],
+        "body_height": [0.0, 0.035],
+        "body_pitch": [0.0, 0.04]
+      },
+      "profile_mixture": [
+        {
+          "name": "stand",
+          "weight": 0.25,
+          "command": [0.0, 0.0, 0.0, 1.6, 0.5, 0.5, 0.08, 0.0, 0.0, 0.0],
+          "jitter": [0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.005, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "walk_slow",
+          "weight": 0.10,
+          "command": [0.5, 0.0, 0.0, 2.2, 0.5, 0.5, 0.12, 0.0, 0.0, 0.0],
+          "jitter": [0.05, 0.03, 0.03, 0.08, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "walk_fast",
+          "weight": 0.12,
+          "command": [1.2, 0.0, 0.0, 2.8, 0.5, 0.5, 0.17, 0.0, 0.03, 0.0],
+          "jitter": [0.08, 0.03, 0.04, 0.1, 0.0, 0.0, 0.015, 0.0, 0.005, 0.0]
+        },
+        {
+          "name": "run",
+          "weight": 0.12,
+          "command": [1.6, 0.0, 0.0, 3.0, 0.5, 0.5, 0.2, 0.0, 0.03, 0.0],
+          "jitter": [0.08, 0.03, 0.04, 0.1, 0.0, 0.0, 0.01, 0.0, 0.005, 0.0]
+        },
+        {
+          "name": "jump",
+          "weight": 0.25,
+          "command": [0.0, 0.0, 0.0, 2.35, 0.0, 0.5, 0.2, 0.03, 0.0, 0.0],
+          "jitter": [0.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.005, 0.003, 0.0, 0.0]
+        },
+        {
+          "name": "turn_left",
+          "weight": 0.08,
+          "command": [0.4, 0.0, 0.6, 2.2, 0.5, 0.5, 0.12, 0.0, 0.0, 0.0],
+          "jitter": [0.04, 0.02, 0.04, 0.08, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0]
+        },
+        {
+          "name": "strafe_right",
+          "weight": 0.08,
+          "command": [0.0, 0.3, 0.0, 2.2, 0.5, 0.5, 0.12, 0.0, 0.0, 0.0],
+          "jitter": [0.02, 0.04, 0.03, 0.08, 0.0, 0.0, 0.01, 0.0, 0.0, 0.0]
+        }
+      ]
+    },
+    "disturb": {
+      "start_by_curriculum": false,
+      "staged_release": true,
+      "stage_init_curriculum_to_level": true,
+      "stage_levels": [0.925, 0.95, 0.975, 1.0],
+      "stage_min_episodes": 1024,
+      "stage_min_task_return": [18.0, 20.0, 22.0, 24.0],
+      "stage_max_fall_rate": [0.20, 0.16, 0.12, 0.10],
+      "stage_monitor_noise_only": true,
+      "stage_monitor_expert": null,
+      "stage_monitor_profiles": ["stand", "jump"],
+      "stage_require_all_monitor_profiles": true,
+      "stage_regress_on_failure": true,
+      "stage_regress_patience": 2
+    },
+    "amp": {
+      "motion_experts": {
+        "walk": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/walk",
+        "run": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/run",
+        "jump": "{LEGGED_GYM_ROOT_DIR}/legged_gym/motions/jump"
+      },
+      "default_motion_expert": "walk",
+      "expert_style_enabled": {
+        "walk": true,
+        "run": false,
+        "jump": false
+      }
+    }
+  },
+  "train": {
+    "runner": {
+      "run_name": "selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery",
+      "save_interval": 250,
+      "save_top_task_checkpoints": 3,
+      "max_iterations": 4000
+    },
+    "algorithm": {
+      "clip_param": 0.1,
+      "desired_kl": 0.005,
+      "learning_rate": 0.0002,
+      "teacher_policy_retention_coef": 0.25
+    },
+    "amp": {
+      "style_reward_weight": 0.0,
+      "expert_style_enabled": {
+        "walk": true,
+        "run": false,
+        "jump": false
+      }
+    }
+  }
+}

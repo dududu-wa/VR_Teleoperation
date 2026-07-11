@@ -1,10 +1,11 @@
 import sys
 import types
 import ast
+import contextlib
 import csv
 import importlib.util
 import json
-import tempfile
+import uuid
 from pathlib import Path
 
 import torch
@@ -21,6 +22,13 @@ from rsl_rl.algorithms.ppo import PPO
 from rsl_rl.algorithms.amp_ppo import AMPPPO
 from rsl_rl.runners.on_policy_runner import OnPolicyRunner
 import rsl_rl.runners.on_policy_runner as runner_module
+
+
+def _repo_test_dir(label):
+    """Create a writable test directory without Windows tempfile ACL changes."""
+    path = ROOT_DIR / ".test_tmp" / f"{label}_{uuid.uuid4().hex}"
+    path.mkdir(parents=True)
+    return path
 
 
 def _bare_amp_algo():
@@ -621,6 +629,116 @@ def test_eval_manifold_staged_disturb_release_uses_command_profile_mixture():
     assert len(disturb["stage_levels"]) == len(disturb["stage_max_fall_rate"])
 
 
+def test_staged_disturb_all_profile_gate_requires_each_profile_to_pass():
+    script_path = ROOT_DIR / "legged_gym/envs/r2/staged_disturb_gate.py"
+    spec = importlib.util.spec_from_file_location(
+        "staged_disturb_gate",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    aggregate = {
+        "episode_count": 4096,
+        "return_sum": 28.0 * 4096,
+        "fall_sum": 0.05 * 4096,
+    }
+    profile_stats = {
+        "jump": {
+            "episode_count": 1024,
+            "return_sum": 10.0 * 1024,
+            "fall_sum": 0.40 * 1024,
+        },
+        "stand": {
+            "episode_count": 1024,
+            "return_sum": 26.0 * 1024,
+            "fall_sum": 0.06 * 1024,
+        },
+    }
+
+    assert module.staged_disturb_window_ready(
+        episode_count=aggregate["episode_count"],
+        min_episodes=1024,
+        profile_stats=profile_stats,
+        require_all_profiles=True,
+    )
+    assert module.staged_disturb_window_passes(
+        **aggregate,
+        min_episodes=1024,
+        min_task_return=20.0,
+        max_fall_rate=0.10,
+        profile_stats=profile_stats,
+        require_all_profiles=False,
+    )
+    assert not module.staged_disturb_window_passes(
+        **aggregate,
+        min_episodes=1024,
+        min_task_return=20.0,
+        max_fall_rate=0.10,
+        profile_stats=profile_stats,
+        require_all_profiles=True,
+    )
+
+    passing_profiles = {
+        name: {
+            "episode_count": stats["episode_count"],
+            "return_sum": 24.0 * stats["episode_count"],
+            "fall_sum": 0.08 * stats["episode_count"],
+        }
+        for name, stats in profile_stats.items()
+    }
+    assert module.staged_disturb_window_passes(
+        **aggregate,
+        min_episodes=1024,
+        min_task_return=20.0,
+        max_fall_rate=0.10,
+        profile_stats=passing_profiles,
+        require_all_profiles=True,
+    )
+
+    under_sampled = dict(passing_profiles)
+    under_sampled["jump"] = dict(under_sampled["jump"], episode_count=1023)
+    assert not module.staged_disturb_window_ready(
+        episode_count=aggregate["episode_count"],
+        min_episodes=1024,
+        profile_stats=under_sampled,
+        require_all_profiles=True,
+    )
+    try:
+        module.validate_profile_gate_resampling(
+            require_all_profiles=True,
+            resampling_time_s=10.0,
+            dt=0.02,
+            max_episode_length=1000,
+        )
+    except ValueError as exc:
+        assert "longer than one episode" in str(exc)
+    else:
+        raise AssertionError("strict profile gates must reject mid-episode profile resampling")
+    module.validate_profile_gate_resampling(
+        require_all_profiles=True,
+        resampling_time_s=30.0,
+        dt=0.02,
+        max_episode_length=1000,
+    )
+    module.validate_profile_gate_resampling(
+        require_all_profiles=False,
+        resampling_time_s=10.0,
+        dt=0.02,
+        max_episode_length=1000,
+    )
+
+    interrupt_config_source = (
+        ROOT_DIR / "legged_gym/envs/r2/r2interrupt_config.py"
+    ).read_text(encoding="utf-8")
+    interrupt_source = (
+        ROOT_DIR / "legged_gym/envs/r2/r2interrupt.py"
+    ).read_text(encoding="utf-8")
+    assert "stage_require_all_monitor_profiles = False" in interrupt_config_source
+    assert "staged_disturb_require_all_monitor_profiles" in interrupt_source
+    assert "staged_disturb_profile_stats" in interrupt_source
+
+
 def test_eval_manifold_conservative_disturb_release_json_contract():
     # This adjacent config isolates disturbance pressure from eval-profile coverage.
     base_payload = json.loads(
@@ -792,6 +910,51 @@ def test_selective_walk_retention_probe_json_contracts():
     assert "model_12000.pt" in disturb100_probe["notes"]
 
 
+def test_selective_walk_profile_guard_recovery_json_contract():
+    payload = json.loads(
+        (
+            ROOT_DIR
+            / "configs/ablation/"
+            "selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery.json"
+        ).read_text(encoding="utf-8")
+    )
+    profiles = payload["env"]["commands"]["profile_mixture"]
+    weights = {profile["name"]: float(profile["weight"]) for profile in profiles}
+    disturb = payload["env"]["disturb"]
+
+    assert payload["train"]["runner"]["run_name"] == (
+        "selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery"
+    )
+    assert payload["train"]["runner"]["max_iterations"] == 4000
+    assert payload["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.25
+    assert payload["train"]["amp"]["style_reward_weight"] == 0.0
+    assert abs(sum(weights.values()) - 1.0) < 1e-6
+    assert weights == {
+        "stand": 0.25,
+        "walk_slow": 0.10,
+        "walk_fast": 0.12,
+        "run": 0.12,
+        "jump": 0.25,
+        "turn_left": 0.08,
+        "strafe_right": 0.08,
+    }
+    assert disturb["stage_init_curriculum_to_level"] is True
+    assert disturb["stage_levels"] == [0.925, 0.95, 0.975, 1.0]
+    assert disturb["stage_min_episodes"] == 1024
+    assert disturb["stage_min_task_return"] == [18.0, 20.0, 22.0, 24.0]
+    assert disturb["stage_max_fall_rate"] == [0.20, 0.16, 0.12, 0.10]
+    assert disturb["stage_monitor_profiles"] == ["stand", "jump"]
+    assert disturb["stage_require_all_monitor_profiles"] is True
+    assert payload["env"]["commands"]["resampling_time"] == 30.0
+    assert disturb["stage_regress_on_failure"] is True
+    assert "rewards" not in payload["env"]
+    assert "Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe" in (
+        payload["notes"]
+    )
+    assert "model_16000.pt" in payload["notes"]
+    assert "model_20000.pt" in payload["notes"]
+
+
 def test_selective_walk_retention_probe_algorithm_keys_exist_in_cfg_schema():
     source = ast.parse(
         (ROOT_DIR / "legged_gym/envs/base/legged_robot_config.py").read_text(
@@ -880,6 +1043,276 @@ def test_selective_walk_followup_eval_plan_script_contract():
     assert "--record_termination_reasons" in command_text
     assert "--record_state_trace" in command_text
     assert "--preset stand --preset run --preset jump --preset strafe_right" in command_text
+
+
+def test_jul08_disturb100_diagnostic_command_contract():
+    script_path = ROOT_DIR / "scripts/run_jul08_disturb100_diagnostics.py"
+    spec = importlib.util.spec_from_file_location(
+        "run_jul08_disturb100_diagnostics",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    command = module.build_diagnostic_command()
+    command_text = " ".join(command)
+
+    assert command[:4] == ["wsl.exe", "-d", "Ubuntu-22.04", "--cd"]
+    assert "Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe" in command_text
+    assert "--checkpoint=16000" in command
+    assert (
+        "configs/ablation/selective_walk_profile_teacher_retention_disturb100_probe.json"
+        in command
+    )
+    assert "--preset" in command
+    assert command.count("--preset") == 2
+    assert "jump" in command and "stand" in command
+    assert "--eval_disturb_ratio=1.0" in command
+    assert "--record_termination_reasons" in command
+    assert "--record_state_trace" in command
+    assert "--state_trace_window_steps=50" in command
+    assert "--sim_device=cpu" in command
+    assert "--rl_device=cpu" in command
+    assert "--num_envs=64" in command
+    assert "--num_episodes=64" in command
+    assert "--episode_seconds=10" in command
+    assert (
+        "outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_"
+        "16000_jump_stand_disturb100_failure_diagnostics"
+        in command
+    )
+
+    dry_run = module.run_diagnostic(execute=False)
+    assert dry_run["executed"] is False
+    executed = []
+    result = module.run_diagnostic(
+        execute=True,
+        command_runner=lambda argv, check: executed.append((argv, check)),
+    )
+    assert result["executed"] is True
+    assert executed == [(command, True)]
+
+
+def test_failure_diagnostics_summary_uses_terminal_trace_rows():
+    script_path = ROOT_DIR / "scripts/summarize_failure_diagnostics.py"
+    spec = importlib.util.spec_from_file_location(
+        "summarize_failure_diagnostics",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    # tempfile.TemporaryDirectory creates an unreadable ACL in this Windows
+    # environment, so retain the same context shape with a repo-local path.
+    with contextlib.nullcontext(_repo_test_dir("failure_diagnostics_summary")) as output_dir:
+        with (output_dir / "metrics.csv").open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "preset_name",
+                    "num_episodes",
+                    "task_return_mean",
+                    "fall_rate",
+                    "survival_time_mean_s",
+                    "base_height_violation_rate",
+                    "roll_pitch_violation_rate",
+                ],
+            )
+            writer.writeheader()
+            writer.writerows(
+                [
+                    {
+                        "preset_name": "jump",
+                        "num_episodes": "4",
+                        "task_return_mean": "7.0",
+                        "fall_rate": "0.75",
+                        "survival_time_mean_s": "4.0",
+                        "base_height_violation_rate": "0.2",
+                        "roll_pitch_violation_rate": "0.1",
+                    },
+                    {
+                        "preset_name": "stand",
+                        "num_episodes": "4",
+                        "task_return_mean": "12.0",
+                        "fall_rate": "0.5",
+                        "survival_time_mean_s": "6.0",
+                        "base_height_violation_rate": "0.1",
+                        "roll_pitch_violation_rate": "0.2",
+                    },
+                ]
+            )
+
+        with (output_dir / "termination_reasons.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "preset_name",
+                    "termination_reason",
+                    "termination_detail",
+                    "count",
+                    "rate",
+                    "mean_survival_time_s",
+                ],
+            )
+            writer.writeheader()
+            writer.writerows(
+                [
+                    {
+                        "preset_name": "jump",
+                        "termination_reason": "contact",
+                        "termination_detail": "base_link",
+                        "count": "3",
+                        "rate": "0.75",
+                        "mean_survival_time_s": "2.0",
+                    },
+                    {
+                        "preset_name": "jump",
+                        "termination_reason": "timeout",
+                        "termination_detail": "",
+                        "count": "1",
+                        "rate": "0.25",
+                        "mean_survival_time_s": "10.0",
+                    },
+                    {
+                        "preset_name": "stand",
+                        "termination_reason": "orientation",
+                        "termination_detail": "roll_pitch",
+                        "count": "2",
+                        "rate": "0.5",
+                        "mean_survival_time_s": "3.0",
+                    },
+                    {
+                        "preset_name": "stand",
+                        "termination_reason": "timeout",
+                        "termination_detail": "",
+                        "count": "2",
+                        "rate": "0.5",
+                        "mean_survival_time_s": "10.0",
+                    },
+                ]
+            )
+
+        with (output_dir / "state_trace.csv").open(
+            "w", newline="", encoding="utf-8"
+        ) as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "preset_name",
+                    "episode_index",
+                    "steps_until_done",
+                    "base_z",
+                    "roll",
+                    "pitch",
+                    "lin_vel_error",
+                    "yaw_vel_error",
+                    "contact_force_max",
+                ],
+            )
+            writer.writeheader()
+            writer.writerows(
+                [
+                    {
+                        "preset_name": "jump",
+                        "episode_index": "0",
+                        "steps_until_done": "1",
+                        "base_z": "0.8",
+                        "roll": "0.1",
+                        "pitch": "0.1",
+                        "lin_vel_error": "1.0",
+                        "yaw_vel_error": "1.0",
+                        "contact_force_max": "0.0",
+                    },
+                    {
+                        "preset_name": "jump",
+                        "episode_index": "0",
+                        "steps_until_done": "0",
+                        "base_z": "0.5",
+                        "roll": "-0.4",
+                        "pitch": "0.6",
+                        "lin_vel_error": "2.0",
+                        "yaw_vel_error": "3.0",
+                        "contact_force_max": "100.0",
+                    },
+                    {
+                        "preset_name": "stand",
+                        "episode_index": "0",
+                        "steps_until_done": "0",
+                        "base_z": "0.6",
+                        "roll": "0.8",
+                        "pitch": "-0.2",
+                        "lin_vel_error": "0.5",
+                        "yaw_vel_error": "1.5",
+                        "contact_force_max": "20.0",
+                    },
+                    *[
+                        {
+                            "preset_name": "jump",
+                            "episode_index": str(episode_index),
+                            "steps_until_done": "0",
+                            "base_z": "0.5",
+                            "roll": "-0.4",
+                            "pitch": "0.6",
+                            "lin_vel_error": "2.0",
+                            "yaw_vel_error": "3.0",
+                            "contact_force_max": "100.0",
+                        }
+                        for episode_index in range(1, 4)
+                    ],
+                    *[
+                        {
+                            "preset_name": "stand",
+                            "episode_index": str(episode_index),
+                            "steps_until_done": "0",
+                            "base_z": "0.6",
+                            "roll": "0.8",
+                            "pitch": "-0.2",
+                            "lin_vel_error": "0.5",
+                            "yaw_vel_error": "1.5",
+                            "contact_force_max": "20.0",
+                        }
+                        for episode_index in range(1, 4)
+                    ],
+                ]
+            )
+
+        summary = module.summarize_failure_diagnostics(str(output_dir))
+        rows = {row["preset"]: row for row in summary["rows"]}
+
+        assert summary["presets"] == ["jump", "stand"]
+        assert rows["jump"]["contact_base_link_rate"] == 0.75
+        assert rows["stand"]["orientation_roll_pitch_rate"] == 0.5
+        assert rows["jump"]["mean_base_z_terminal"] == 0.5
+        assert rows["jump"]["mean_abs_roll_terminal"] == 0.4
+        assert rows["jump"]["max_contact_force_terminal"] == 100.0
+        assert (output_dir / "failure_diagnostics_summary.csv").exists()
+        assert (output_dir / "failure_diagnostics_summary.json").exists()
+
+        termination_path = output_dir / "termination_reasons.csv"
+        with termination_path.open(newline="", encoding="utf-8") as f:
+            incomplete_rows = list(csv.DictReader(f))[:-1]
+        with termination_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "preset_name",
+                    "termination_reason",
+                    "termination_detail",
+                    "count",
+                    "rate",
+                    "mean_survival_time_s",
+                ],
+            )
+            writer.writeheader()
+            writer.writerows(incomplete_rows)
+        try:
+            module.summarize_failure_diagnostics(str(output_dir))
+        except ValueError as exc:
+            assert "termination count" in str(exc)
+        else:
+            raise AssertionError("incomplete termination accounting must fail")
 
 
 def test_selective_walk_followup_train_plan_script_contract():
@@ -976,7 +1409,7 @@ def test_selective_walk_followup_eval_summary_script_contract():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with contextlib.nullcontext(_repo_test_dir("followup_eval_summary")) as tmp:
         tmp_path = Path(tmp)
         output_prefix = tmp_path / "selective_walk_followup_8000"
         summary_dir = tmp_path / "summary"
@@ -1052,7 +1485,7 @@ def test_selective_walk_followup_readiness_audit_contract():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with contextlib.nullcontext(_repo_test_dir("followup_readiness")) as tmp:
         tmp_path = Path(tmp)
         logs_root = tmp_path / "logs" / "r2_amp"
         eval_root = tmp_path / "outputs" / "eval"

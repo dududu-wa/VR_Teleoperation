@@ -19,6 +19,11 @@ from legged_gym.utils.isaacgym_utils import get_euler_xyz as get_euler_xyz_in_te
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.envs.r2.r2 import R2Robot
 from legged_gym.envs.r2.r2interrupt_config import R2InterruptCfg
+from legged_gym.envs.r2.staged_disturb_gate import (
+    staged_disturb_window_passes,
+    staged_disturb_window_ready,
+    validate_profile_gate_resampling,
+)
 from copy import deepcopy
 
 class R2InterruptRobot(R2Robot):
@@ -151,6 +156,15 @@ class R2InterruptRobot(R2Robot):
             if profile_mixture
             else []
         )
+        self.staged_disturb_require_all_monitor_profiles = bool(
+            getattr(cfg.disturb, "stage_require_all_monitor_profiles", False)
+        )
+        validate_profile_gate_resampling(
+            require_all_profiles=self.staged_disturb_require_all_monitor_profiles,
+            resampling_time_s=cfg.commands.resampling_time,
+            dt=self.dt,
+            max_episode_length=self.max_episode_length,
+        )
         raw_monitor_profiles = getattr(cfg.disturb, "stage_monitor_profiles", None)
         if raw_monitor_profiles == "":
             raw_monitor_profiles = None
@@ -158,6 +172,7 @@ class R2InterruptRobot(R2Robot):
             raw_monitor_profiles = [raw_monitor_profiles]
         self.staged_disturb_monitor_profiles = raw_monitor_profiles
         self.staged_disturb_monitor_profile_ids = None
+        self.staged_disturb_profile_id_by_name = {}
         if raw_monitor_profiles is not None:
             profile_to_id = {name: idx for idx, name in enumerate(self.command_profile_names)}
             missing_profiles = [name for name in raw_monitor_profiles if name not in profile_to_id]
@@ -171,12 +186,41 @@ class R2InterruptRobot(R2Robot):
                 device=self.device,
                 requires_grad=False,
             )
+            self.staged_disturb_profile_id_by_name = {
+                name: profile_to_id[name] for name in raw_monitor_profiles
+            }
+        if self.staged_disturb_require_all_monitor_profiles:
+            if not raw_monitor_profiles:
+                raise ValueError(
+                    "cfg.disturb.stage_require_all_monitor_profiles requires "
+                    "cfg.disturb.stage_monitor_profiles"
+                )
+            if len(set(raw_monitor_profiles)) != len(raw_monitor_profiles):
+                raise ValueError("cfg.disturb.stage_monitor_profiles must not contain duplicates")
+            profile_weights = {
+                str(profile.get("name", idx)): float(profile.get("weight", 1.0))
+                for idx, profile in enumerate(profile_mixture or [])
+            }
+            non_positive_profiles = [
+                name for name in raw_monitor_profiles if profile_weights.get(name, 0.0) <= 0.0
+            ]
+            if non_positive_profiles:
+                raise ValueError(
+                    "strict staged disturbance monitor profiles require positive "
+                    "cfg.commands.profile_mixture weights"
+                )
+        self.staged_disturb_profile_stats = (
+            {
+                name: {"episode_count": 0, "return_sum": 0.0, "fall_sum": 0.0}
+                for name in raw_monitor_profiles
+            }
+            if self.staged_disturb_require_all_monitor_profiles
+            else {}
+        )
         self.staged_disturb_regress_on_failure = bool(getattr(cfg.disturb, "stage_regress_on_failure", False))
         self.staged_disturb_regress_patience = max(1, int(getattr(cfg.disturb, "stage_regress_patience", 2)))
         self.staged_disturb_failure_windows = 0
-        self.staged_disturb_episode_count = 0
-        self.staged_disturb_return_sum = 0.0
-        self.staged_disturb_fall_sum = 0.0
+        self._reset_staged_disturb_window()
         if cfg.disturb.disturb_rad_curriculum:
             init_curriculum = (
                 self._current_staged_disturb_level()
@@ -301,26 +345,58 @@ class R2InterruptRobot(R2Robot):
         self.staged_disturb_episode_count += int(monitor_ids.numel())
         self.staged_disturb_return_sum += float(task_returns.sum().detach().cpu().item())
         self.staged_disturb_fall_sum += float(falls.sum().detach().cpu().item())
+        for profile_name, stats in self.staged_disturb_profile_stats.items():
+            profile_id = self.staged_disturb_profile_id_by_name[profile_name]
+            profile_mask = self.command_profile_ids[monitor_ids] == profile_id
+            profile_count = int(profile_mask.sum().detach().cpu().item())
+            if profile_count == 0:
+                continue
+            stats["episode_count"] += profile_count
+            stats["return_sum"] += float(
+                task_returns[profile_mask].sum().detach().cpu().item()
+            )
+            stats["fall_sum"] += float(falls[profile_mask].sum().detach().cpu().item())
+
+    def _reset_staged_disturb_window(self):
+        self.staged_disturb_episode_count = 0
+        self.staged_disturb_return_sum = 0.0
+        self.staged_disturb_fall_sum = 0.0
+        for stats in self.staged_disturb_profile_stats.values():
+            stats["episode_count"] = 0
+            stats["return_sum"] = 0.0
+            stats["fall_sum"] = 0.0
 
     def _maybe_advance_staged_disturb_release(self):
         if not self.staged_disturb_release:
             return
-        if self.staged_disturb_episode_count < self.staged_disturb_min_episodes:
+        if not staged_disturb_window_ready(
+            episode_count=self.staged_disturb_episode_count,
+            min_episodes=self.staged_disturb_min_episodes,
+            profile_stats=self.staged_disturb_profile_stats,
+            require_all_profiles=self.staged_disturb_require_all_monitor_profiles,
+        ):
             self._cap_staged_disturb_curriculum()
             return
 
-        avg_task_return = self.staged_disturb_return_sum / max(self.staged_disturb_episode_count, 1)
-        fall_rate = self.staged_disturb_fall_sum / max(self.staged_disturb_episode_count, 1)
         min_task_return, max_fall_rate = self._current_staged_disturb_gate()
+        gate_passed = staged_disturb_window_passes(
+            episode_count=self.staged_disturb_episode_count,
+            return_sum=self.staged_disturb_return_sum,
+            fall_sum=self.staged_disturb_fall_sum,
+            min_episodes=self.staged_disturb_min_episodes,
+            min_task_return=min_task_return,
+            max_fall_rate=max_fall_rate,
+            profile_stats=self.staged_disturb_profile_stats,
+            require_all_profiles=self.staged_disturb_require_all_monitor_profiles,
+        )
         can_advance = (
-            avg_task_return >= min_task_return
-            and fall_rate <= max_fall_rate
+            gate_passed
             and self.staged_disturb_stage_idx < int(self.staged_disturb_levels.numel()) - 1
         )
         if can_advance:
             self.staged_disturb_stage_idx += 1
             self.staged_disturb_failure_windows = 0
-        elif avg_task_return >= min_task_return and fall_rate <= max_fall_rate:
+        elif gate_passed:
             self.staged_disturb_failure_windows = 0
         elif self.staged_disturb_regress_on_failure and self.staged_disturb_stage_idx > 0:
             self.staged_disturb_failure_windows += 1
@@ -332,9 +408,7 @@ class R2InterruptRobot(R2Robot):
 
         # Use non-overlapping windows so a bad phase cannot be hidden by older,
         # easier data after the stage cap changes.
-        self.staged_disturb_episode_count = 0
-        self.staged_disturb_return_sum = 0.0
-        self.staged_disturb_fall_sum = 0.0
+        self._reset_staged_disturb_window()
         self._cap_staged_disturb_curriculum()
 
     def _disturb_values(self, tensor):
@@ -628,6 +702,18 @@ class R2InterruptRobot(R2Robot):
                 self.extras['episode']['staged_disturb_window_fall_rate'] = (
                     self.staged_disturb_fall_sum / self.staged_disturb_episode_count
                 )
+            for profile_name, stats in self.staged_disturb_profile_stats.items():
+                profile_count = int(stats["episode_count"])
+                self.extras['episode'][
+                    f'staged_disturb_profile_{profile_name}_episodes'
+                ] = profile_count
+                if profile_count > 0:
+                    self.extras['episode'][
+                        f'staged_disturb_profile_{profile_name}_task_return'
+                    ] = stats["return_sum"] / profile_count
+                    self.extras['episode'][
+                        f'staged_disturb_profile_{profile_name}_fall_rate'
+                    ] = stats["fall_sum"] / profile_count
             
     def random_switch_disturb(self):
         switch_rand = torch.rand(self.num_envs, device=self.device)

@@ -1,6 +1,6 @@
 ﻿# R2 AMP Experiment Progress
 
-Last updated: 2026-07-06
+Last updated: 2026-07-11
 
 This document is the running record for R2 AMP ablations. Keep it factual: record what was run, what changed, where the artifacts are, what the evaluation showed, and what conclusion is supported by the data.
 
@@ -3134,7 +3134,7 @@ Implemented code/config artifacts:
 |---|---|---|
 | `legged_gym/envs/r2/r2interrupt_config.py` | implemented | Adds `disturb.stage_init_curriculum_to_level=False` as a default-off resume-only schema field, so existing staged curricula still initialize `disturb_rad_curriculum` at `0.0`. |
 | `legged_gym/envs/r2/r2interrupt.py` | implemented | Consumes `stage_init_curriculum_to_level`; when a staged resume config sets it to `true`, `R2InterruptRobot.__init__()` initializes `disturb_rad_curriculum` to the current stage cap instead of zero. This is needed because `stage_levels` are caps, not saved environment state. |
-| `configs/ablation/selective_walk_profile_teacher_retention_disturb100_probe.json` | implemented, not trained | Continues from the Jul05 `disturb075/model_12000.pt` checkpoint, keeps `teacher_policy_retention_coef=0.25`, seven eval-like profiles, and `style_reward_weight=0.0`, then trains staged disturbance through `0.75 -> 0.85 -> 0.925 -> 1.0`. |
+| `configs/ablation/selective_walk_profile_teacher_retention_disturb100_probe.json` | implemented; Jul06 run evaluated with source-checkpoint mismatch | Intended to continue from the Jul05 `disturb075/model_12000.pt` checkpoint, keep `teacher_policy_retention_coef=0.25`, seven eval-like profiles, and `style_reward_weight=0.0`, then train staged disturbance through `0.75 -> 0.85 -> 0.925 -> 1.0`. The Jul06 run below did not follow that intended source. |
 | `tests/test_amp_training_contracts.py` | implemented | Locks the new resume-only initialization switch and the `disturb100` JSON contract, including the continuation checkpoint note, stage gates, all-profile monitoring, and 4000-additional-iteration budget. |
 
 Training decision:
@@ -3156,6 +3156,183 @@ CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym
   --run_name selective_walk_profile_teacher_retention_disturb100_probe \
   --max_iterations=4000
 ```
+
+### July08 Evaluation of Jul06 Disturb100 Run
+
+Hypothesis under test: pushing the retention-stabilized disturbance curriculum beyond `0.75` should only continue if the policy preserves the no-disturb seven-preset baseline before any higher forced-disturbance diagnostics.
+
+Training root:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_amp\Jul06
+```
+
+Training artifact:
+
+| experiment | config | run directory | evaluated checkpoints | tail staged disturbance | status |
+|---|---|---|---|---:|---|
+| `selective_walk_profile_teacher_retention_disturb100_probe` | `configs/ablation/selective_walk_profile_teacher_retention_disturb100_probe.json` | `logs/r2_amp/Jul06/Jul06_13-53-29_selective_walk_profile_teacher_retention_disturb100_probe` | `model_best_task.pt`, `model_8000.pt` | `0.7500` | evaluated; source-checkpoint mismatch |
+
+Training-tail and source facts from `train.log`:
+
+- The run loaded `logs/r2_amp/Jun17/Jun17_14-46-44_expert_hard_gate_selective_walk/model_best_task.pt`, not the intended `logs/r2_amp/Jul05/Jul05_16-01-08_selective_walk_profile_teacher_retention_disturb075_probe/model_12000.pt`.
+- The checkpoint sequence ended at `model_8000.pt`, not the planned `model_16000.pt`.
+- The tail entry ended at learning iteration `7999/8000` with `Mean task reward: -7.72`, `Best task reward: 40.98`, `staged_disturb_level=0.7500`, `staged_disturb_window_task_return=-43.4630`, and `staged_disturb_window_fall_rate=0.8436`.
+
+Evaluation protocol:
+
+- WSL CPU PhysX / CPU policy via `legged_gym/scripts/evaluate.py`.
+- `--task=r2amp`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default seven fixed presets; DTW was not enabled.
+- Forced-disturbance follow-up was not run because `model_8000.pt` failed the no-disturb full7 preservation gate.
+
+Evaluation outputs:
+
+```text
+outputs/eval/July06_selective_walk_profile_teacher_retention_disturb100_probe_best_task_baseline_full7
+outputs/eval/July06_selective_walk_profile_teacher_retention_disturb100_probe_8000_baseline_full7
+```
+
+Aggregate result:
+
+| checkpoint / protocol | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | action-rate L2 | worst task preset | worst task return | worst fall preset | worst fall rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `disturb100/model_best_task.pt`, baseline full7 | 7 | 29.94 | 0.022 | 9.88 | 0.307 | 0.437 | 2.52 | `run` | 20.03 | `stand` | 0.078 |
+| `disturb100/model_8000.pt`, baseline full7 | 7 | 19.87 | 0.330 | 7.49 | 0.402 | 0.539 | 3.72 | `jump` | -1.97 | `jump` | 1.000 |
+
+Selected per-preset facts:
+
+- `model_best_task.pt` remained usable under no-disturb full7: all seven presets had `fall_rate <= 0.078`; the weakest task preset was `run` with `task_return=20.03` and `fall_rate=0.016`.
+- `model_8000.pt` regressed sharply: `jump` had `task_return=-1.97`, `fall_rate=1.000`, and `survival=1.20s`; `stand` also rose to `fall_rate=0.484`.
+- Because the terminal checkpoint fails no-disturb full7, higher forced-disturbance tests at `0.75`, `0.925`, or `1.0` would not isolate disturbance robustness; they would mostly measure an already-regressed policy.
+
+Interpretation:
+
+- This Jul06 run should not be treated as a valid test of the planned Jul05-to-1.0 continuation, because its `train.log` shows it resumed from Jun17 rather than from the Jul05 `disturb075/model_12000.pt` source.
+- The early best checkpoint is a usable recovery point, but the terminal `model_8000.pt` is not a continuation candidate.
+- The next clean action is to rerun the intended command from the previous section, verify the new `train.log` loads the Jul05 `model_12000.pt` source before training proceeds, and expect the terminal checkpoint to align with `model_16000.pt`.
+
+### July10 Evaluation of Jul08_12 Disturb100 Continuation
+
+Hypothesis under test: if the `disturb100` continuation is resumed from the correct Jul05 `disturb075/model_12000.pt` source, the terminal `model_16000.pt` should preserve the no-disturb seven-preset baseline and then reveal the usable forced-disturbance boundary between `0.75` and `1.0`.
+
+Training root:
+
+```text
+E:\codebase\VR_Teleoperation\logs\r2_amp\Jul08_12
+```
+
+Training artifact:
+
+| experiment | config | run directory | evaluated checkpoints | tail staged disturbance | status |
+|---|---|---|---|---:|---|
+| `selective_walk_profile_teacher_retention_disturb100_probe` | `configs/ablation/selective_walk_profile_teacher_retention_disturb100_probe.json` | `logs/r2_amp/Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe` | `model_best_task.pt`, `model_16000.pt`; `model_16000.pt` also evaluated at forced `0.75`, `0.925`, and `1.0` disturbance | `1.0000` | evaluated; correct Jul05 source |
+
+Training-tail and source facts from `train.log`:
+
+- The run loaded `/home/ubuntu/lzxworkspace/codespace/VR_Teleoperation/logs/r2_amp/Jul05_16-01-08_selective_walk_profile_teacher_retention_disturb075_probe/model_12000.pt`, matching the intended Jul05 `disturb075/model_12000.pt` source by run name and checkpoint.
+- The checkpoint sequence includes `model_12000.pt` through `model_16000.pt`, plus `model_best_task.pt` and top-task checkpoints `model_top_task_12052.pt`, `model_top_task_12060.pt`, and `model_top_task_12095.pt`.
+- The tail entry ended at learning iteration `15999/16000` with `Mean task reward: 17.49`, `Best task reward: 63.63`, `staged_disturb_level=1.0000`, `staged_disturb_window_task_return=20.1177`, and `staged_disturb_window_fall_rate=0.1062`.
+
+Evaluation protocol:
+
+- WSL CPU PhysX / CPU policy via `legged_gym/scripts/evaluate.py`.
+- `--task=r2amp`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`.
+- Default seven fixed presets; DTW was not enabled.
+- `model_best_task.pt` and `model_16000.pt` were first evaluated with no forced disturbance. Because `model_16000.pt` preserved the no-disturb full7 aggregate, forced-disturbance full7 diagnostics were run at `0.75`, `0.925`, and `1.0`.
+
+Evaluation outputs:
+
+```text
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_best_task_baseline_full7
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_baseline_full7
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_full7_disturb075
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_full7_disturb0925
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_full7_disturb100
+```
+
+Aggregate result:
+
+| checkpoint / protocol | rows | avg task return | avg fall rate | avg survival s | lin rmse | yaw rmse | action-rate L2 | worst task preset | worst task return | worst fall preset | worst fall rate |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---:|---|---:|
+| `disturb100/model_best_task.pt`, baseline full7 | 7 | 34.59 | 0.056 | 9.63 | 0.277 | 0.338 | 2.45 | `run` | 24.04 | `jump` | 0.125 |
+| `disturb100/model_16000.pt`, baseline full7 | 7 | 33.64 | 0.083 | 9.52 | 0.289 | 0.353 | 2.48 | `run` | 25.03 | `jump` | 0.250 |
+| `disturb100/model_16000.pt`, forced `0.75` full7 | 7 | 33.52 | 0.049 | 9.74 | 0.309 | 0.389 | 2.58 | `run` | 24.23 | `jump` | 0.156 |
+| `disturb100/model_16000.pt`, forced `0.925` full7 | 7 | 29.55 | 0.092 | 9.42 | 0.386 | 0.455 | 2.84 | `run` | 17.17 | `jump` | 0.328 |
+| `disturb100/model_16000.pt`, forced `1.0` full7 | 7 | 22.26 | 0.208 | 8.49 | 0.504 | 0.600 | 3.41 | `jump` | 7.06 | `jump` | 0.547 |
+
+Selected per-preset facts:
+
+- `model_16000.pt` preserved the no-disturb baseline relative to its early best checkpoint: avg task return moved from `34.59` to `33.64`, and avg fall rate from `0.056` to `0.083`; the weakest no-disturb task preset remained `run` at `25.03`.
+- At forced `0.75`, `model_16000.pt` remained close to its no-disturb result: avg task return `33.52`, avg fall rate `0.049`, and avg survival `9.74s`. The weakest task preset was still `run` at `24.23`.
+- At forced `0.925`, performance degraded but remained usable at the aggregate level: avg task return `29.55`, avg fall rate `0.092`, and avg survival `9.42s`. The main weak point was `jump`, which had the worst fall rate at `0.328`.
+- At forced `1.0`, the stress boundary became clear: avg task return fell to `22.26`, avg fall rate rose to `0.208`, and `jump` was the dominant failure mode with `task_return=7.06`, `fall_rate=0.547`, and `survival=6.16s`. `stand` also degraded with `fall_rate=0.328`, while `strafe_right` remained comparatively strong at `task_return=33.74` and `fall_rate=0.063`.
+
+Focused forced-`1.0` failure diagnostic:
+
+```text
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_jump_stand_disturb100_failure_diagnostics/metrics.csv
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_jump_stand_disturb100_failure_diagnostics/termination_reasons.csv
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_jump_stand_disturb100_failure_diagnostics/state_trace.csv
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_jump_stand_disturb100_failure_diagnostics/failure_diagnostics_summary.csv
+outputs/eval/July08_12_selective_walk_profile_teacher_retention_disturb100_probe_16000_jump_stand_disturb100_failure_diagnostics/failure_diagnostics_summary.json
+```
+
+- Checkpoint/config: the same Jul08_12 `model_16000.pt` and `selective_walk_profile_teacher_retention_disturb100_probe.json`.
+- Protocol: WSL CPU, `jump` and `stand`, `64` episodes per preset, `--eval_disturb_ratio=1.0`, `--record_termination_reasons`, `--record_state_trace`, and `--state_trace_window_steps=50`.
+- `failure_diagnostics_summary.*` was generated from the three evaluator CSVs; terminal-state values use only rows with `steps_until_done=0`.
+
+| preset | task return | fall rate | survival s | `contact:base_link` | contact mean survival s | `orientation:roll_pitch` | timeout | terminal mean base z | terminal max contact force |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | 10.49 | 0.469 | 6.80 | 30/64 (0.469) | 3.16 | 0/64 (0.000) | 34/64 (0.531) | 0.612 | 1307.21 |
+| `stand` | 10.53 | 0.484 | 6.53 | 29/64 (0.453) | 2.71 | 2/64 (0.031) | 33/64 (0.516) | 0.573 | 1184.95 |
+
+Diagnostic interpretation:
+
+- The focused diagnostic is a separate stochastic rollout, so its exact task/fall values should not be substituted for the earlier seven-preset table. Its termination classification is the evidence needed here: both weak profiles are dominated by early `base_link` contact, while orientation-only termination is absent for `jump` and rare for `stand`.
+- This evidence does not support changing an orientation threshold or introducing a new reward scale. The existing failure is primarily contact collapse under full disturbance.
+- Code inspection found a matching curriculum-control gap: `stage_monitor_profiles` filtered which episodes entered the window, but `_maybe_advance_staged_disturb_release()` still decided from one aggregate return/fall mean. Therefore strong monitored profiles could offset weak `jump/stand` values even though all seven names were listed.
+
+Evidence-based code/config follow-up completed on July10 and review-hardened on July11:
+
+- Added `legged_gym/envs/r2/staged_disturb_gate.py` with simulator-independent aggregate and strict per-profile readiness/pass checks.
+- Added the default-off schema option `disturb.stage_require_all_monitor_profiles`. When enabled, `R2InterruptRobot` separately accumulates count/return/fall for each named monitor profile, waits for each profile to reach `stage_min_episodes`, and requires each one to pass the current-stage gates. Strict mode also requires command resampling to occur after the maximum episode length, so a full episode return cannot be attributed to a profile selected halfway through the episode. Existing configs retain aggregate behavior because the option defaults to `false`.
+- Added `scripts/run_jul08_disturb100_diagnostics.py` and `scripts/summarize_failure_diagnostics.py` so the exact diagnostic and terminal-state summary are reproducible.
+- Added `configs/ablation/selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery.json`; status: **not trained**.
+
+Planned recovery experiment:
+
+| field | value |
+|---|---|
+| source | `logs/r2_amp/Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe/model_16000.pt` |
+| run name | `selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery` |
+| profile weights | `stand=0.25`, `jump=0.25`, remaining five profiles sum to `0.50` |
+| profile hold | `commands.resampling_time=30.0s`, longer than the `20s` episode, so each gate episode has one profile |
+| staged levels | `0.925 -> 0.95 -> 0.975 -> 1.0` |
+| per-profile gates | min return `[18, 20, 22, 24]`; max fall `[0.20, 0.16, 0.12, 0.10]`; `1024` episodes per profile |
+| unchanged controls | teacher retention `0.25`; AMP style reward `0.0`; PPO settings, command anchors, and reward scales unchanged |
+| budget / expected terminal | additional `4000` iterations; expected `model_20000.pt` |
+| status | **not trained** |
+
+Training command after activating the training environment:
+
+```bash
+python legged_gym/scripts/train.py \
+  --task=r2amp \
+  --headless \
+  --resume \
+  --load_run Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe \
+  --checkpoint=16000 \
+  --cfg_override_json configs/ablation/selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery.json \
+  --run_name selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery \
+  --max_iterations=4000
+```
+
+Interpretation:
+
+- This `Jul08_12` run is the valid test that the Jul06 source-mismatch run failed to provide: it starts from the intended Jul05 `disturb075/model_12000.pt` source, reaches `model_16000.pt`, and preserves the no-disturb seven-preset aggregate.
+- The useful forced-disturbance operating range is stronger at `0.75` and still broadly usable at `0.925`; full `1.0` disturbance is not solved, with `jump` and then `stand` carrying most of the fall-rate increase.
+- The focused diagnostic is now complete and supports an opt-in per-profile curriculum guard plus targeted `jump/stand` resampling. The next empirical step is to train the new recovery config, verify the first `Loading model from` line points to Jul08_12 `model_16000.pt`, and evaluate the resulting `model_20000.pt` first on baseline full7, then at forced `0.925` and `1.0`.
 
 ## Maintenance Rules
 
