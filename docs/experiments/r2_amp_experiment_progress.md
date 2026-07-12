@@ -3334,6 +3334,74 @@ Interpretation:
 - The useful forced-disturbance operating range is stronger at `0.75` and still broadly usable at `0.925`; full `1.0` disturbance is not solved, with `jump` and then `stand` carrying most of the fall-rate increase.
 - The focused diagnostic is now complete and supports an opt-in per-profile curriculum guard plus targeted `jump/stand` resampling. The next empirical step is to train the new recovery config, verify the first `Loading model from` line points to Jul08_12 `model_16000.pt`, and evaluate the resulting `model_20000.pt` first on baseline full7, then at forced `0.925` and `1.0`.
 
+### July12 Evaluation of Jul11 Profile-Guard Recovery
+
+Hypothesis under test: strict per-profile staged gates plus higher `stand`/`jump` sampling should preserve the Jul08_12 no-disturb baseline and improve the two weak profiles at forced disturbance `0.925` and `1.0`.
+
+Training artifact:
+
+| field | value |
+|---|---|
+| config | `configs/ablation/selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery.json` |
+| run | `logs/r2_amp/Jul11/Jul11_09-35-22_selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery` |
+| actual resume source | `/home/ubuntu/lzxworkspace/codespace/VR_Teleoperation/logs/r2_amp/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe/model_16000.pt` |
+| evaluated checkpoints | `model_best_task.pt` (last replaced at iteration `16095`, train-window best task reward `55.4368`) and `model_20000.pt` |
+| terminal staged state | stage `1`, level `0.95`; the run did not reach `0.975` or `1.0` |
+| status | trained and evaluated; recovery objective failed |
+
+Training-tail facts from `train.log`:
+
+- At iteration `19999/20000`, mean task reward was `31.48`, best task reward was `55.44`, aggregate staged-window task return was `29.56`, and fall rate was `0.020`.
+- The strict profile window reported `stand` task return `39.33` / fall rate `0.007`, but `jump` task return `19.85` / fall rate `0.033`.
+- The current stage required minimum task return `20.0` and maximum fall rate `0.16`; therefore `jump` remained just below the return gate and correctly prevented advancement beyond disturbance level `0.95`.
+
+Evaluation protocol:
+
+- WSL CPU PhysX / CPU policy via `legged_gym/scripts/evaluate.py`.
+- `--task=r2amp`, `--num_envs=64`, `--num_episodes=64`, `--episode_seconds=10`, and the default seven fixed presets.
+- `model_best_task.pt` and `model_20000.pt` were evaluated without forced disturbance. Since the terminal checkpoint preserved the historical Jul08_12 no-disturb aggregate, `model_20000.pt` was then evaluated at forced disturbance `0.925` and `1.0`.
+
+Evaluation outputs:
+
+```text
+outputs/eval/July11_profile_guard_recovery_best_task_baseline_full7
+outputs/eval/July11_profile_guard_recovery_20000_baseline_full7
+outputs/eval/July11_profile_guard_recovery_20000_full7_disturb0925
+outputs/eval/July11_profile_guard_recovery_20000_full7_disturb100
+outputs/eval/July11_profile_guard_recovery_20000_jump_stand_disturb100_failure_diagnostics
+```
+
+Aggregate results:
+
+| checkpoint / protocol | avg task return | avg fall rate | avg survival s | lin RMSE | yaw RMSE | action-rate L2 |
+|---|---:|---:|---:|---:|---:|---:|
+| Jul11 `model_best_task.pt`, baseline full7 | 33.40 | 0.047 | 9.73 | 0.286 | 0.364 | 2.49 |
+| Jul11 `model_20000.pt`, baseline full7 | 33.11 | 0.083 | 9.47 | 0.289 | 0.371 | 2.50 |
+| Jul11 `model_20000.pt`, forced `0.925` full7 | 21.00 | 0.248 | 8.45 | 0.496 | 0.583 | 3.66 |
+| Jul11 `model_20000.pt`, forced `1.0` full7 | 10.02 | 0.462 | 6.79 | 0.685 | 0.787 | 4.41 |
+| Jul08_12 source `model_16000.pt`, forced `0.925` full7 | 29.55 | 0.092 | 9.42 | 0.386 | 0.455 | 2.84 |
+| Jul08_12 source `model_16000.pt`, forced `1.0` full7 | 22.26 | 0.208 | 8.49 | 0.504 | 0.600 | 3.41 |
+
+Selected per-preset facts:
+
+- The terminal no-disturb aggregate remained close to the Jul08_12 source baseline (`33.64` task return / `0.083` fall rate), but it was weaker than the Jul11 best-task checkpoint. In particular, terminal `run` fell from `22.57 / 0.078` to `20.07 / 0.156`, and terminal `stand` from `35.99 / 0.063` to `32.63 / 0.141`.
+- At forced `0.925`, the two targeted profiles regressed instead of recovering: `stand` had task return `12.72` / fall rate `0.547`, and `jump` had `6.68 / 0.641`. The Jul08_12 source checkpoint had `32.67 / 0.109` and `19.11 / 0.328`, respectively.
+- At forced `1.0`, `stand` reached task return `-6.20` / fall rate `0.969`, while `jump` reached `-7.55 / 0.938`. The source checkpoint had `19.15 / 0.328` and `7.06 / 0.547`.
+
+Focused forced-`1.0` failure diagnostic:
+
+| preset | task return | fall rate | survival s | `contact:base_link` | `orientation:roll_pitch` | timeout | terminal mean base z | terminal mean max contact force |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `jump` | -5.59 | 0.938 | 3.94 | 59/64 (0.922) | 1/64 (0.016) | 4/64 (0.063) | 0.511 | 666.59 |
+| `stand` | -1.37 | 0.859 | 4.52 | 54/64 (0.844) | 1/64 (0.016) | 9/64 (0.141) | 0.456 | 739.80 |
+
+Interpretation:
+
+- The run is valid with respect to its intended resume source, and the strict gate behaved as designed by stopping at `0.95` when `jump` missed the return threshold. The failure therefore is not a resume-source mismatch or a gate-accounting failure.
+- The recovery objective failed empirically. It preserved the no-disturb aggregate but substantially worsened forced-disturbance robustness at both `0.925` and `1.0`, including the very `stand`/`jump` profiles that received higher sampling weights.
+- The new focused diagnostic reproduces the same mechanism more severely: failure is dominated by early `base_link` contact, while orientation-only termination remains rare. This does not support changing orientation thresholds.
+- Do not continue training from `model_20000.pt` and do not promote the profile-guard recovery over the Jul08_12 `model_16000.pt`. The Jul08_12 source remains the stronger robustness checkpoint. A next experiment should first isolate the confound between `30s` full-episode profile hold / `stand+jump` oversampling and the changed staged schedule; repeating the same continuation with more iterations is not justified by these metrics.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
