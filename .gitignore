@@ -20,5 +20,6 @@ Thumbs.db
 .claude/
 legged_gym/motions/
 .codegraph/
+.worktrees/
 outputs/
 AGENTS.md
