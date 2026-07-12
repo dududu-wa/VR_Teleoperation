@@ -163,6 +163,8 @@ python legged_gym/scripts/train.py --task=r2amp --headless --cfg_override_json c
 
 `selective_walk_profile_teacher_retention_disturb100_profile_guard_recovery.json` 是 July10 forced `1.0` failure diagnostic 后的恢复配置，计划从 Jul08_12 正确续训 run 的 `model_16000.pt` resume。它不改 PPO、teacher retention、AMP style 或 reward scale，只把 `jump/stand` 权重各提高到 `0.25`，从 `0.925 -> 0.95 -> 0.975 -> 1.0` 重新释放 disturbance，并设置 `stage_monitor_profiles=["stand", "jump"]`、`stage_require_all_monitor_profiles=true`。`commands.resampling_time=30.0` 严格长于 20 秒 episode，保证一次 episode 不会在 termination 前切换 profile；每个 profile 都至少积累 `1024` 个 noise-disturb episode 且分别满足当前 return/fall gate 后才可晋级。追加 `4000` iteration 时预期 terminal checkpoint 为 `model_20000.pt`。
 
+`selective_walk_disturb100_causal_control.json`（C0）、`selective_walk_disturb100_hold30_only.json`（H）、`selective_walk_disturb100_stand_jump_weights_only.json`（W）和 `selective_walk_disturb100_high_start_schedule_only.json`（S）是 July12 profile-guard 失败后的因果归因批次，四组都从 `Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe` 的 `model_16000.pt` resume，追加 `2000` iterations，预期 terminal checkpoint 为 `model_18000.pt`，并保持 strict profile gate 禁用。C0 是完全复用 Jul08 `disturb100` payload 的纯 continuation control；H 相对 C0 唯一增加 `commands.resampling_time=30.0`；W 相对 C0 唯一把 `stand/jump` 权重提高到 `0.25/0.25`，同时重分配其余五个 profile 权重；S 相对 C0 唯一把 disturbance schedule/window/threshold 改为 levels `[0.925, 0.95, 0.975, 1.0]`、每窗 `1024` episodes、task-return gates `[18, 20, 22, 24]` 和 fall-rate gates `[0.20, 0.16, 0.12, 0.10]`。完整 payload 的单变量等价性由 `test_selective_walk_disturb100_causal_attribution_json_contracts` 锁定，避免把 profile hold、采样权重和高起点 schedule 再次混成一个实验。
+
 ### 2.3 回放链路
 
 ```text

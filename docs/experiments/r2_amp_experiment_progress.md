@@ -3402,6 +3402,54 @@ Interpretation:
 - The new focused diagnostic reproduces the same mechanism more severely: failure is dominated by early `base_link` contact, while orientation-only termination remains rare. This does not support changing orientation thresholds.
 - Do not continue training from `model_20000.pt` and do not promote the profile-guard recovery over the Jul08_12 `model_16000.pt`. The Jul08_12 source remains the stronger robustness checkpoint. A next experiment should first isolate the confound between `30s` full-episode profile hold / `stand+jump` oversampling and the changed staged schedule; repeating the same continuation with more iterations is not justified by these metrics.
 
+### July12 Planned Causal-Attribution Batch
+
+Hypothesis: the Jul11 recovery regression came from one or more of three simultaneously changed factors—full-episode command hold, `stand/jump` oversampling, or the high-start disturbance schedule—so each factor must be compared with an otherwise identical continuation control before enabling another strict profile gate.
+
+Common training contract:
+
+| field | value |
+|---|---|
+| source run | `logs/r2_amp/Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe` |
+| source checkpoint | `model_16000.pt` |
+| budget / expected terminal | additional `2000` iterations / `model_18000.pt` |
+| unchanged controls | teacher retention `0.25`; AMP style reward `0.0`; PPO settings, command anchors, reward scales, and Jul08 disturbance payload unchanged unless named in the matrix |
+| strict profile gate | disabled in all four arms (`stage_require_all_monitor_profiles` remains absent/default `false`) |
+| status | all four arms **not trained**; run directories, checkpoints, evaluation outputs, and metrics are pending |
+
+Single-variable matrix:
+
+| arm | config / planned run name | only behavioral difference from C0 | status |
+|---|---|---|---|
+| C0 | `configs/ablation/selective_walk_disturb100_causal_control.json` / `selective_walk_disturb100_causal_control` | none: pure continuation of the Jul08_12 `model_16000.pt` training payload | **not trained** |
+| H | `configs/ablation/selective_walk_disturb100_hold30_only.json` / `selective_walk_disturb100_hold30_only` | `commands.resampling_time=30.0` only | **not trained** |
+| W | `configs/ablation/selective_walk_disturb100_stand_jump_weights_only.json` / `selective_walk_disturb100_stand_jump_weights_only` | profile weights only: `stand=0.25`, `jump=0.25`, and the remaining five weights redistribute the other `0.50` | **not trained** |
+| S | `configs/ablation/selective_walk_disturb100_high_start_schedule_only.json` / `selective_walk_disturb100_high_start_schedule_only` | schedule/window/threshold only: levels `[0.925, 0.95, 0.975, 1.0]`, `1024` episodes, task gates `[18, 20, 22, 24]`, fall gates `[0.20, 0.16, 0.12, 0.10]` | **not trained** |
+
+`tests/test_amp_training_contracts.py::test_selective_walk_disturb100_causal_attribution_json_contracts` locks the full normalized payload equality: C0 equals the Jul08 source payload, and removing the one named factor from H, W, or S must recover C0 exactly.
+
+Linux training commands (do not start until the source check below is in place):
+
+```bash
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe --checkpoint=16000 --cfg_override_json configs/ablation/selective_walk_disturb100_causal_control.json --run_name selective_walk_disturb100_causal_control --max_iterations=2000
+
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe --checkpoint=16000 --cfg_override_json configs/ablation/selective_walk_disturb100_hold30_only.json --run_name selective_walk_disturb100_hold30_only --max_iterations=2000
+
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe --checkpoint=16000 --cfg_override_json configs/ablation/selective_walk_disturb100_stand_jump_weights_only.json --run_name selective_walk_disturb100_stand_jump_weights_only --max_iterations=2000
+
+CUDA_VISIBLE_DEVICES=3 conda run -n hugwbc --no-capture-output python legged_gym/scripts/train.py --task=r2amp --headless --seed=0 --resume --load_run Jul08_12/Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe --checkpoint=16000 --cfg_override_json configs/ablation/selective_walk_disturb100_high_start_schedule_only.json --run_name selective_walk_disturb100_high_start_schedule_only --max_iterations=2000
+```
+
+Before allowing any arm to continue, inspect its first `Loading model from` line and require it to resolve to the intended Jul08_12 `model_16000.pt`; stop that arm immediately if the path differs.
+
+Evaluation gates for each `model_18000.pt`:
+
+- Baseline full7 qualification: average task return `>=30`, average fall rate `<=0.15`, and every preset fall rate `<=0.35`. An arm that fails this gate is not eligible for forced-disturbance promotion.
+- Forced `0.925` causal harm relative to C0: classify an arm as harmful when its average task return is at least `5` points below C0 (`delta task <= -5`) **and** its average fall rate is at least `0.10` above C0 (`delta fall >= +0.10`).
+- Forced `1.0` qualification: average task return `>=27` and average fall rate `<=0.15`.
+- At any evaluated disturbance ratio, any single preset fall rate `>=0.50` triggers a focused rerun with `--record_termination_reasons` and `--record_state_trace` before causal interpretation.
+- T/G strict-gate variants are deferred to a second stage. Do not train them until C0/H/W/S identify which factor, if any, improves robustness without breaking the baseline gate.
+
 ## Maintenance Rules
 
 When a new experiment is trained or evaluated, update this document in the same turn:
