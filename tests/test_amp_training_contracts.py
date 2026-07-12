@@ -955,6 +955,91 @@ def test_selective_walk_profile_guard_recovery_json_contract():
     assert "model_20000.pt" in payload["notes"]
 
 
+def test_selective_walk_disturb100_causal_attribution_json_contracts():
+    ablation_dir = ROOT_DIR / "configs/ablation"
+
+    def load(filename):
+        return json.loads((ablation_dir / filename).read_text(encoding="utf-8"))
+
+    def without_metadata(payload):
+        normalized = json.loads(json.dumps(payload))
+        normalized.pop("notes")
+        runner = normalized["train"]["runner"]
+        runner.pop("run_name")
+        runner.pop("max_iterations")
+        return normalized
+
+    source = load("selective_walk_profile_teacher_retention_disturb100_probe.json")
+    filenames = {
+        "C0": "selective_walk_disturb100_causal_control.json",
+        "H": "selective_walk_disturb100_hold30_only.json",
+        "W": "selective_walk_disturb100_stand_jump_weights_only.json",
+        "S": "selective_walk_disturb100_high_start_schedule_only.json",
+    }
+    payloads = {arm: load(filename) for arm, filename in filenames.items()}
+
+    for arm, payload in payloads.items():
+        runner = payload["train"]["runner"]
+        assert runner["max_iterations"] == 2000
+        assert runner["save_interval"] == 250
+        assert runner["save_top_task_checkpoints"] == 3
+        assert runner["run_name"].startswith("selective_walk_disturb100_")
+        assert payload["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.25
+        assert payload["train"]["amp"]["style_reward_weight"] == 0.0
+        assert "Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe" in payload["notes"]
+        assert "model_16000.pt" in payload["notes"]
+        assert "model_18000.pt" in payload["notes"]
+        assert "--max_iterations=2000" in payload["notes"]
+        assert payload["env"]["disturb"].get(
+            "stage_require_all_monitor_profiles", False
+        ) is False
+
+    control = payloads["C0"]
+    assert without_metadata(control) == without_metadata(source)
+
+    hold = json.loads(json.dumps(payloads["H"]))
+    assert hold["env"]["commands"].pop("resampling_time") == 30.0
+    assert without_metadata(hold) == without_metadata(control)
+
+    weighted = json.loads(json.dumps(payloads["W"]))
+    weights = {
+        profile["name"]: float(profile["weight"])
+        for profile in weighted["env"]["commands"]["profile_mixture"]
+    }
+    assert weights == {
+        "stand": 0.25,
+        "walk_slow": 0.10,
+        "walk_fast": 0.12,
+        "run": 0.12,
+        "jump": 0.25,
+        "turn_left": 0.08,
+        "strafe_right": 0.08,
+    }
+    control_weights = {
+        profile["name"]: profile["weight"]
+        for profile in control["env"]["commands"]["profile_mixture"]
+    }
+    for profile in weighted["env"]["commands"]["profile_mixture"]:
+        profile["weight"] = control_weights[profile["name"]]
+    assert without_metadata(weighted) == without_metadata(control)
+
+    scheduled = json.loads(json.dumps(payloads["S"]))
+    scheduled_disturb = scheduled["env"]["disturb"]
+    assert scheduled_disturb["stage_levels"] == [0.925, 0.95, 0.975, 1.0]
+    assert scheduled_disturb["stage_min_episodes"] == 1024
+    assert scheduled_disturb["stage_min_task_return"] == [18.0, 20.0, 22.0, 24.0]
+    assert scheduled_disturb["stage_max_fall_rate"] == [0.20, 0.16, 0.12, 0.10]
+    source_disturb = control["env"]["disturb"]
+    for key in (
+        "stage_levels",
+        "stage_min_episodes",
+        "stage_min_task_return",
+        "stage_max_fall_rate",
+    ):
+        scheduled_disturb[key] = source_disturb[key]
+    assert without_metadata(scheduled) == without_metadata(control)
+
+
 def test_selective_walk_retention_probe_algorithm_keys_exist_in_cfg_schema():
     source = ast.parse(
         (ROOT_DIR / "legged_gym/envs/base/legged_robot_config.py").read_text(
