@@ -3446,7 +3446,7 @@ Evaluation gates for each `model_18000.pt`:
 
 - Baseline full7 qualification: average task return `>=30`, average fall rate `<=0.15`, and every preset fall rate `<=0.35`. An arm that fails this gate is not eligible for forced-disturbance promotion.
 - Forced `0.925` causal harm relative to C0: classify an arm as harmful when its average task return is at least `5` points below C0 (`delta task <= -5`) **and** its average fall rate is at least `0.10` above C0 (`delta fall >= +0.10`).
-- Forced `1.0` qualification: average task return `>=27` and average fall rate `<=0.15`.
+- Forced-`0.925` promotion gate: only when the forced-`0.925` result reaches average task return `>=27` and average fall rate `<=0.15` may that arm advance to a forced-`1.0` evaluation. This gate controls promotion from forced `0.925`; it is not a forced-`1.0` acceptance threshold.
 - At any evaluated disturbance ratio, any single preset fall rate `>=0.50` triggers a focused rerun with `--record_termination_reasons` and `--record_state_trace` before causal interpretation.
 - T/G strict-gate variants are deferred to a second stage. Do not train them until C0/H/W/S identify which factor, if any, improves robustness without breaking the baseline gate.
 

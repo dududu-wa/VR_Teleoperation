@@ -977,6 +977,10 @@ def test_selective_walk_disturb100_causal_attribution_json_contracts():
         "S": "selective_walk_disturb100_high_start_schedule_only.json",
     }
     payloads = {arm: load(filename) for arm, filename in filenames.items()}
+    expected_load_run = (
+        "--load_run Jul08_12/"
+        "Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe"
+    )
 
     for arm, payload in payloads.items():
         runner = payload["train"]["runner"]
@@ -986,7 +990,9 @@ def test_selective_walk_disturb100_causal_attribution_json_contracts():
         assert runner["run_name"].startswith("selective_walk_disturb100_")
         assert payload["train"]["algorithm"]["teacher_policy_retention_coef"] == 0.25
         assert payload["train"]["amp"]["style_reward_weight"] == 0.0
-        assert "Jul08_12-34-51_selective_walk_profile_teacher_retention_disturb100_probe" in payload["notes"]
+        # Lock the full resume token so the run basename cannot mask a wrong date directory.
+        assert expected_load_run in payload["notes"]
+        assert "--load_run Jul08/" not in payload["notes"]
         assert "model_16000.pt" in payload["notes"]
         assert "model_18000.pt" in payload["notes"]
         assert "--max_iterations=2000" in payload["notes"]
